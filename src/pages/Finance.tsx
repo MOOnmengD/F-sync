@@ -1,6 +1,8 @@
-import { ChevronDown } from 'lucide-react'
+import { ChevronDown, Menu } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { supabase } from '../supabaseClient'
+import { useUi } from '../store/ui'
+import { IconButton } from '../shared/ui/IconButton'
 
 type MonthKey = `${number}-${string}`
 
@@ -56,6 +58,7 @@ function formatAmount(amount: number | null) {
 }
 
 export default function Finance() {
+  const toggleDrawer = useUi((s) => s.toggleDrawer)
   const defaultMonthKey = useMemo(
     () => toMonthKey(new Date().getFullYear(), new Date().getMonth() + 1),
     [],
@@ -225,7 +228,8 @@ export default function Finance() {
   return (
     <div className="mx-auto min-h-dvh max-w-[480px] bg-base-bg px-4 pb-[calc(env(safe-area-inset-bottom)+1.5rem)] pt-[calc(env(safe-area-inset-top)+1.25rem)] text-base-text">
       <header className="sticky top-0 z-20 -mx-4 bg-base-bg/95 px-4 pb-3 backdrop-blur-sm">
-        <div className="flex items-center justify-center">
+        <div className="flex items-center justify-between">
+          <IconButton label="打开导航" onClick={toggleDrawer} icon={<Menu size={18} />} />
           <button
             type="button"
             onClick={() => setOpen((v) => !v)}
@@ -236,6 +240,7 @@ export default function Finance() {
             <span>{formatMonthLabel(monthKey)}</span>
             <ChevronDown size={16} className={open ? 'rotate-180 transition-transform' : 'transition-transform'} />
           </button>
+          <div className="h-10 w-10" />
         </div>
       </header>
 
@@ -300,7 +305,7 @@ export default function Finance() {
             aria-label="关闭月份选择器"
             onClick={() => setOpen(false)}
           />
-          <div className="absolute left-1/2 top-[calc(env(safe-area-inset-top)+4.5rem)] w-[calc(100%-2rem)] max-w-[440px] -translate-x-1/2 rounded-2xl border border-base-line bg-base-bg p-3">
+          <div className="absolute left-1/2 top-[calc(env(safe-area-inset-top)+4.5rem)] w-[calc(100%-2rem)] max-w-[440px] -translate-x-1/2 rounded-2xl border border-base-line bg-[#FDFCFB] p-3">
             <div className="grid grid-cols-[1fr_1fr_auto] items-center gap-2 px-1">
               <div className="text-xs font-medium text-base-muted">年份</div>
               <div className="text-xs font-medium text-base-muted">月份</div>
@@ -321,7 +326,7 @@ export default function Finance() {
             <div className="relative mt-3 grid grid-cols-2 gap-2">
               <div className="relative">
                 <div
-                  className="pointer-events-none absolute left-2 right-2 top-1/2 z-10 -translate-y-1/2 rounded-2xl border border-base-line bg-base-surface/40"
+                  className="pointer-events-none absolute left-2 right-2 top-1/2 z-10 -translate-y-1/2 rounded-2xl border border-base-line bg-[#F7F5F2]/40"
                   style={{ height: wheel.itemH }}
                 />
                 <div
@@ -363,7 +368,7 @@ export default function Finance() {
 
               <div className="relative">
                 <div
-                  className="pointer-events-none absolute left-2 right-2 top-1/2 z-10 -translate-y-1/2 rounded-2xl border border-base-line bg-base-surface/40"
+                  className="pointer-events-none absolute left-2 right-2 top-1/2 z-10 -translate-y-1/2 rounded-2xl border border-base-line bg-[#F7F5F2]/40"
                   style={{ height: wheel.itemH }}
                 />
                 <div

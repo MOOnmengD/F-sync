@@ -191,13 +191,9 @@ export default function Home() {
         className="fixed left-1/2 z-40 w-full max-w-[480px] -translate-x-1/2 px-4"
         style={{ bottom: keyboardOffset }}
       >
-        <section
-          className="rounded-2xl border bg-base-surface p-3"
-          style={composerBorder}
-          aria-label="快速输入"
-        >
-          {mode === 'finance' && (
-            <div className="mb-2 flex flex-wrap items-center gap-2">
+        {mode === 'finance' && (
+          <div className="mb-2 rounded-2xl bg-base-surface p-3">
+            <div className="flex flex-wrap items-center gap-2">
               {financeCategories.map((c) => {
                 const active = category === c
                 return (
@@ -214,31 +210,40 @@ export default function Home() {
                   </button>
                 )
               })}
-              <div className="h-4 w-px bg-base-line/80" />
-              {(
-                [
-                  { key: 'need' as const, label: '必需' },
-                  { key: 'want' as const, label: '非必需' },
-                ] as const
-              ).map((o) => {
-                const active = necessity === o.key
-                return (
-                  <button
-                    key={o.key}
-                    type="button"
-                    onClick={() => setNecessity(active ? null : o.key)}
-                    className={`rounded-full border border-base-line px-3 py-1 text-xs active:opacity-70 ${
-                      active ? 'text-base-text' : 'bg-transparent text-base-muted'
-                    }`}
-                    style={active ? chipActiveStyle : undefined}
-                  >
-                    {o.label}
-                  </button>
-                )
-              })}
             </div>
-          )}
 
+            <div className="mt-2">
+              <div className="inline-grid grid-cols-2 overflow-hidden rounded-full border border-base-line bg-base-bg">
+                {(
+                  [
+                    { key: 'need' as const, label: '必需' },
+                    { key: 'want' as const, label: '非必需' },
+                  ] as const
+                ).map((o) => {
+                  const active = necessity === o.key
+                  return (
+                    <button
+                      key={o.key}
+                      type="button"
+                      onClick={() => setNecessity(active ? null : o.key)}
+                      className={`w-14 whitespace-nowrap py-2 text-xs font-medium active:opacity-70 ${
+                        active ? 'text-base-text' : 'bg-transparent text-base-muted'
+                      }`}
+                      style={active ? chipActiveStyle : undefined}
+                    >
+                      {o.label}
+                    </button>
+                  )
+                })}
+              </div>
+            </div>
+          </div>
+        )}
+        <section
+          className="rounded-2xl border bg-base-surface p-3"
+          style={composerBorder}
+          aria-label="快速输入"
+        >
           <div className="relative">
             <textarea
               rows={2}
@@ -257,11 +262,6 @@ export default function Home() {
             >
               <Send size={18} />
             </button>
-          </div>
-
-          <div className="mt-2 flex items-center justify-between gap-3">
-            <div className="text-xs text-base-muted">辅助选项</div>
-            <div className="text-xs text-base-muted">仅静态 UI（Mock）</div>
           </div>
 
           <div className="mt-2 pb-[env(safe-area-inset-bottom)]">

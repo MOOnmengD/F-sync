@@ -1,4 +1,5 @@
-import { NavLink } from 'react-router-dom'
+import { useEffect, useRef } from 'react'
+import { NavLink, useLocation } from 'react-router-dom'
 import { X } from 'lucide-react'
 import { useUi } from '../store/ui'
 import { IconButton } from '../shared/ui/IconButton'
@@ -22,6 +23,17 @@ function Item({ to, label }: { to: string; label: string }) {
 export function DrawerNav() {
   const open = useUi((s) => s.drawerOpen)
   const setOpen = useUi((s) => s.setDrawerOpen)
+  const { pathname } = useLocation()
+  const openRef = useRef(open)
+
+  useEffect(() => {
+    openRef.current = open
+  }, [open])
+
+  useEffect(() => {
+    if (!openRef.current) return
+    setOpen(false)
+  }, [pathname, setOpen])
 
   if (!open) return null
 
@@ -50,12 +62,7 @@ export function DrawerNav() {
           <Item to="/work" label="工作总结 Work" />
           <Item to="/vault" label="知识库 Vault" />
         </nav>
-
-        <div className="mt-6 rounded-2xl border border-base-line bg-base-surface p-4 text-xs text-base-muted">
-          极简 · 无阴影 · 马卡龙色
-        </div>
       </aside>
     </div>
   )
 }
-
