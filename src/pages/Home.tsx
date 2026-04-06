@@ -1,5 +1,5 @@
 import { Menu, Send } from 'lucide-react'
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { supabase } from '../supabaseClient'
 import { useUi } from '../store/ui'
 import type { QuickMode } from '../types/domain'
@@ -38,6 +38,10 @@ export default function Home() {
 
   const meta = modeMeta[mode]
   const [text, setText] = useState('')
+  const [customMoods, setCustomMoods] = useState<string[]>([])
+  const [customMoodOpen, setCustomMoodOpen] = useState(false)
+  const [customMoodDraft, setCustomMoodDraft] = useState('')
+  const customMoodInputRef = useRef<HTMLInputElement | null>(null)
   const [keyboardOffset, setKeyboardOffset] = useState(0)
   const [toast, setToast] = useState<string | null>(null)
   const [sending, setSending] = useState(false)
@@ -66,6 +70,7 @@ export default function Home() {
     [meta.accent],
   )
   const chipActiveStyle = useMemo(() => ({ backgroundColor: accentHex[modeMeta.finance.accent] }), [])
+  const noteMoodActiveStyle = useMemo(() => ({ backgroundColor: accentHex[modeMeta.note.accent] }), [])
 
   useEffect(() => {
     if (!toast) return
@@ -74,6 +79,25 @@ export default function Home() {
   }, [toast])
 
   const financeCategories = useMemo(() => ['衣', '食', '住', '行', '娱乐'] as const, [])
+  const baseMoods = useMemo(() => ['😐', '🥰', '😔', '🤬', '😖'] as const, [])
+  const moodOptions = useMemo(() => [...baseMoods, ...customMoods], [baseMoods, customMoods])
+
+  useEffect(() => {
+    if (!customMoodOpen) return
+    const id = window.requestAnimationFrame(() => {
+      customMoodInputRef.current?.focus()
+      customMoodInputRef.current?.select()
+    })
+    return () => window.cancelAnimationFrame(id)
+  }, [customMoodOpen])
+
+  const commitCustomMood = () => {
+    const trimmed = customMoodDraft.trim()
+    if (!trimmed) return
+    setCustomMoods((prev) => (prev.includes(trimmed) ? prev : [...prev, trimmed]))
+    setMood(trimmed)
+    setCustomMoodOpen(false)
+  }
 
   const sendFinance = async () => {
     const raw = text.trim()
@@ -128,9 +152,49 @@ export default function Home() {
     }
   }
 
+  const sendWhisper = async () => {
+    const raw = text.trim()
+    if (!raw) return
+
+    if (!supabase) {
+      setToast('先配置 Supabase URL/Key')
+      return
+    }
+
+    if (sending) return
+    setSending(true)
+    try {
+      const payload: {
+        type: string
+        content: string
+        mood: string
+      } = {
+        type: 'whisper',
+        content: raw,
+        mood,
+      }
+
+      const { error } = await supabase.from('transactions').insert(payload)
+      if (error) {
+        setToast('写入失败')
+        return
+      }
+
+      setText('')
+      setToast('已记录')
+    } finally {
+      setSending(false)
+    }
+  }
+
   const handleSend = () => {
     if (mode === 'finance') {
       void sendFinance()
+      return
+    }
+
+    if (mode === 'note') {
+      void sendWhisper()
       return
     }
 
@@ -166,7 +230,10 @@ export default function Home() {
           <PillButton
             label="碎碎念"
             active={mode === 'note'}
-            onClick={() => setMode('note')}
+            onClick={() => {
+              setMode('note')
+              setMood('😐')
+            }}
             accent={modeMeta.note.accent}
           />
           <PillButton
@@ -191,6 +258,39 @@ export default function Home() {
         className="fixed left-1/2 z-40 w-full max-w-[480px] -translate-x-1/2 px-4"
         style={{ bottom: keyboardOffset }}
       >
+        {mode === 'note' && (
+          <div className="mb-2 rounded-2xl bg-base-surface p-3">
+            <div className="flex flex-wrap gap-2">
+              {moodOptions.map((m) => {
+                const active = mood === m
+                return (
+                  <button
+                    key={m}
+                    type="button"
+                    onClick={() => setMood(m)}
+                    className={`rounded-full border border-base-line px-4 py-2 text-sm active:opacity-70 ${
+                      active ? 'text-base-text' : 'bg-base-bg text-base-muted'
+                    }`}
+                    style={active ? noteMoodActiveStyle : undefined}
+                  >
+                    {m}
+                  </button>
+                )
+              })}
+              <button
+                type="button"
+                onClick={() => {
+                  setCustomMoodDraft(mood)
+                  setCustomMoodOpen(true)
+                }}
+                className="rounded-full border border-base-line bg-base-bg px-4 py-2 text-sm text-base-muted active:opacity-70"
+                aria-label="添加自定义 emoji"
+              >
+                ➕
+              </button>
+            </div>
+          </div>
+        )}
         {mode === 'finance' && (
           <div className="mb-2 rounded-2xl bg-base-surface p-3">
             <div className="flex flex-wrap items-center gap-2">
@@ -265,23 +365,6 @@ export default function Home() {
           </div>
 
           <div className="mt-2 pb-[env(safe-area-inset-bottom)]">
-            {mode === 'note' && (
-              <div className="flex gap-2">
-                {(['🙂', '😌', '😵‍💫'] as const).map((m) => (
-                  <button
-                    key={m}
-                    type="button"
-                    onClick={() => setMood(m)}
-                    className={`rounded-full border border-base-line px-4 py-2 text-sm ${
-                      mood === m ? 'bg-pastel-baby text-base-text' : 'bg-base-bg text-base-muted'
-                    }`}
-                  >
-                    {m}
-                  </button>
-                ))}
-              </div>
-            )}
-
             {mode !== 'finance' && mode !== 'note' && (
               <div className="flex flex-wrap gap-2">
                 <span className="rounded-full border border-base-line bg-base-bg px-3 py-1 text-xs text-base-muted">
@@ -301,6 +384,55 @@ export default function Home() {
           aria-live="polite"
         >
           {toast}
+        </div>
+      )}
+
+      {customMoodOpen && (
+        <div
+          className="fixed inset-0 z-[60] flex items-end justify-center bg-black/15 px-4 pb-6 backdrop-blur-sm"
+          role="dialog"
+          aria-modal="true"
+          aria-label="添加自定义 emoji"
+          onClick={() => setCustomMoodOpen(false)}
+        >
+          <div
+            className="w-full max-w-[480px] rounded-2xl border border-base-line bg-base-surface p-3"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center gap-2">
+              <input
+                ref={customMoodInputRef}
+                value={customMoodDraft}
+                onChange={(e) => setCustomMoodDraft(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault()
+                    commitCustomMood()
+                  }
+                  if (e.key === 'Escape') setCustomMoodOpen(false)
+                }}
+                inputMode="text"
+                className="h-11 flex-1 rounded-xl border border-base-line bg-base-bg px-3 text-base-text focus:outline-none"
+                placeholder="例如：😵‍💫"
+                aria-label="自定义 emoji"
+              />
+              <button
+                type="button"
+                onClick={() => setCustomMoodOpen(false)}
+                className="h-11 rounded-xl border border-base-line bg-base-bg px-4 text-sm text-base-muted active:opacity-70"
+              >
+                取消
+              </button>
+              <button
+                type="button"
+                onClick={commitCustomMood}
+                className="h-11 rounded-xl border border-base-line bg-base-bg px-4 text-sm text-base-text active:opacity-70"
+                style={noteMoodActiveStyle}
+              >
+                添加
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>

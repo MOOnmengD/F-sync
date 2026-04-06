@@ -27,7 +27,7 @@ export type ItemReview = {
   comment: string
 }
 
-export type Mood = '🙂' | '😌' | '😵‍💫'
+export type Mood = string
 
 export type QuickMode = 'finance' | 'review' | 'note' | 'work' | 'save'
 
@@ -64,4 +64,3 @@ export type MockDb = {
   transactions: Transaction[]
   homeRecent: HomeRecord[]
 }
-

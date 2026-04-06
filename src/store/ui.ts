@@ -13,8 +13,8 @@ type UiState = {
   setFinanceCategory: (v: FinanceCategory | null) => void
   financeNecessity: 'need' | 'want' | null
   setFinanceNecessity: (v: 'need' | 'want' | null) => void
-  noteMood: '🙂' | '😌' | '😵‍💫'
-  setNoteMood: (m: '🙂' | '😌' | '😵‍💫') => void
+  noteMood: string
+  setNoteMood: (m: string) => void
 }
 
 export const useUi = create<UiState>((set) => ({
@@ -27,6 +27,6 @@ export const useUi = create<UiState>((set) => ({
   setFinanceCategory: (v) => set({ financeCategory: v }),
   financeNecessity: null,
   setFinanceNecessity: (v) => set({ financeNecessity: v }),
-  noteMood: '😌',
+  noteMood: '😐',
   setNoteMood: (m) => set({ noteMood: m }),
 }))
