@@ -134,8 +134,16 @@ export default function Home() {
     if (sending) return
     setSending(true)
     try {
-      const parsed = await parseTransactionByAi(raw)
-      const itemName = parsed.item_name?.trim() || raw.split(/\s+/g).filter(Boolean)[0] || null
+      const normalized = raw.replace(/\u3000/g, ' ').trim()
+      const dateResult = extractDate(normalized, new Date())
+      const aiInput = dateResult.rest.trim()
+      if (!aiInput) {
+        setToast('请输入内容')
+        return
+      }
+
+      const parsed = await parseTransactionByAi(aiInput)
+      const itemName = parsed.item_name?.trim() || aiInput.split(/\s+/g).filter(Boolean)[0] || null
       if (!itemName) {
         setToast('AI 未解析出 item_name')
         return
@@ -200,6 +208,17 @@ export default function Home() {
       }
       if (mode === 'finance') {
         payload.necessity = necessity === null ? null : necessity === 'need'
+      }
+      if (dateResult.date) {
+        payload.created_at = new Date(
+          dateResult.date.year,
+          dateResult.date.month - 1,
+          dateResult.date.day,
+          12,
+          0,
+          0,
+          0,
+        ).toISOString()
       }
 
       const { error } = await supabase.from('transactions').insert(payload)
@@ -504,4 +523,51 @@ export default function Home() {
       )}
     </div>
   )
+}
+
+function extractDate(
+  source: string,
+  now: Date,
+): { date: { year: number; month: number; day: number } | null; rest: string } {
+  const s = source
+
+  if (/(^|\s)昨天(\s|$)/.test(s)) {
+    const d = new Date(now)
+    d.setDate(d.getDate() - 1)
+    return {
+      date: { year: d.getFullYear(), month: d.getMonth() + 1, day: d.getDate() },
+      rest: s.replace(/(^|\s)昨天(\s|$)/g, ' ').trim(),
+    }
+  }
+
+  if (/(^|\s)今天(\s|$)/.test(s)) {
+    return {
+      date: { year: now.getFullYear(), month: now.getMonth() + 1, day: now.getDate() },
+      rest: s.replace(/(^|\s)今天(\s|$)/g, ' ').trim(),
+    }
+  }
+
+  const ymd = s.match(/(\d{4})年(\d{1,2})月(\d{1,2})日/)
+  if (ymd) {
+    const year = Number(ymd[1])
+    const month = Number(ymd[2])
+    const day = Number(ymd[3])
+    return {
+      date: { year, month, day },
+      rest: s.replace(ymd[0], ' ').trim(),
+    }
+  }
+
+  const md = s.match(/(\d{1,2})月(\d{1,2})日/)
+  if (md) {
+    const year = now.getFullYear()
+    const month = Number(md[1])
+    const day = Number(md[2])
+    return {
+      date: { year, month, day },
+      rest: s.replace(md[0], ' ').trim(),
+    }
+  }
+
+  return { date: null, rest: s }
 }

@@ -89,7 +89,7 @@ export default async function handler(req: any, res: any) {
     '任务：把用户输入的中文消费/点评文本解析为结构化 JSON。',
     '输出字段固定为：amount(数字或null), item_name(字符串或null), brand(字符串或null), details(字符串或null), review(字符串或null)。',
     'amount 使用数字（例如 9.9），无法确定就返回 null。',
-    'details 放偏客观的规格/口味/温度/加料等；review 放主观感受/评价。',
+    'details 放偏客观的规格/口味/温度/加料等细节；review 放用户的主观感受/评价。',
   ].join('\n')
 
   const user = [
