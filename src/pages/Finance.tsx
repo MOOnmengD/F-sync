@@ -9,9 +9,10 @@ type MonthKey = `${number}-${string}`
 type TransactionRow = {
   id: string
   created_at: string
-  content: string | null
   amount: number | null
   type: string | null
+  item_id: string | null
+  item_name: string | null
 }
 
 function pad2(n: number) {
@@ -105,7 +106,7 @@ export default function Finance() {
 
       const { data, error } = await client
         .from('transactions')
-        .select('id, created_at, content, amount, type')
+        .select('id, created_at, amount, type, item_id')
         .eq('type', '记账')
         .gte('created_at', startIso)
         .lt('created_at', endIso)
@@ -119,8 +120,45 @@ export default function Finance() {
         return
       }
 
-      const normalized = ((data ?? []).filter(Boolean) as unknown as TransactionRow[]).filter((r) => r.type === '记账')
-      setRows(normalized)
+      const normalized = ((data ?? []).filter(Boolean) as unknown as TransactionRow[])
+        .filter((r) => r.type === '记账')
+        .map((r) => ({
+          ...r,
+          item_id: r.item_id ? String(r.item_id) : null,
+          item_name: null,
+        }))
+
+      const itemIds = Array.from(
+        new Set(normalized.map((r) => r.item_id).filter((v): v is string => Boolean(v))),
+      )
+
+      if (itemIds.length === 0) {
+        setRows(normalized)
+        setLoading(false)
+        return
+      }
+
+      const { data: itemRows, error: itemError } = await client.from('items').select('id, item_name').in('id', itemIds)
+      if (!active) return
+      if (itemError) {
+        setRows(normalized)
+        setLoading(false)
+        return
+      }
+
+      const nameById = new Map<string, string>()
+      for (const it of (itemRows ?? []) as Array<{ id: unknown; item_name: unknown }>) {
+        const id = typeof it?.id === 'string' ? it.id : it?.id != null ? String(it.id) : ''
+        const name = typeof it?.item_name === 'string' ? it.item_name.trim() : ''
+        if (id && name) nameById.set(id, name)
+      }
+
+      setRows(
+        normalized.map((r) => ({
+          ...r,
+          item_name: r.item_id ? nameById.get(r.item_id) ?? null : null,
+        })),
+      )
       setLoading(false)
     }
 
@@ -149,21 +187,39 @@ export default function Finance() {
           if (!Number.isFinite(t)) return
           if (t < Date.parse(startIso) || t >= Date.parse(endIso)) return
 
+          const itemId = (next as any)?.item_id ? String((next as any).item_id) : null
+
           setRows((prev) => {
             if (prev.some((r) => r.id === next.id)) return prev
             const merged: TransactionRow[] = [
               {
                 id: String(next.id),
                 created_at: String(next.created_at),
-                content: (next.content ?? null) as string | null,
                 amount: (typeof next.amount === 'number' ? next.amount : null) as number | null,
                 type: (next.type ?? null) as string | null,
+                item_id: itemId,
+                item_name: null,
               },
               ...prev,
             ]
             merged.sort((a, b) => Date.parse(b.created_at) - Date.parse(a.created_at))
             return merged
           })
+
+          if (!itemId) return
+          void (async () => {
+            const { data: item, error } = await client
+              .from('items')
+              .select('id, item_name')
+              .eq('id', itemId)
+              .maybeSingle()
+            if (error || !item) return
+            const name = typeof (item as any)?.item_name === 'string' ? (item as any).item_name.trim() : ''
+            if (!name) return
+            setRows((prev) =>
+              prev.map((r) => (r.id === String(next.id) ? { ...r, item_name: name } : r)),
+            )
+          })()
         },
       )
       .subscribe()
@@ -285,7 +341,7 @@ export default function Finance() {
                           className="flex items-center justify-between rounded-2xl border border-base-line border-l-4 border-l-pastel-mint bg-base-surface px-4 py-3"
                         >
                           <div className="min-w-0 flex-1 pr-3 text-sm text-base-text">
-                            <div className="truncate">{r.content || '（无内容）'}</div>
+                            <div className="truncate">{r.item_name || '（无名称）'}</div>
                           </div>
                           <div className="shrink-0 text-sm font-medium text-base-text">
                             {formatAmount(r.amount)}
