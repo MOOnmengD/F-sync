@@ -11,6 +11,7 @@ type TransactionRow = {
   created_at: string
   content: string | null
   amount: number | null
+  type: string | null
 }
 
 function pad2(n: number) {
@@ -104,7 +105,8 @@ export default function Finance() {
 
       const { data, error } = await client
         .from('transactions')
-        .select('id, created_at, content, amount')
+        .select('id, created_at, content, amount, type')
+        .eq('type', '记账')
         .gte('created_at', startIso)
         .lt('created_at', endIso)
         .order('created_at', { ascending: false })
@@ -117,7 +119,7 @@ export default function Finance() {
         return
       }
 
-      const normalized = (data ?? []).filter(Boolean) as unknown as TransactionRow[]
+      const normalized = ((data ?? []).filter(Boolean) as unknown as TransactionRow[]).filter((r) => r.type === '记账')
       setRows(normalized)
       setLoading(false)
     }
@@ -140,6 +142,7 @@ export default function Finance() {
         (payload) => {
           const next = payload.new as unknown as Partial<TransactionRow> | null
           if (!next?.id || !next.created_at) return
+          if (next.type !== '记账') return
 
           const { startIso, endIso } = monthRangeIso(monthKey)
           const t = Date.parse(next.created_at)
@@ -154,6 +157,7 @@ export default function Finance() {
                 created_at: String(next.created_at),
                 content: (next.content ?? null) as string | null,
                 amount: (typeof next.amount === 'number' ? next.amount : null) as number | null,
+                type: (next.type ?? null) as string | null,
               },
               ...prev,
             ]

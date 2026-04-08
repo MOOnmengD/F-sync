@@ -46,6 +46,29 @@ export default function Home() {
   const [toast, setToast] = useState<string | null>(null)
   const [sending, setSending] = useState(false)
 
+  const parseTransactionByAi = async (raw: string) => {
+    const r = await fetch('/api/parse-transaction', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text: raw }),
+    })
+    const data = (await r.json().catch(() => null)) as unknown
+    if (!r.ok || !data || typeof data !== 'object') {
+      const msg =
+        typeof (data as any)?.error === 'string'
+          ? (data as any).error
+          : 'AI 解析失败（后端未返回有效 JSON）'
+      throw new Error(msg)
+    }
+    return data as {
+      amount: number | null
+      item_name: string | null
+      brand: string | null
+      details: string | null
+      review: string | null
+    }
+  }
+
   useEffect(() => {
     const vv = window.visualViewport
     if (!vv) return
@@ -99,7 +122,7 @@ export default function Home() {
     setCustomMoodOpen(false)
   }
 
-  const sendFinance = async () => {
+  const sendTransaction = async () => {
     const raw = text.trim()
     if (!raw) return
 
@@ -111,35 +134,77 @@ export default function Home() {
     if (sending) return
     setSending(true)
     try {
-      const parsed = parseFinanceInput(raw)
-      const payload: {
-        type: string
-        content: string
-        amount?: number | null
-        necessity?: boolean | null
-        created_at?: string
-      } = {
-        type: modeMeta.finance.label,
-        content: raw,
-        amount: parsed.amount ?? null,
-        necessity: necessity === null ? null : necessity === 'need',
+      const parsed = await parseTransactionByAi(raw)
+      const itemName = parsed.item_name?.trim() || raw.split(/\s+/g).filter(Boolean)[0] || null
+      if (!itemName) {
+        setToast('AI 未解析出 item_name')
+        return
       }
 
-      if (parsed.date) {
-        payload.created_at = new Date(
-          parsed.date.year,
-          parsed.date.month - 1,
-          parsed.date.day,
-          12,
-          0,
-          0,
-          0,
-        ).toISOString()
+      const metadata = { brand: parsed.brand, details: parsed.details }
+
+      const { data: existingItem, error: findError } = await supabase
+        .from('items')
+        .select('id')
+        .eq('item_name', itemName)
+        .maybeSingle()
+
+      if (findError) {
+        setToast(findError.message || '查询 items 失败')
+        return
+      }
+
+      let itemId: string | null = existingItem?.id ? String(existingItem.id) : null
+
+      if (!itemId) {
+        const { data: created, error: createError } = await supabase
+          .from('items')
+          .insert({
+            item_name: itemName,
+            last_review: parsed.review ?? null,
+            metadata,
+          })
+          .select('id')
+          .single()
+
+        if (createError) {
+          setToast(createError.message || '创建 item 失败')
+          return
+        }
+        itemId = created?.id ? String(created.id) : null
+      } else {
+        const { error: updateError } = await supabase
+          .from('items')
+          .update({
+            last_review: parsed.review ?? null,
+            metadata,
+          })
+          .eq('id', itemId)
+
+        if (updateError) {
+          setToast(updateError.message || '更新 item 失败')
+          return
+        }
+      }
+
+      if (!itemId) {
+        setToast('item_id 获取失败')
+        return
+      }
+
+      const payload: Record<string, unknown> = {
+        type: modeMeta[mode].label,
+        content: raw,
+        amount: parsed.amount ?? null,
+        item_id: itemId,
+      }
+      if (mode === 'finance') {
+        payload.necessity = necessity === null ? null : necessity === 'need'
       }
 
       const { error } = await supabase.from('transactions').insert(payload)
       if (error) {
-        setToast('写入失败')
+        setToast(error.message || '写入失败')
         return
       }
 
@@ -147,6 +212,8 @@ export default function Home() {
       setCategory(null)
       setNecessity(null)
       setToast('已记录')
+    } catch (e: any) {
+      setToast(String(e?.message ?? e) || 'AI 解析失败')
     } finally {
       setSending(false)
     }
@@ -176,7 +243,7 @@ export default function Home() {
 
       const { error } = await supabase.from('transactions').insert(payload)
       if (error) {
-        setToast('写入失败')
+        setToast(error.message || '写入失败')
         return
       }
 
@@ -188,13 +255,13 @@ export default function Home() {
   }
 
   const handleSend = () => {
-    if (mode === 'finance') {
-      void sendFinance()
+    if (mode === 'note') {
+      void sendWhisper()
       return
     }
 
-    if (mode === 'note') {
-      void sendWhisper()
+    if (mode === 'finance' || mode === 'review') {
+      void sendTransaction()
       return
     }
 
@@ -437,112 +504,4 @@ export default function Home() {
       )}
     </div>
   )
-}
-
-function parseFinanceInput(input: string): {
-  amount: number | null
-  date: { year: number; month: number; day: number } | null
-  item: string | null
-  note: string | null
-  review: string | null
-} {
-  const now = new Date()
-  const normalized = input.replace(/\u3000/g, ' ').trim()
-
-  const dateResult = extractDate(normalized, now)
-  const amountResult = extractAmount(dateResult.rest)
-
-  const rest = amountResult.rest.replace(/\s+/g, ' ').trim()
-  const parts = rest ? rest.split(' ') : []
-  const item = parts.length ? parts[0] : null
-  const tail = parts.slice(1).join(' ').trim() || null
-  const { note, review } = splitNoteAndReview(tail)
-
-  return {
-    amount: amountResult.amount,
-    date: dateResult.date,
-    item,
-    note,
-    review,
-  }
-}
-
-function extractAmount(source: string): { amount: number | null; rest: string } {
-  const tokens = source.split(/\s+/g).filter(Boolean)
-  let amountTokenIndex = -1
-  for (let i = tokens.length - 1; i >= 0; i -= 1) {
-    const t = tokens[i]
-    if (/[年月日]/.test(t)) continue
-    if (!/[0-9]/.test(t)) continue
-    if (!/^(?:[¥￥])?\d+(?:\.\d{1,2})?(?:元|块)?$/.test(t)) continue
-    amountTokenIndex = i
-    break
-  }
-
-  if (amountTokenIndex === -1) return { amount: null, rest: source }
-
-  const raw = tokens[amountTokenIndex].replace(/[¥￥元块]/g, '')
-  const amount = Number(raw)
-  if (!Number.isFinite(amount)) return { amount: null, rest: source }
-
-  const restTokens = [...tokens.slice(0, amountTokenIndex), ...tokens.slice(amountTokenIndex + 1)]
-  return { amount, rest: restTokens.join(' ') }
-}
-
-function extractDate(
-  source: string,
-  now: Date,
-): { date: { year: number; month: number; day: number } | null; rest: string } {
-  const s = source
-
-  if (/(^|\s)昨天(\s|$)/.test(s)) {
-    const d = new Date(now)
-    d.setDate(d.getDate() - 1)
-    return {
-      date: { year: d.getFullYear(), month: d.getMonth() + 1, day: d.getDate() },
-      rest: s.replace(/(^|\s)昨天(\s|$)/g, ' ').trim(),
-    }
-  }
-
-  if (/(^|\s)今天(\s|$)/.test(s)) {
-    return {
-      date: { year: now.getFullYear(), month: now.getMonth() + 1, day: now.getDate() },
-      rest: s.replace(/(^|\s)今天(\s|$)/g, ' ').trim(),
-    }
-  }
-
-  const ymd = s.match(/(\d{4})年(\d{1,2})月(\d{1,2})日/)
-  if (ymd) {
-    const year = Number(ymd[1])
-    const month = Number(ymd[2])
-    const day = Number(ymd[3])
-    return {
-      date: { year, month, day },
-      rest: s.replace(ymd[0], ' ').trim(),
-    }
-  }
-
-  const md = s.match(/(\d{1,2})月(\d{1,2})日/)
-  if (md) {
-    const year = now.getFullYear()
-    const month = Number(md[1])
-    const day = Number(md[2])
-    return {
-      date: { year, month, day },
-      rest: s.replace(md[0], ' ').trim(),
-    }
-  }
-
-  return { date: null, rest: s }
-}
-
-function splitNoteAndReview(
-  tail: string | null,
-): { note: string | null; review: string | null } {
-  if (!tail) return { note: null, review: null }
-  const cut = tail.match(/(.*?)(?:[，,。.!！?？;；:：]\s*)(.+)$/)
-  if (!cut) return { note: tail, review: null }
-  const note = cut[1].trim() || null
-  const review = cut[2].trim() || null
-  return { note, review }
 }
