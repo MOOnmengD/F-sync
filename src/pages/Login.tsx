@@ -7,7 +7,7 @@ export default function Login() {
   const [checking, setChecking] = useState(true)
   const [hasSession, setHasSession] = useState(false)
   const [errorText, setErrorText] = useState<string | null>(null)
-  const redirectTo = useMemo(() => `${window.location.origin}/login`, [])
+  const redirectTo = useMemo(() => `${window.location.origin}/`, [])
 
   useEffect(() => {
     if (!client) {
@@ -88,4 +88,3 @@ export default function Login() {
     </div>
   )
 }
-
