@@ -46,6 +46,51 @@ export default function Home() {
   const [toast, setToast] = useState<string | null>(null)
   const [sending, setSending] = useState(false)
 
+  const makeClientId = () => {
+    const cryptoAny = crypto as unknown as { randomUUID?: () => string } | undefined
+    if (cryptoAny?.randomUUID) return cryptoAny.randomUUID()
+    return `${Date.now()}-${Math.random().toString(16).slice(2)}`
+  }
+
+  type OutboxEntry = {
+    id: string
+    mode: QuickMode
+    raw: string
+    ts: number
+  }
+
+  const loadOutbox = (): OutboxEntry[] => {
+    try {
+      const raw = localStorage.getItem('fsync_outbox')
+      if (!raw) return []
+      const parsed = JSON.parse(raw) as unknown
+      if (!Array.isArray(parsed)) return []
+      return parsed.filter(Boolean) as OutboxEntry[]
+    } catch {
+      return []
+    }
+  }
+
+  const saveOutbox = (next: OutboxEntry[]) => {
+    try {
+      localStorage.setItem('fsync_outbox', JSON.stringify(next))
+    } catch {
+      return
+    }
+  }
+
+  const addOutbox = (entry: OutboxEntry) => {
+    const prev = loadOutbox()
+    const merged = [...prev, entry]
+    saveOutbox(merged)
+  }
+
+  const removeOutbox = (id: string) => {
+    const prev = loadOutbox()
+    const next = prev.filter((e) => e?.id !== id)
+    saveOutbox(next)
+  }
+
   const parseTransactionByAi = async (raw: string) => {
     const r = await fetch('/api/parse-transaction', {
       method: 'POST',
@@ -97,6 +142,7 @@ export default function Home() {
 
   useEffect(() => {
     if (!toast) return
+    if (toast === '记录中…') return
     const t = window.setTimeout(() => setToast(null), 1200)
     return () => window.clearTimeout(t)
   }, [toast])
@@ -132,6 +178,12 @@ export default function Home() {
     }
 
     if (sending) return
+
+    const outboxId = makeClientId()
+    addOutbox({ id: outboxId, mode, raw, ts: Date.now() })
+    setText('')
+    setToast('记录中…')
+
     setSending(true)
     try {
       const normalized = raw.replace(/\u3000/g, ' ').trim()
@@ -227,12 +279,14 @@ export default function Home() {
         return
       }
 
-      setText('')
+      removeOutbox(outboxId)
       setCategory(null)
       setNecessity(null)
       setToast('已记录')
     } catch (e: any) {
-      setToast(String(e?.message ?? e) || 'AI 解析失败')
+      const msg = String(e?.message ?? e) || 'AI 解析失败'
+      setToast(`${msg}（已保存在本地草稿）`)
+      if (!text.trim()) setText(raw)
     } finally {
       setSending(false)
     }
@@ -248,6 +302,12 @@ export default function Home() {
     }
 
     if (sending) return
+
+    const outboxId = makeClientId()
+    addOutbox({ id: outboxId, mode, raw, ts: Date.now() })
+    setText('')
+    setToast('记录中…')
+
     setSending(true)
     try {
       const payload: {
@@ -266,7 +326,7 @@ export default function Home() {
         return
       }
 
-      setText('')
+      removeOutbox(outboxId)
       setToast('已记录')
     } finally {
       setSending(false)
