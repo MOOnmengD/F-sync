@@ -261,6 +261,7 @@ export default function Home() {
       }
       if (mode === 'finance') {
         payload.necessity = necessity === null ? null : necessity === 'need'
+        payload.repurchase_index = repurchaseIndex > 0 ? repurchaseIndex : null
       }
       if (dateResult.date) {
         payload.created_at = new Date(
