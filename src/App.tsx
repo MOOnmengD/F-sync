@@ -1,21 +1,77 @@
-import { Routes, Route, Navigate } from 'react-router-dom'
+import { Routes, Route, Navigate, useLocation } from 'react-router-dom'
+import { useEffect, useState } from 'react'
+import type { Session } from '@supabase/supabase-js'
 import { DrawerNav } from './layout/DrawerNav'
 import Home from './pages/Home'
 import Finance from './pages/Finance'
 import Whisper from './pages/Whisper'
 import Work from './pages/Work'
 import Vault from './pages/Vault'
+import Login from './pages/Login'
+import { supabase } from './supabaseClient'
 
 export default function App() {
+  const { pathname } = useLocation()
+  const [sessionReady, setSessionReady] = useState(false)
+  const [session, setSession] = useState<Session | null>(null)
+
+  useEffect(() => {
+    const client = supabase
+    if (!client) {
+      setSessionReady(true)
+      setSession(null)
+      return
+    }
+
+    let active = true
+    void client.auth.getSession().then(({ data }) => {
+      if (!active) return
+      setSession(data.session ?? null)
+      setSessionReady(true)
+    })
+
+    const { data } = client.auth.onAuthStateChange((_event, nextSession) => {
+      setSession(nextSession)
+    })
+
+    return () => {
+      active = false
+      data.subscription.unsubscribe()
+    }
+  }, [])
+
+  const clientConfigured = Boolean(supabase)
+  const authed = Boolean(session)
+  const isLogin = pathname === '/login'
+
+  if (clientConfigured && !sessionReady) {
+    return (
+      <div className="mx-auto min-h-dvh max-w-[480px] bg-base-bg px-4 py-10 text-base-text">
+        <div className="rounded-2xl border border-base-line bg-base-surface p-4 text-sm">
+          正在初始化…
+        </div>
+      </div>
+    )
+  }
+
+  if (clientConfigured && !authed && !isLogin) {
+    return <Navigate to="/login" replace />
+  }
+
+  if (clientConfigured && authed && isLogin) {
+    return <Navigate to="/" replace />
+  }
+
   return (
     <>
-      <DrawerNav />
+      {clientConfigured && !authed ? null : <DrawerNav />}
       <Routes>
         <Route path="/" element={<Home />} />
         <Route path="/finance" element={<Finance />} />
         <Route path="/whisper" element={<Whisper />} />
         <Route path="/work" element={<Work />} />
         <Route path="/vault" element={<Vault />} />
+        <Route path="/login" element={<Login />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </>
