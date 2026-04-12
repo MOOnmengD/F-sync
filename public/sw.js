@@ -2,7 +2,15 @@ const CACHE_VERSION = 'v1'
 const STATIC_CACHE = `f-sync-static-${CACHE_VERSION}`
 const RUNTIME_CACHE = `f-sync-runtime-${CACHE_VERSION}`
 
-const STATIC_ASSETS = ['/', '/index.html', '/manifest.webmanifest', '/favicon.svg', '/icons.svg']
+const STATIC_ASSETS = [
+  '/',
+  '/index.html',
+  '/manifest.webmanifest',
+  '/favicon.svg',
+  '/icons.svg',
+  '/pwa-192.png',
+  '/pwa-512.png',
+]
 
 self.addEventListener('install', (event) => {
   event.waitUntil(
