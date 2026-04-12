@@ -2,7 +2,7 @@ type Props = {
   label: string
   active?: boolean
   onClick?: () => void
-  accent: 'peach' | 'mint' | 'baby' | 'butter' | 'lavender'
+  accent: 'peach' | 'mint' | 'baby' | 'butter' | 'lavender' | 'timeline'
 }
 
 const accentHex: Record<Props['accent'], string> = {
@@ -11,6 +11,7 @@ const accentHex: Record<Props['accent'], string> = {
   baby: '#D7E8FF',
   butter: '#FFF1B8',
   lavender: '#E9D9FF',
+  timeline: '#F2DEBD',
 }
 
 export function PillButton({ label, active, onClick, accent }: Props) {
@@ -29,4 +30,3 @@ export function PillButton({ label, active, onClick, accent }: Props) {
     </button>
   )
 }
-

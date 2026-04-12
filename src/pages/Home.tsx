@@ -1,5 +1,6 @@
 import { Menu, Send, Star } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type PointerEvent } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { supabase } from '../supabaseClient'
 import { useUi } from '../store/ui'
 import type { QuickMode } from '../types/domain'
@@ -26,6 +27,7 @@ const accentHex: Record<(typeof modeMeta)[QuickMode]['accent'], string> = {
 }
 
 export default function Home() {
+  const navigate = useNavigate()
   const toggleDrawer = useUi((s) => s.toggleDrawer)
   const mode = useUi((s) => s.homeMode)
   const setMode = useUi((s) => s.setHomeMode)
@@ -628,6 +630,10 @@ export default function Home() {
             accent={modeMeta.save.accent}
           />
           </div>
+        </div>
+
+        <div className="mt-3 flex flex-wrap gap-2">
+          <PillButton label="时间轴" active onClick={() => navigate('/timeline')} accent="timeline" />
         </div>
       </header>
 

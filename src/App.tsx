@@ -7,6 +7,7 @@ import Finance from './pages/Finance'
 import Whisper from './pages/Whisper'
 import Work from './pages/Work'
 import Vault from './pages/Vault'
+import Timeline from './pages/Timeline'
 import Login from './pages/Login'
 import { supabase } from './supabaseClient'
 
@@ -71,6 +72,7 @@ export default function App() {
         <Route path="/whisper" element={<Whisper />} />
         <Route path="/work" element={<Work />} />
         <Route path="/vault" element={<Vault />} />
+        <Route path="/timeline" element={<Timeline />} />
         <Route path="/login" element={<Login />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
