@@ -46,6 +46,8 @@ export default function Home() {
   const [toast, setToast] = useState<string | null>(null)
   const [sending, setSending] = useState(false)
   const [repurchaseIndex, setRepurchaseIndex] = useState(0)
+  const [lastFinanceTx, setLastFinanceTx] = useState<LastFinanceTx | null>(null)
+  const [reviewTargetId, setReviewTargetId] = useState<string | null>(null)
 
   const makeClientId = () => {
     const cryptoAny = crypto as unknown as { randomUUID?: () => string } | undefined
@@ -115,6 +117,89 @@ export default function Home() {
     }
   }
 
+  const fetchLastFinanceTx = async () => {
+    const client = supabase
+    if (!client) return
+
+    const { data, error } = await client
+      .from('transactions')
+      .select(
+        'id, created_at, content, amount, type, item_id, ai_metadata, review, details, finance_category, item_name_snapshot, brand_snapshot',
+      )
+      .eq('type', '记账')
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle()
+
+    if (error || !data?.id || !data.created_at) {
+      setLastFinanceTx(null)
+      return
+    }
+
+    const itemId = (data as any)?.item_id ? String((data as any).item_id) : null
+    const content = typeof (data as any)?.content === 'string' ? String((data as any).content) : ''
+    const rawAmount = (data as any)?.amount
+    const amount =
+      typeof rawAmount === 'number'
+        ? rawAmount
+        : typeof rawAmount === 'string'
+          ? Number.parseFloat(rawAmount)
+          : null
+    const aiMetadata = isRecord((data as any)?.ai_metadata)
+      ? ((data as any).ai_metadata as Record<string, unknown>)
+      : null
+    const review = typeof (data as any)?.review === 'string' ? (data as any).review : null
+    const details = typeof (data as any)?.details === 'string' ? (data as any).details : null
+    const financeCategory =
+      typeof (data as any)?.finance_category === 'string' ? (data as any).finance_category : null
+    const itemNameSnapshot =
+      typeof (data as any)?.item_name_snapshot === 'string' ? (data as any).item_name_snapshot : null
+    const brandSnapshot =
+      typeof (data as any)?.brand_snapshot === 'string' ? (data as any).brand_snapshot : null
+
+    if (!itemId) {
+      setLastFinanceTx({
+        id: String(data.id),
+        created_at: String(data.created_at),
+        content,
+        amount,
+        item_id: null,
+        item_name: null,
+        ai_metadata: aiMetadata,
+        review,
+        details,
+        finance_category: financeCategory,
+        item_name_snapshot: itemNameSnapshot,
+        brand_snapshot: brandSnapshot,
+      })
+      return
+    }
+
+    const { data: item, error: itemErr } = await client
+      .from('items')
+      .select('id, item_name')
+      .eq('id', itemId)
+      .maybeSingle()
+
+    const itemName =
+      !itemErr && typeof (item as any)?.item_name === 'string' ? (item as any).item_name.trim() : null
+
+    setLastFinanceTx({
+      id: String(data.id),
+      created_at: String(data.created_at),
+      content,
+      amount,
+      item_id: itemId,
+      item_name: itemName || null,
+      ai_metadata: aiMetadata,
+      review,
+      details,
+      finance_category: financeCategory,
+      item_name_snapshot: itemNameSnapshot,
+      brand_snapshot: brandSnapshot,
+    })
+  }
+
   useEffect(() => {
     const vv = window.visualViewport
     if (!vv) return
@@ -130,6 +215,48 @@ export default function Home() {
     return () => {
       vv.removeEventListener('resize', update)
       vv.removeEventListener('scroll', update)
+    }
+  }, [])
+
+  useEffect(() => {
+    const client = supabase
+    if (!client) return
+
+    let active = true
+    const safeFetch = async () => {
+      if (!active) return
+      await fetchLastFinanceTx()
+    }
+
+    void safeFetch()
+
+    const channel = client
+      .channel('home-last-finance')
+      .on(
+        'postgres_changes',
+        { event: 'INSERT', schema: 'public', table: 'transactions' },
+        (payload) => {
+          const next = payload.new as any
+          if (!next?.id || !next?.created_at) return
+          if (next.type !== '记账') return
+          void safeFetch()
+        },
+      )
+      .on(
+        'postgres_changes',
+        { event: 'UPDATE', schema: 'public', table: 'transactions' },
+        (payload) => {
+          const next = payload.new as any
+          if (!next?.id || !next?.created_at) return
+          if (next.type !== '记账') return
+          void safeFetch()
+        },
+      )
+      .subscribe()
+
+    return () => {
+      active = false
+      void client.removeChannel(channel)
     }
   }, [])
 
@@ -169,6 +296,86 @@ export default function Home() {
     setCustomMoodOpen(false)
   }
 
+  const pendingReviewTx = useMemo(() => {
+    if (mode !== 'finance') return null
+    if (!lastFinanceTx) return null
+    const txReview = typeof lastFinanceTx.review === 'string' ? lastFinanceTx.review : ''
+    if (txReview.trim()) return null
+    const metaReview = typeof lastFinanceTx.ai_metadata?.review === 'string' ? lastFinanceTx.ai_metadata.review : ''
+    if (metaReview.trim()) return null
+    if (hasInlineReview(lastFinanceTx.content)) return null
+    return lastFinanceTx
+  }, [lastFinanceTx, mode])
+
+  useEffect(() => {
+    if (!reviewTargetId) return
+    if (!pendingReviewTx || pendingReviewTx.id !== reviewTargetId) setReviewTargetId(null)
+  }, [pendingReviewTx, reviewTargetId])
+
+  const sendReviewSupplement = async (transactionId: string) => {
+    const reviewText = text.trim()
+    if (!reviewText) return
+
+    if (!supabase) {
+      setToast('先配置 Supabase URL/Key')
+      return
+    }
+
+    if (sending) return
+
+    setText('')
+    setToast('记录中…')
+
+    setSending(true)
+    try {
+      const { data: tx, error: txError } = await supabase
+        .from('transactions')
+        .select('id, content, item_id, ai_metadata')
+        .eq('id', transactionId)
+        .maybeSingle()
+
+      if (txError || !tx?.id) {
+        setToast(txError?.message || '读取上一条记录失败')
+        return
+      }
+
+      const currentContent = typeof (tx as any)?.content === 'string' ? String((tx as any).content) : ''
+      const nextContent = upsertInlineReview(currentContent, reviewText)
+      const currentAiMetadata = isRecord((tx as any)?.ai_metadata)
+        ? ((tx as any).ai_metadata as Record<string, unknown>)
+        : {}
+      const nextAiMetadata: Record<string, unknown> = { ...currentAiMetadata, review: reviewText }
+
+      const { error: updateError } = await supabase
+        .from('transactions')
+        .update({ content: nextContent, ai_metadata: nextAiMetadata, review: reviewText })
+        .eq('id', transactionId)
+
+      if (updateError) {
+        setToast(updateError.message || '写入失败')
+        return
+      }
+
+      const itemId = (tx as any)?.item_id ? String((tx as any).item_id) : null
+      if (itemId) {
+        const { error: itemUpdateError } = await supabase
+          .from('items')
+          .update({ last_review: reviewText })
+          .eq('id', itemId)
+        if (itemUpdateError) {
+          setToast(itemUpdateError.message || '更新 item 失败')
+          return
+        }
+      }
+
+      setReviewTargetId(null)
+      await fetchLastFinanceTx()
+      setToast('已补点评')
+    } finally {
+      setSending(false)
+    }
+  }
+
   const sendTransaction = async () => {
     const raw = text.trim()
     if (!raw) return
@@ -196,17 +403,30 @@ export default function Home() {
       }
 
       const parsed = await parseTransactionByAi(aiInput)
+      const parsedReview = typeof parsed.review === 'string' ? parsed.review.trim() : ''
+      const reviewText = parsedReview ? parsedReview : null
       const itemName = parsed.item_name?.trim() || aiInput.split(/\s+/g).filter(Boolean)[0] || null
       if (!itemName) {
         setToast('AI 未解析出 item_name')
         return
       }
 
-      const metadata = { brand: parsed.brand, details: parsed.details }
+      const brandText = typeof parsed.brand === 'string' ? parsed.brand.trim() : ''
+      const brand = brandText ? brandText : null
+      const detailsText = typeof parsed.details === 'string' ? parsed.details.trim() : ''
+      const details = detailsText ? detailsText : null
+
+      const aiMetadata: Record<string, unknown> = {
+        item_name: itemName,
+        brand,
+        details,
+        review: reviewText,
+      }
+      const contentToStore = reviewText ? upsertInlineReview(raw, reviewText) : raw
 
       const { data: existingItem, error: findError } = await supabase
         .from('items')
-        .select('id')
+        .select('id, brand')
         .eq('item_name', itemName)
         .maybeSingle()
 
@@ -222,8 +442,8 @@ export default function Home() {
           .from('items')
           .insert({
             item_name: itemName,
-            last_review: parsed.review ?? null,
-            metadata,
+            last_review: reviewText,
+            brand,
           })
           .select('id')
           .single()
@@ -234,13 +454,11 @@ export default function Home() {
         }
         itemId = created?.id ? String(created.id) : null
       } else {
-        const { error: updateError } = await supabase
-          .from('items')
-          .update({
-            last_review: parsed.review ?? null,
-            metadata,
-          })
-          .eq('id', itemId)
+        const updatePatch: Record<string, unknown> = {}
+        if (brand && (existingItem as any)?.brand !== brand) updatePatch.brand = brand
+        if (reviewText) updatePatch.last_review = reviewText
+
+        const { error: updateError } = await supabase.from('items').update(updatePatch).eq('id', itemId)
 
         if (updateError) {
           setToast(updateError.message || '更新 item 失败')
@@ -255,13 +473,19 @@ export default function Home() {
 
       const payload: Record<string, unknown> = {
         type: modeMeta[mode].label,
-        content: raw,
+        content: contentToStore,
         amount: parsed.amount ?? null,
         item_id: itemId,
+        ai_metadata: aiMetadata,
+        review: reviewText,
+        details,
+        item_name_snapshot: itemName,
+        brand_snapshot: brand,
       }
       if (mode === 'finance') {
         payload.necessity = necessity === null ? null : necessity === 'need'
         payload.repurchase_index = repurchaseIndex > 0 ? repurchaseIndex : null
+        payload.finance_category = category ?? null
       }
       if (dateResult.date) {
         payload.created_at = new Date(
@@ -285,6 +509,7 @@ export default function Home() {
       setCategory(null)
       setNecessity(null)
       setRepurchaseIndex(0)
+      void fetchLastFinanceTx()
       setToast('已记录')
     } catch (e: any) {
       const msg = String(e?.message ?? e) || 'AI 解析失败'
@@ -339,6 +564,11 @@ export default function Home() {
   const handleSend = () => {
     if (mode === 'note') {
       void sendWhisper()
+      return
+    }
+
+    if (mode === 'finance' && pendingReviewTx && reviewTargetId === pendingReviewTx.id) {
+      void sendReviewSupplement(pendingReviewTx.id)
       return
     }
 
@@ -489,6 +719,32 @@ export default function Home() {
             </div>
           </div>
         )}
+        {mode === 'finance' && pendingReviewTx && (
+          <button
+            type="button"
+            onClick={() =>
+              setReviewTargetId((prev) => (prev === pendingReviewTx.id ? null : pendingReviewTx.id))
+            }
+            className={`mb-2 w-full rounded-2xl border bg-base-surface p-3 text-left active:opacity-70 ${
+              reviewTargetId === pendingReviewTx.id ? 'border-base-text' : 'border-base-line'
+            }`}
+            aria-label="上一条记账待补点评"
+          >
+            <div className="flex items-center justify-between gap-2">
+              <div className="text-sm font-medium text-base-text">上一条记账待补点评</div>
+              <div className="text-xs text-base-muted">
+                {reviewTargetId === pendingReviewTx.id ? '正在补点评' : '点一下补'}
+              </div>
+            </div>
+            <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-base-muted">
+              <span>{pendingReviewTx.item_name_snapshot || pendingReviewTx.item_name || '（未识别 item）'}</span>
+              <span>·</span>
+              <span>{formatAmount(pendingReviewTx.amount)}</span>
+              <span>·</span>
+              <span>{formatCompactDateTime(pendingReviewTx.created_at)}</span>
+            </div>
+          </button>
+        )}
         <section
           className="rounded-2xl border bg-base-surface p-3"
           style={composerBorder}
@@ -499,7 +755,11 @@ export default function Home() {
               rows={2}
               value={text}
               onChange={(e) => setText(e.target.value)}
-              placeholder={`在「${meta.label}」里输入…`}
+              placeholder={
+                mode === 'finance' && pendingReviewTx && reviewTargetId === pendingReviewTx.id
+                  ? '给上一条记账补充点评…'
+                  : `在「${meta.label}」里输入…`
+              }
               className="min-h-[52px] w-full resize-none bg-transparent px-1 py-2 pr-14 text-base-text placeholder:text-base-muted focus:outline-none"
             />
             <button
@@ -587,6 +847,59 @@ export default function Home() {
       )}
     </div>
   )
+}
+
+type LastFinanceTx = {
+  id: string
+  created_at: string
+  content: string
+  amount: number | null
+  item_id: string | null
+  item_name: string | null
+  ai_metadata: Record<string, unknown> | null
+  review: string | null
+  details: string | null
+  finance_category: string | null
+  item_name_snapshot: string | null
+  brand_snapshot: string | null
+}
+
+function isRecord(v: unknown): v is Record<string, unknown> {
+  return Boolean(v) && typeof v === 'object' && !Array.isArray(v)
+}
+
+function hasInlineReview(content: string) {
+  if (!content) return false
+  return /(^|\n)\s*点评[:：]\s*\S+/.test(content)
+}
+
+function upsertInlineReview(content: string, review: string) {
+  const trimmed = review.trim()
+  const base = String(content ?? '').replace(/(^|\n)\s*点评[:：][\s\S]*$/g, '').trimEnd()
+  if (!trimmed) return base
+  if (!base) return `点评：${trimmed}`
+  return `${base}\n点评：${trimmed}`
+}
+
+function formatCompactDateTime(iso: string) {
+  const t = Date.parse(iso)
+  if (!Number.isFinite(t)) return iso
+  const d = new Date(t)
+  const now = new Date()
+  const sameDay =
+    d.getFullYear() === now.getFullYear() &&
+    d.getMonth() === now.getMonth() &&
+    d.getDate() === now.getDate()
+  const time = new Intl.DateTimeFormat('zh-CN', { hour: '2-digit', minute: '2-digit' }).format(d)
+  if (sameDay) return time
+  const date = new Intl.DateTimeFormat('zh-CN', { month: 'numeric', day: 'numeric' }).format(d)
+  return `${date} ${time}`
+}
+
+function formatAmount(amount: number | null) {
+  if (amount === null || amount === undefined) return '—'
+  if (!Number.isFinite(amount)) return '—'
+  return `¥${amount.toFixed(2)}`
 }
 
 function RepurchaseIndexPill({
