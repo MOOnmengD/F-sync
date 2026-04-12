@@ -1,0 +1,388 @@
+{
+  "meta": {
+    "capturedAt": "",
+    "notes": ""
+  },
+  "columns": [
+    {
+      "table_name": "items",
+      "column_name": "id",
+      "data_type": "uuid",
+      "udt_name": "uuid",
+      "is_nullable": "NO",
+      "column_default": "gen_random_uuid()"
+    },
+    {
+      "table_name": "items",
+      "column_name": "created_at",
+      "data_type": "timestamp with time zone",
+      "udt_name": "timestamptz",
+      "is_nullable": "NO",
+      "column_default": "now()"
+    },
+    {
+      "table_name": "items",
+      "column_name": "item_name",
+      "data_type": "text",
+      "udt_name": "text",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "table_name": "items",
+      "column_name": "category",
+      "data_type": "text",
+      "udt_name": "text",
+      "is_nullable": "YES",
+      "column_default": null
+    },
+    {
+      "table_name": "items",
+      "column_name": "brand",
+      "data_type": "text",
+      "udt_name": "text",
+      "is_nullable": "YES",
+      "column_default": null
+    },
+    {
+      "table_name": "items",
+      "column_name": "last_review",
+      "data_type": "text",
+      "udt_name": "text",
+      "is_nullable": "YES",
+      "column_default": null
+    },
+    {
+      "table_name": "items",
+      "column_name": "metadata",
+      "data_type": "jsonb",
+      "udt_name": "jsonb",
+      "is_nullable": "YES",
+      "column_default": "'{}'::jsonb"
+    },
+    {
+      "table_name": "transactions",
+      "column_name": "id",
+      "data_type": "uuid",
+      "udt_name": "uuid",
+      "is_nullable": "NO",
+      "column_default": "gen_random_uuid()"
+    },
+    {
+      "table_name": "transactions",
+      "column_name": "created_at",
+      "data_type": "timestamp with time zone",
+      "udt_name": "timestamptz",
+      "is_nullable": "NO",
+      "column_default": "now()"
+    },
+    {
+      "table_name": "transactions",
+      "column_name": "type",
+      "data_type": "text",
+      "udt_name": "text",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "table_name": "transactions",
+      "column_name": "content",
+      "data_type": "text",
+      "udt_name": "text",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "table_name": "transactions",
+      "column_name": "amount",
+      "data_type": "numeric",
+      "udt_name": "numeric",
+      "is_nullable": "YES",
+      "column_default": null
+    },
+    {
+      "table_name": "transactions",
+      "column_name": "necessity",
+      "data_type": "boolean",
+      "udt_name": "bool",
+      "is_nullable": "YES",
+      "column_default": null
+    },
+    {
+      "table_name": "transactions",
+      "column_name": "mood",
+      "data_type": "text",
+      "udt_name": "text",
+      "is_nullable": "YES",
+      "column_default": null
+    },
+    {
+      "table_name": "transactions",
+      "column_name": "item_id",
+      "data_type": "uuid",
+      "udt_name": "uuid",
+      "is_nullable": "YES",
+      "column_default": null
+    },
+    {
+      "table_name": "transactions",
+      "column_name": "ai_metadata",
+      "data_type": "jsonb",
+      "udt_name": "jsonb",
+      "is_nullable": "YES",
+      "column_default": "'{}'::jsonb"
+    },
+    {
+      "table_name": "transactions",
+      "column_name": "repurchase_index",
+      "data_type": "smallint",
+      "udt_name": "int2",
+      "is_nullable": "YES",
+      "column_default": null
+    },
+    {
+      "table_name": "transactions",
+      "column_name": "finance_category",
+      "data_type": "text",
+      "udt_name": "text",
+      "is_nullable": "YES",
+      "column_default": null
+    },
+    {
+      "table_name": "transactions",
+      "column_name": "review",
+      "data_type": "text",
+      "udt_name": "text",
+      "is_nullable": "YES",
+      "column_default": null
+    },
+    {
+      "table_name": "transactions",
+      "column_name": "details",
+      "data_type": "text",
+      "udt_name": "text",
+      "is_nullable": "YES",
+      "column_default": null
+    },
+    {
+      "table_name": "transactions",
+      "column_name": "item_name_snapshot",
+      "data_type": "text",
+      "udt_name": "text",
+      "is_nullable": "YES",
+      "column_default": null
+    },
+    {
+      "table_name": "transactions",
+      "column_name": "brand_snapshot",
+      "data_type": "text",
+      "udt_name": "text",
+      "is_nullable": "YES",
+      "column_default": null
+    }
+  ],
+  "constraints": [
+    {
+      "table_name": "items",
+      "constraint_name": "2200_17722_1_not_null",
+      "constraint_type": "CHECK",
+      "column_name": null,
+      "foreign_table_name": null,
+      "foreign_column_name": null
+    },
+    {
+      "table_name": "items",
+      "constraint_name": "2200_17722_2_not_null",
+      "constraint_type": "CHECK",
+      "column_name": null,
+      "foreign_table_name": null,
+      "foreign_column_name": null
+    },
+    {
+      "table_name": "items",
+      "constraint_name": "2200_17722_3_not_null",
+      "constraint_type": "CHECK",
+      "column_name": null,
+      "foreign_table_name": null,
+      "foreign_column_name": null
+    },
+    {
+      "table_name": "items",
+      "constraint_name": "items_pkey",
+      "constraint_type": "PRIMARY KEY",
+      "column_name": "id",
+      "foreign_table_name": "items",
+      "foreign_column_name": "id"
+    },
+    {
+      "table_name": "items",
+      "constraint_name": "items_name_key",
+      "constraint_type": "UNIQUE",
+      "column_name": "item_name",
+      "foreign_table_name": "items",
+      "foreign_column_name": "item_name"
+    },
+    {
+      "table_name": "transactions",
+      "constraint_name": "2200_17538_1_not_null",
+      "constraint_type": "CHECK",
+      "column_name": null,
+      "foreign_table_name": null,
+      "foreign_column_name": null
+    },
+    {
+      "table_name": "transactions",
+      "constraint_name": "2200_17538_2_not_null",
+      "constraint_type": "CHECK",
+      "column_name": null,
+      "foreign_table_name": null,
+      "foreign_column_name": null
+    },
+    {
+      "table_name": "transactions",
+      "constraint_name": "2200_17538_3_not_null",
+      "constraint_type": "CHECK",
+      "column_name": null,
+      "foreign_table_name": null,
+      "foreign_column_name": null
+    },
+    {
+      "table_name": "transactions",
+      "constraint_name": "2200_17538_4_not_null",
+      "constraint_type": "CHECK",
+      "column_name": null,
+      "foreign_table_name": null,
+      "foreign_column_name": null
+    },
+    {
+      "table_name": "transactions",
+      "constraint_name": "transactions_item_id_fkey",
+      "constraint_type": "FOREIGN KEY",
+      "column_name": "item_id",
+      "foreign_table_name": "items",
+      "foreign_column_name": "id"
+    },
+    {
+      "table_name": "transactions",
+      "constraint_name": "transactions_pkey",
+      "constraint_type": "PRIMARY KEY",
+      "column_name": "id",
+      "foreign_table_name": "transactions",
+      "foreign_column_name": "id"
+    }
+  ],
+  "indexes": [
+    {
+      "schemaname": "public",
+      "tablename": "items",
+      "indexname": "items_name_key",
+      "indexdef": "CREATE UNIQUE INDEX items_name_key ON public.items USING btree (item_name)"
+    },
+    {
+      "schemaname": "public",
+      "tablename": "items",
+      "indexname": "items_pkey",
+      "indexdef": "CREATE UNIQUE INDEX items_pkey ON public.items USING btree (id)"
+    },
+    {
+      "schemaname": "public",
+      "tablename": "transactions",
+      "indexname": "transactions_pkey",
+      "indexdef": "CREATE UNIQUE INDEX transactions_pkey ON public.transactions USING btree (id)"
+    }
+  ],
+  "rls": [
+    {
+      "table_name": "items",
+      "rls_enabled": true,
+      "rls_forced": false
+    },
+    {
+      "table_name": "transactions",
+      "rls_enabled": true,
+      "rls_forced": false
+    }
+  ],
+  "policies": [
+    {
+      "schemaname": "public",
+      "tablename": "items",
+      "policyname": "owner_delete_items",
+      "permissive": "PERMISSIVE",
+      "roles": "{authenticated}",
+      "cmd": "DELETE",
+      "qual": "(auth.uid() = '17bc4400-b67a-45b0-9366-0e689eedfa09'::uuid)",
+      "with_check": null
+    },
+    {
+      "schemaname": "public",
+      "tablename": "items",
+      "policyname": "owner_insert_items",
+      "permissive": "PERMISSIVE",
+      "roles": "{authenticated}",
+      "cmd": "INSERT",
+      "qual": null,
+      "with_check": "(auth.uid() = '17bc4400-b67a-45b0-9366-0e689eedfa09'::uuid)"
+    },
+    {
+      "schemaname": "public",
+      "tablename": "items",
+      "policyname": "owner_select_items",
+      "permissive": "PERMISSIVE",
+      "roles": "{authenticated}",
+      "cmd": "SELECT",
+      "qual": "(auth.uid() = '17bc4400-b67a-45b0-9366-0e689eedfa09'::uuid)",
+      "with_check": null
+    },
+    {
+      "schemaname": "public",
+      "tablename": "items",
+      "policyname": "owner_update_items",
+      "permissive": "PERMISSIVE",
+      "roles": "{authenticated}",
+      "cmd": "UPDATE",
+      "qual": "(auth.uid() = '17bc4400-b67a-45b0-9366-0e689eedfa09'::uuid)",
+      "with_check": "(auth.uid() = '17bc4400-b67a-45b0-9366-0e689eedfa09'::uuid)"
+    },
+    {
+      "schemaname": "public",
+      "tablename": "transactions",
+      "policyname": "owner_delete_transactions",
+      "permissive": "PERMISSIVE",
+      "roles": "{authenticated}",
+      "cmd": "DELETE",
+      "qual": "(auth.uid() = '17bc4400-b67a-45b0-9366-0e689eedfa09'::uuid)",
+      "with_check": null
+    },
+    {
+      "schemaname": "public",
+      "tablename": "transactions",
+      "policyname": "owner_insert_transactions",
+      "permissive": "PERMISSIVE",
+      "roles": "{authenticated}",
+      "cmd": "INSERT",
+      "qual": null,
+      "with_check": "(auth.uid() = '17bc4400-b67a-45b0-9366-0e689eedfa09'::uuid)"
+    },
+    {
+      "schemaname": "public",
+      "tablename": "transactions",
+      "policyname": "owner_select_transactions",
+      "permissive": "PERMISSIVE",
+      "roles": "{authenticated}",
+      "cmd": "SELECT",
+      "qual": "(auth.uid() = '17bc4400-b67a-45b0-9366-0e689eedfa09'::uuid)",
+      "with_check": null
+    },
+    {
+      "schemaname": "public",
+      "tablename": "transactions",
+      "policyname": "owner_update_transactions",
+      "permissive": "PERMISSIVE",
+      "roles": "{authenticated}",
+      "cmd": "UPDATE",
+      "qual": "(auth.uid() = '17bc4400-b67a-45b0-9366-0e689eedfa09'::uuid)",
+      "with_check": "(auth.uid() = '17bc4400-b67a-45b0-9366-0e689eedfa09'::uuid)"
+    }
+  ]
+}
