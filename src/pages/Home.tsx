@@ -1,21 +1,36 @@
 import { Menu, Send, Star } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type PointerEvent } from 'react'
-import { useNavigate } from 'react-router-dom'
 import { supabase } from '../supabaseClient'
 import { useUi } from '../store/ui'
 import type { QuickMode } from '../types/domain'
 import { IconButton } from '../shared/ui/IconButton'
 import { PillButton } from '../shared/ui/PillButton'
 
+type TimelineKind = '睡眠' | '生活' | '工作' | '娱乐'
+
+type TimingType = 'sleep' | 'life' | 'work' | 'play'
+
+function pad2(n: number) {
+  return String(n).padStart(2, '0')
+}
+
+function formatDurationHm(ms: number) {
+  const totalMin = Math.max(0, Math.floor(ms / 60000))
+  const hh = Math.floor(totalMin / 60)
+  const mm = totalMin % 60
+  return `${pad2(hh)}:${pad2(mm)}`
+}
+
 const modeMeta: Record<
   QuickMode,
-  { label: string; accent: 'peach' | 'mint' | 'baby' | 'butter' | 'lavender'; hint: string }
+  { label: string; accent: 'peach' | 'mint' | 'baby' | 'butter' | 'lavender' | 'timeline'; hint: string }
 > = {
   finance: { label: '记账', accent: 'mint', hint: '今天花了多少？一句话记下来' },
   review: { label: '点评', accent: 'peach', hint: '对一个物品/服务写一句感受' },
   note: { label: '碎碎念', accent: 'baby', hint: '写点当下的想法，不用完整' },
   work: { label: '工作', accent: 'butter', hint: '记录推进点 / blockers / 下一步' },
   save: { label: '收藏', accent: 'lavender', hint: '保存链接/片段，稍后再整理' },
+  timeline: { label: '时间轴', accent: 'timeline', hint: '计时记录：选择分类，开始 / 停止' },
 }
 
 const accentHex: Record<(typeof modeMeta)[QuickMode]['accent'], string> = {
@@ -24,10 +39,10 @@ const accentHex: Record<(typeof modeMeta)[QuickMode]['accent'], string> = {
   baby: '#D7E8FF',
   butter: '#FFF1B8',
   lavender: '#E9D9FF',
+  timeline: '#F2DEBD',
 }
 
 export default function Home() {
-  const navigate = useNavigate()
   const toggleDrawer = useUi((s) => s.toggleDrawer)
   const mode = useUi((s) => s.homeMode)
   const setMode = useUi((s) => s.setHomeMode)
@@ -50,6 +65,134 @@ export default function Home() {
   const [repurchaseIndex, setRepurchaseIndex] = useState(0)
   const [lastFinanceTx, setLastFinanceTx] = useState<LastFinanceTx | null>(null)
   const [reviewTargetId, setReviewTargetId] = useState<string | null>(null)
+
+  const timelineStorageKey = 'fsync.timeline.active.v1'
+  const timelineKinds = useMemo(() => ['睡眠', '生活', '工作', '娱乐'] as const, [])
+  const [timelineKind, setTimelineKind] = useState<TimelineKind | null>(null)
+  const [timelineRunning, setTimelineRunning] = useState(false)
+  const [timelineStartAt, setTimelineStartAt] = useState<number | null>(null)
+  const [timelineTick, setTimelineTick] = useState(0)
+
+  const timingTypeByKind: Record<TimelineKind, TimingType> = useMemo(
+    () => ({
+      睡眠: 'sleep',
+      生活: 'life',
+      工作: 'work',
+      娱乐: 'play',
+    }),
+    [],
+  )
+
+  const kindByTimingType: Record<TimingType, TimelineKind> = useMemo(
+    () => ({
+      sleep: '睡眠',
+      life: '生活',
+      work: '工作',
+      play: '娱乐',
+    }),
+    [],
+  )
+
+  useEffect(() => {
+    const raw = localStorage.getItem(timelineStorageKey)
+    if (!raw) return
+    try {
+      const parsed = JSON.parse(raw) as { timing_type?: unknown; start_time?: unknown } | null
+      const timingType = typeof parsed?.timing_type === 'string' ? parsed.timing_type : ''
+      const startTime = typeof parsed?.start_time === 'string' ? parsed.start_time : ''
+      if (!timingType || !startTime) {
+        localStorage.removeItem(timelineStorageKey)
+        return
+      }
+      if (!['sleep', 'life', 'work', 'play'].includes(timingType)) {
+        localStorage.removeItem(timelineStorageKey)
+        return
+      }
+      const ms = Date.parse(startTime)
+      if (!Number.isFinite(ms)) {
+        localStorage.removeItem(timelineStorageKey)
+        return
+      }
+
+      setTimelineKind(kindByTimingType[timingType as TimingType])
+      setTimelineStartAt(ms)
+      setTimelineRunning(true)
+    } catch {
+      localStorage.removeItem(timelineStorageKey)
+    }
+  }, [kindByTimingType])
+
+  useEffect(() => {
+    if (!timelineRunning) return
+    const id = window.setInterval(() => setTimelineTick((t) => t + 1), 1000)
+    return () => window.clearInterval(id)
+  }, [timelineRunning])
+
+  const timelineElapsedMs = useMemo(() => {
+    if (!timelineRunning || timelineStartAt === null) return 0
+    return Math.max(0, Date.now() - timelineStartAt)
+  }, [timelineRunning, timelineStartAt, timelineTick])
+
+  const timelineDurationLabel = useMemo(() => formatDurationHm(timelineElapsedMs), [timelineElapsedMs])
+
+  const writeTiming = async (input: { timingType: TimingType; startMs: number; endMs: number }) => {
+    const client = supabase
+    if (!client) {
+      setToast('未配置 Supabase')
+      return false
+    }
+    const duration = Math.max(0, Math.floor((input.endMs - input.startMs) / 1000))
+    const payload = {
+      type: 'timing',
+      timing_type: input.timingType,
+      start_time: new Date(input.startMs).toISOString(),
+      end_time: new Date(input.endMs).toISOString(),
+      duration,
+    }
+
+    const { error } = await client.from('transactions').insert(payload)
+    if (error) {
+      setToast('写入失败')
+      return false
+    }
+    return true
+  }
+
+  const handleTimelineStart = () => {
+    if (timelineRunning) return
+    if (!timelineKind) {
+      setToast('请先选择计时类型')
+      return
+    }
+    const now = Date.now()
+    localStorage.setItem(
+      timelineStorageKey,
+      JSON.stringify({ timing_type: timingTypeByKind[timelineKind], start_time: new Date(now).toISOString() }),
+    )
+    setTimelineStartAt(now)
+    setTimelineRunning(true)
+  }
+
+  const handleTimelineStop = () => {
+    if (!timelineRunning || timelineStartAt === null) return
+    setTimelineRunning(false)
+    setTimelineStartAt(null)
+    localStorage.removeItem(timelineStorageKey)
+
+    if (!timelineKind) return
+    const endMs = Date.now()
+    void (async () => {
+      await writeTiming({ timingType: timingTypeByKind[timelineKind], startMs: timelineStartAt, endMs })
+    })()
+  }
+
+  const handleTimelineCancel = () => {
+    if (!timelineRunning) return
+    setTimelineRunning(false)
+    setTimelineStartAt(null)
+    setTimelineKind(null)
+    localStorage.removeItem(timelineStorageKey)
+  }
 
   const makeClientId = () => {
     const cryptoAny = crypto as unknown as { randomUUID?: () => string } | undefined
@@ -628,11 +771,13 @@ export default function Home() {
             onClick={() => setMode('save')}
             accent={modeMeta.save.accent}
           />
+          <PillButton
+            label="时间轴"
+            active={mode === 'timeline'}
+            onClick={() => setMode('timeline')}
+            accent="timeline"
+          />
           </div>
-        </div>
-
-        <div className="mt-3 flex flex-wrap gap-2">
-          <PillButton label="时间轴" active onClick={() => navigate('/timeline')} accent="timeline" />
         </div>
       </header>
 
@@ -642,153 +787,256 @@ export default function Home() {
         className="fixed left-1/2 z-40 w-full max-w-[480px] -translate-x-1/2 px-4"
         style={{ bottom: keyboardOffset }}
       >
-        {mode === 'note' && (
-          <div className="mb-2 rounded-2xl bg-base-surface p-3">
-            <div className="flex flex-wrap gap-2">
-              {moodOptions.map((m) => {
-                const active = mood === m
+        {mode === 'timeline' && (
+          <div
+            className="rounded-2xl border border-base-line bg-base-surface p-3"
+            style={{ borderColor: '#F2DEBD' }}
+          >
+            <div className="grid grid-cols-4 gap-2">
+              {timelineKinds.map((k) => {
+                const active = timelineKind === k
                 return (
                   <button
-                    key={m}
+                    key={k}
                     type="button"
-                    onClick={() => setMood(m)}
+                    onClick={() => {
+                      if (!timelineRunning) {
+                        setTimelineKind(active ? null : k)
+                        return
+                      }
+                      if (k === timelineKind) return
+                      if (!timelineKind || timelineStartAt === null) {
+                        const now = Date.now()
+                        setTimelineKind(k)
+                        setTimelineStartAt(now)
+                        localStorage.setItem(
+                          timelineStorageKey,
+                          JSON.stringify({
+                            timing_type: timingTypeByKind[k],
+                            start_time: new Date(now).toISOString(),
+                          }),
+                        )
+                        return
+                      }
+
+                      const prevKind = timelineKind
+                      const prevStartAt = timelineStartAt
+                      const now = Date.now()
+
+                      setTimelineKind(k)
+                      setTimelineStartAt(now)
+                      localStorage.setItem(
+                        timelineStorageKey,
+                        JSON.stringify({
+                          timing_type: timingTypeByKind[k],
+                          start_time: new Date(now).toISOString(),
+                        }),
+                      )
+                      void (async () => {
+                        await writeTiming({
+                          timingType: timingTypeByKind[prevKind],
+                          startMs: prevStartAt,
+                          endMs: now,
+                        })
+                      })()
+                    }}
                     className={`rounded-full border border-base-line px-4 py-2 text-sm active:opacity-70 ${
-                      active ? 'text-base-text' : 'bg-base-bg text-base-muted'
+                      active ? 'text-base-text' : 'bg-transparent text-base-muted'
                     }`}
-                    style={active ? noteMoodActiveStyle : undefined}
+                    style={active ? { backgroundColor: '#F2DEBD' } : undefined}
                   >
-                    {m}
+                    {k}
                   </button>
                 )
               })}
+            </div>
+
+            <div className="mt-3 flex items-center gap-2 pb-[env(safe-area-inset-bottom)]">
               <button
                 type="button"
-                onClick={() => {
-                  setCustomMoodDraft(mood)
-                  setCustomMoodOpen(true)
-                }}
-                className="rounded-full border border-base-line bg-base-bg px-4 py-2 text-sm text-base-muted active:opacity-70"
-                aria-label="添加自定义 emoji"
+                onClick={handleTimelineStart}
+                className="rounded-full border border-base-line bg-base-bg px-4 py-2 text-sm text-base-text active:opacity-70 whitespace-nowrap disabled:opacity-40 disabled:active:opacity-40"
+                disabled={timelineRunning}
               >
-                ➕
+                开始
+              </button>
+
+              <div className="min-w-0 flex-1 text-center text-sm font-bold" style={{ color: '#E49F5E' }}>
+                {timelineDurationLabel}
+              </div>
+
+              <button
+                type="button"
+                onClick={handleTimelineStop}
+                className="rounded-full border border-base-line bg-base-bg px-4 py-2 text-sm text-base-text active:opacity-70 whitespace-nowrap disabled:opacity-40 disabled:active:opacity-40"
+                disabled={!timelineRunning}
+              >
+                停止
+              </button>
+
+              <button
+                type="button"
+                onClick={handleTimelineCancel}
+                className="rounded-full border border-base-line bg-base-bg px-4 py-2 text-sm text-base-text active:opacity-70 whitespace-nowrap disabled:opacity-40 disabled:active:opacity-40"
+                disabled={!timelineRunning}
+              >
+                取消计时
               </button>
             </div>
           </div>
         )}
-        {mode === 'finance' && (
-          <div className="mb-2 rounded-2xl bg-base-surface p-3">
-            <div className="flex flex-wrap items-center gap-2">
-              {financeCategories.map((c) => {
-                const active = category === c
-                return (
+
+        {mode !== 'timeline' && (
+          <>
+            {mode === 'note' && (
+              <div className="mb-2 rounded-2xl bg-base-surface p-3">
+                <div className="flex flex-wrap gap-2">
+                  {moodOptions.map((m) => {
+                    const active = mood === m
+                    return (
+                      <button
+                        key={m}
+                        type="button"
+                        onClick={() => setMood(m)}
+                        className={`rounded-full border border-base-line px-4 py-2 text-sm active:opacity-70 ${
+                          active ? 'text-base-text' : 'bg-base-bg text-base-muted'
+                        }`}
+                        style={active ? noteMoodActiveStyle : undefined}
+                      >
+                        {m}
+                      </button>
+                    )
+                  })}
                   <button
-                    key={c}
                     type="button"
-                    onClick={() => setCategory(active ? null : c)}
-                    className={`rounded-full border border-base-line px-3 py-1 text-xs active:opacity-70 ${
-                      active ? 'text-base-text' : 'bg-transparent text-base-muted'
-                    }`}
-                    style={active ? chipActiveStyle : undefined}
+                    onClick={() => {
+                      setCustomMoodDraft(mood)
+                      setCustomMoodOpen(true)
+                    }}
+                    className="rounded-full border border-base-line bg-base-bg px-4 py-2 text-sm text-base-muted active:opacity-70"
+                    aria-label="添加自定义 emoji"
                   >
-                    {c}
+                    ➕
                   </button>
-                )
-              })}
-            </div>
-
-            <div className="mt-2 flex items-center gap-2">
-              <div className="inline-grid grid-cols-2 overflow-hidden rounded-full border border-base-line bg-base-bg">
-                {(
-                  [
-                    { key: 'need' as const, label: '必需' },
-                    { key: 'want' as const, label: '非必需' },
-                  ] as const
-                ).map((o) => {
-                  const active = necessity === o.key
-                  return (
-                    <button
-                      key={o.key}
-                      type="button"
-                      onClick={() => setNecessity(active ? null : o.key)}
-                      className={`w-14 whitespace-nowrap py-2 text-xs font-medium active:opacity-70 ${
-                        active ? 'text-base-text' : 'bg-transparent text-base-muted'
-                      }`}
-                      style={active ? chipActiveStyle : undefined}
-                    >
-                      {o.label}
-                    </button>
-                  )
-                })}
-              </div>
-              <RepurchaseIndexPill value={repurchaseIndex} onChange={setRepurchaseIndex} />
-            </div>
-          </div>
-        )}
-        {mode === 'finance' && pendingReviewTx && (
-          <button
-            type="button"
-            onClick={() =>
-              setReviewTargetId((prev) => (prev === pendingReviewTx.id ? null : pendingReviewTx.id))
-            }
-            className={`mb-2 w-full rounded-2xl border bg-base-surface p-3 text-left active:opacity-70 ${
-              reviewTargetId === pendingReviewTx.id ? 'border-base-text' : 'border-base-line'
-            }`}
-            aria-label="上一条记账待补点评"
-          >
-            <div className="flex items-center justify-between gap-2">
-              <div className="text-sm font-medium text-base-text">上一条记账待补点评</div>
-              <div className="text-xs text-base-muted">
-                {reviewTargetId === pendingReviewTx.id ? '正在补点评' : '点一下补'}
-              </div>
-            </div>
-            <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-base-muted">
-              <span>{pendingReviewTx.item_name_snapshot || pendingReviewTx.item_name || '（未识别 item）'}</span>
-              <span>·</span>
-              <span>{formatAmount(pendingReviewTx.amount)}</span>
-              <span>·</span>
-              <span>{formatCompactDateTime(pendingReviewTx.created_at)}</span>
-            </div>
-          </button>
-        )}
-        <section
-          className="rounded-2xl border bg-base-surface p-3"
-          style={composerBorder}
-          aria-label="快速输入"
-        >
-          <div className="relative">
-            <textarea
-              rows={2}
-              value={text}
-              onChange={(e) => setText(e.target.value)}
-              placeholder={
-                mode === 'finance' && pendingReviewTx && reviewTargetId === pendingReviewTx.id
-                  ? '给上一条记账补充点评…'
-                  : `在「${meta.label}」里输入…`
-              }
-              className="min-h-[52px] w-full resize-none bg-transparent px-1 py-2 pr-14 text-base-text placeholder:text-base-muted focus:outline-none"
-            />
-            <button
-              type="button"
-              onClick={handleSend}
-              disabled={sending}
-              className="absolute right-0 top-2 inline-flex h-10 w-10 items-center justify-center rounded-full border text-base-text active:opacity-70"
-              style={sendStyle}
-              aria-label="发送"
-            >
-              <Send size={18} />
-            </button>
-          </div>
-
-          <div className="mt-2 pb-[env(safe-area-inset-bottom)]">
-            {mode !== 'finance' && mode !== 'note' && (
-              <div className="flex flex-wrap gap-2">
-                <span className="rounded-full border border-base-line bg-base-bg px-3 py-1 text-xs text-base-muted">
-                  自动关联 Item（后续）
-                </span>
+                </div>
               </div>
             )}
-          </div>
-        </section>
+            {mode === 'finance' && (
+              <div className="mb-2 rounded-2xl bg-base-surface p-3">
+                <div className="flex flex-wrap items-center gap-2">
+                  {financeCategories.map((c) => {
+                    const active = category === c
+                    return (
+                      <button
+                        key={c}
+                        type="button"
+                        onClick={() => setCategory(active ? null : c)}
+                        className={`rounded-full border border-base-line px-3 py-1 text-xs active:opacity-70 ${
+                          active ? 'text-base-text' : 'bg-transparent text-base-muted'
+                        }`}
+                        style={active ? chipActiveStyle : undefined}
+                      >
+                        {c}
+                      </button>
+                    )
+                  })}
+                </div>
+
+                <div className="mt-2 flex items-center gap-2">
+                  <div className="inline-grid grid-cols-2 overflow-hidden rounded-full border border-base-line bg-base-bg">
+                    {(
+                      [
+                        { key: 'need' as const, label: '必需' },
+                        { key: 'want' as const, label: '非必需' },
+                      ] as const
+                    ).map((o) => {
+                      const active = necessity === o.key
+                      return (
+                        <button
+                          key={o.key}
+                          type="button"
+                          onClick={() => setNecessity(active ? null : o.key)}
+                          className={`w-14 whitespace-nowrap py-2 text-xs font-medium active:opacity-70 ${
+                            active ? 'text-base-text' : 'bg-transparent text-base-muted'
+                          }`}
+                          style={active ? chipActiveStyle : undefined}
+                        >
+                          {o.label}
+                        </button>
+                      )
+                    })}
+                  </div>
+                  <RepurchaseIndexPill value={repurchaseIndex} onChange={setRepurchaseIndex} />
+                </div>
+              </div>
+            )}
+            {mode === 'finance' && pendingReviewTx && (
+              <button
+                type="button"
+                onClick={() =>
+                  setReviewTargetId((prev) => (prev === pendingReviewTx.id ? null : pendingReviewTx.id))
+                }
+                className={`mb-2 w-full rounded-2xl border bg-base-surface p-3 text-left active:opacity-70 ${
+                  reviewTargetId === pendingReviewTx.id ? 'border-base-text' : 'border-base-line'
+                }`}
+                aria-label="上一条记账待补点评"
+              >
+                <div className="flex items-center justify-between gap-2">
+                  <div className="text-sm font-medium text-base-text">上一条记账待补点评</div>
+                  <div className="text-xs text-base-muted">
+                    {reviewTargetId === pendingReviewTx.id ? '正在补点评' : '点一下补'}
+                  </div>
+                </div>
+                <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-base-muted">
+                  <span>{pendingReviewTx.item_name_snapshot || pendingReviewTx.item_name || '（未识别 item）'}</span>
+                  <span>·</span>
+                  <span>{formatAmount(pendingReviewTx.amount)}</span>
+                  <span>·</span>
+                  <span>{formatCompactDateTime(pendingReviewTx.created_at)}</span>
+                </div>
+              </button>
+            )}
+            <section
+              className="rounded-2xl border bg-base-surface p-3"
+              style={composerBorder}
+              aria-label="快速输入"
+            >
+              <div className="relative">
+                <textarea
+                  rows={2}
+                  value={text}
+                  onChange={(e) => setText(e.target.value)}
+                  placeholder={
+                    mode === 'finance' && pendingReviewTx && reviewTargetId === pendingReviewTx.id
+                      ? '给上一条记账补充点评…'
+                      : `在「${meta.label}」里输入…`
+                  }
+                  className="min-h-[52px] w-full resize-none bg-transparent px-1 py-2 pr-14 text-base-text placeholder:text-base-muted focus:outline-none"
+                />
+                <button
+                  type="button"
+                  onClick={handleSend}
+                  disabled={sending}
+                  className="absolute right-0 top-2 inline-flex h-10 w-10 items-center justify-center rounded-full border text-base-text active:opacity-70"
+                  style={sendStyle}
+                  aria-label="发送"
+                >
+                  <Send size={18} />
+                </button>
+              </div>
+
+              <div className="mt-2 pb-[env(safe-area-inset-bottom)]">
+                {mode !== 'finance' && mode !== 'note' && (
+                  <div className="flex flex-wrap gap-2">
+                    <span className="rounded-full border border-base-line bg-base-bg px-3 py-1 text-xs text-base-muted">
+                      自动关联 Item（后续）
+                    </span>
+                  </div>
+                )}
+              </div>
+            </section>
+          </>
+        )}
       </div>
 
       {toast && (
