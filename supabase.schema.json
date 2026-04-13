@@ -179,6 +179,38 @@
       "udt_name": "text",
       "is_nullable": "YES",
       "column_default": null
+    },
+    {
+      "table_name": "transactions",
+      "column_name": "timing_type",
+      "data_type": "text",
+      "udt_name": "text",
+      "is_nullable": "YES",
+      "column_default": null
+    },
+    {
+      "table_name": "transactions",
+      "column_name": "start_time",
+      "data_type": "timestamp with time zone",
+      "udt_name": "timestamptz",
+      "is_nullable": "YES",
+      "column_default": null
+    },
+     {
+      "table_name": "transactions",
+      "column_name": "end_time",
+      "data_type": "timestamp with time zone",
+      "udt_name": "timestamptz",
+      "is_nullable": "YES",
+      "column_default": null
+    },
+    {
+      "table_name": "transactions",
+      "column_name": "duration",
+      "data_type": "int8",
+      "udt_name": "int8",
+      "is_nullable": "YES",
+      "column_default": null
     }
   ],
   "constraints": [

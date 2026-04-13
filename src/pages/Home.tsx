@@ -1075,7 +1075,7 @@ export default function Home() {
                   if (e.key === 'Escape') setCustomMoodOpen(false)
                 }}
                 inputMode="text"
-                className="h-11 flex-1 rounded-xl border border-base-line bg-base-bg px-3 text-base-text focus:outline-none"
+                className="h-11 w-11 rounded-xl border border-base-line bg-base-bg px-3 text-base-text focus:outline-none"
                 placeholder="例如：😵‍💫"
                 aria-label="自定义 emoji"
               />
