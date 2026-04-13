@@ -109,6 +109,7 @@ export default function Timeline() {
     const duration = Math.max(0, Math.floor((input.endMs - input.startMs) / 1000))
     const payload = {
       type: 'timing',
+      content: '',
       timing_type: input.timingType,
       start_time: new Date(input.startMs).toISOString(),
       end_time: new Date(input.endMs).toISOString(),
@@ -117,7 +118,7 @@ export default function Timeline() {
 
     const { error } = await client.from('transactions').insert(payload)
     if (error) {
-      setToast('写入失败')
+      setToast(error.message || '写入失败')
       return false
     }
     return true
