@@ -305,7 +305,6 @@ export default function Home() {
     if (txReview.trim()) return null
     const metaReview = typeof lastFinanceTx.ai_metadata?.review === 'string' ? lastFinanceTx.ai_metadata.review : ''
     if (metaReview.trim()) return null
-    if (hasInlineReview(lastFinanceTx.content)) return null
     return lastFinanceTx
   }, [lastFinanceTx, mode])
 
@@ -332,7 +331,7 @@ export default function Home() {
     try {
       const { data: tx, error: txError } = await supabase
         .from('transactions')
-        .select('id, content, item_id, ai_metadata')
+        .select('id, item_id, ai_metadata')
         .eq('id', transactionId)
         .maybeSingle()
 
@@ -341,8 +340,6 @@ export default function Home() {
         return
       }
 
-      const currentContent = typeof (tx as any)?.content === 'string' ? String((tx as any).content) : ''
-      const nextContent = upsertInlineReview(currentContent, reviewText)
       const currentAiMetadata = isRecord((tx as any)?.ai_metadata)
         ? ((tx as any).ai_metadata as Record<string, unknown>)
         : {}
@@ -350,7 +347,7 @@ export default function Home() {
 
       const { error: updateError } = await supabase
         .from('transactions')
-        .update({ content: nextContent, ai_metadata: nextAiMetadata, review: reviewText })
+        .update({ ai_metadata: nextAiMetadata, review: reviewText })
         .eq('id', transactionId)
 
       if (updateError) {
@@ -398,7 +395,9 @@ export default function Home() {
     try {
       const normalized = raw.replace(/\u3000/g, ' ').trim()
       const dateResult = extractDate(normalized, new Date())
-      const aiInput = dateResult.rest.trim()
+      const amountResult = extractAmount(dateResult.rest)
+      const extractedAmount = amountResult.amount
+      const aiInput = amountResult.rest.trim()
       if (!aiInput) {
         setToast('请输入内容')
         return
@@ -407,7 +406,7 @@ export default function Home() {
       const parsed = await parseTransactionByAi(aiInput)
       const parsedReview = typeof parsed.review === 'string' ? parsed.review.trim() : ''
       const reviewText = parsedReview ? parsedReview : null
-      const itemName = parsed.item_name?.trim() || aiInput.split(/\s+/g).filter(Boolean)[0] || null
+      const itemName = parsed.item_name?.trim() || pickItemNameFallback(aiInput) || null
       if (!itemName) {
         setToast('AI 未解析出 item_name')
         return
@@ -424,7 +423,7 @@ export default function Home() {
         details,
         review: reviewText,
       }
-      const contentToStore = reviewText ? upsertInlineReview(raw, reviewText) : raw
+      const contentToStore = raw
 
       const { data: existingItem, error: findError } = await supabase
         .from('items')
@@ -476,7 +475,7 @@ export default function Home() {
       const payload: Record<string, unknown> = {
         type: modeMeta[mode].label,
         content: contentToStore,
-        amount: parsed.amount ?? null,
+        amount: extractedAmount ?? parsed.amount ?? null,
         item_id: itemId,
         ai_metadata: aiMetadata,
         review: reviewText,
@@ -874,17 +873,40 @@ function isRecord(v: unknown): v is Record<string, unknown> {
   return Boolean(v) && typeof v === 'object' && !Array.isArray(v)
 }
 
-function hasInlineReview(content: string) {
-  if (!content) return false
-  return /(^|\n)\s*点评[:：]\s*\S+/.test(content)
+function parseAmountToken(token: string): number | null {
+  const t = token.trim().replace(/[,，]/g, '')
+  const m = t.match(/^(?:¥|￥)?(\d+(?:\.\d+)?)(?:元|块)?$/)
+  if (!m) return null
+  const n = Number(m[1])
+  return Number.isFinite(n) ? n : null
 }
 
-function upsertInlineReview(content: string, review: string) {
-  const trimmed = review.trim()
-  const base = String(content ?? '').replace(/(^|\n)\s*点评[:：][\s\S]*$/g, '').trimEnd()
-  if (!trimmed) return base
-  if (!base) return `点评：${trimmed}`
-  return `${base}\n点评：${trimmed}`
+function extractAmount(source: string): { amount: number | null; rest: string } {
+  const s = source.replace(/\u3000/g, ' ').replace(/\s+/g, ' ').trim()
+  if (!s) return { amount: null, rest: '' }
+  const parts = s.split(' ').filter(Boolean)
+  if (parts.length === 0) return { amount: null, rest: '' }
+
+  const leading = parseAmountToken(parts[0] ?? '')
+  if (leading !== null) {
+    return { amount: leading, rest: parts.slice(1).join(' ') }
+  }
+
+  const trailing = parseAmountToken(parts[parts.length - 1] ?? '')
+  if (trailing !== null) {
+    return { amount: trailing, rest: parts.slice(0, -1).join(' ') }
+  }
+
+  return { amount: null, rest: s }
+}
+
+function pickItemNameFallback(source: string): string | null {
+  const tokens = source.split(/\s+/g).filter(Boolean)
+  for (const token of tokens) {
+    if (parseAmountToken(token) !== null) continue
+    return token
+  }
+  return null
 }
 
 function formatCompactDateTime(iso: string) {

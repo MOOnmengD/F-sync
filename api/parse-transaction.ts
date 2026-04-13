@@ -88,16 +88,22 @@ export default async function handler(req: any, res: any) {
     '你是一个严格的 JSON 生成器，只输出 JSON，不要输出 Markdown、解释或多余文字。',
     '任务：把用户输入的中文消费/点评文本解析为结构化 JSON。',
     '输出字段固定为：amount(数字或null), item_name(字符串或null), brand(字符串或null), details(字符串或null), review(字符串或null)。',
-    'amount 使用数字（例如 9.9），无法确定就返回 null。',
-    'details 放偏客观的规格/口味/温度/加料等细节；review 放用户的主观感受/评价。',
+    'amount 只能是数字（例如 9.9），无法确定就返回 null。',
+    '如果文本里出现明显的金额（例如 1.5 / 9.9 / ¥12 / 12元），优先识别为 amount；金额可能出现在开头或结尾。',
+    'item_name 是物品/服务名称，不能是纯数字或金额；如果开头是金额，紧随其后的第一个名词通常是 item_name。',
+    'details 放偏客观的规格/口味/温度/加料/场景等细节；review 放用户的主观感受/评价。',
   ].join('\n')
 
   const user = [
     '请解析下面这段文字，并只返回 JSON：',
     text,
     '',
+    '规则补充：如果文本里没有明确金额，amount 返回 null。',
     '示例输入：瑞幸小黄油拿铁 9.9 热，不额外加糖 不是很苦，但有点淡',
     '示例输出：{"amount":9.9,"item_name":"小黄油拿铁","brand":"瑞幸","details":"热，不额外加糖","review":"不是很苦，但有点淡"}',
+    '',
+    '示例输入：1.5 地铁 去逛超市啦',
+    '示例输出：{"amount":1.5,"item_name":"地铁","brand":null,"details":"去逛超市啦","review":null}',
   ].join('\n')
 
   const model = typeof body?.model === 'string' && body.model.trim() ? body.model.trim() : defaultModel
