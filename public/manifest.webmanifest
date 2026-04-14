@@ -6,10 +6,14 @@
   "start_url": "/?source=pwa",
   "scope": "/",
   "display": "standalone",
-  "display_override": ["standalone", "minimal-ui", "browser"],
+  "display_override": ["standalone", "minimal-ui", "browser", "window-controls-overlay"],
   "orientation": "portrait",
   "background_color": "#0b1220",
   "theme_color": "#0f172a",
+  "categories": ["lifestyle", "productivity", "utilities"],
+  "lang": "zh-CN",
+  "dir": "ltr",
+  "prefer_related_applications": false,
   "icons": [
     {
       "src": "/pwa-192.png",
@@ -22,6 +26,15 @@
       "sizes": "512x512",
       "type": "image/png",
       "purpose": "any maskable"
+    }
+  ],
+  "screenshots": [
+    {
+      "src": "/pwa-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "form_factor": "narrow",
+      "label": "F-Sync 主界面"
     }
   ]
 }
