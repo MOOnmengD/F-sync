@@ -116,9 +116,16 @@ export default function Timeline() {
       duration,
     }
 
-    const { error } = await client.from('transactions').insert(payload)
+    console.log('[Timeline] writeTiming payload:', JSON.stringify(payload, null, 2))
+
+    const { error, data } = await client.from('transactions').insert(payload).select()
+    console.log('[Timeline] writeTiming response - error:', error)
+    console.log('[Timeline] writeTiming response - data:', data)
+
     if (error) {
-      setToast(error.message || '写入失败')
+      const msg = error.message || error.details || error.hint || '写入失败'
+      console.error('[Timeline] writeTiming failed:', msg, error)
+      setToast(msg)
       return false
     }
     return true
