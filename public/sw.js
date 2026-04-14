@@ -15,9 +15,13 @@ const STATIC_ASSETS = [
 self.addEventListener('install', (event) => {
   event.waitUntil(
     (async () => {
-      const cache = await caches.open(STATIC_CACHE)
-      await cache.addAll(STATIC_ASSETS)
-      await self.skipWaiting()
+      try {
+        const cache = await caches.open(STATIC_CACHE)
+        await cache.addAll(STATIC_ASSETS)
+        await self.skipWaiting()
+      } catch (err) {
+        console.warn('[SW] Install cache failed:', err)
+      }
     })(),
   )
 })
@@ -25,16 +29,20 @@ self.addEventListener('install', (event) => {
 self.addEventListener('activate', (event) => {
   event.waitUntil(
     (async () => {
-      const keys = await caches.keys()
-      await Promise.all(
-        keys.map((key) => {
-          if (key !== STATIC_CACHE && key !== RUNTIME_CACHE) {
-            return caches.delete(key)
-          }
-          return Promise.resolve()
-        }),
-      )
-      await self.clients.claim()
+      try {
+        const keys = await caches.keys()
+        await Promise.all(
+          keys.map((key) => {
+            if (key !== STATIC_CACHE && key !== RUNTIME_CACHE) {
+              return caches.delete(key)
+            }
+            return Promise.resolve()
+          }),
+        )
+        await self.clients.claim()
+      } catch (err) {
+        console.warn('[SW] Activate cleanup failed:', err)
+      }
     })(),
   )
 })
