@@ -270,7 +270,7 @@ export default function Home() {
     const { data, error } = await client
       .from('transactions')
       .select(
-        'id, created_at, content, amount, type, item_id, ai_metadata, review, details, finance_category, item_name_snapshot, brand_snapshot',
+        'id, created_at, content, amount, type, item_id, ai_metadata, review, details, finance_category, item_name_snapshot, brand_snapshot, necessity, repurchase_index',
       )
       .eq('type', '记账')
       .order('created_at', { ascending: false })
@@ -302,6 +302,8 @@ export default function Home() {
       typeof (data as any)?.item_name_snapshot === 'string' ? (data as any).item_name_snapshot : null
     const brandSnapshot =
       typeof (data as any)?.brand_snapshot === 'string' ? (data as any).brand_snapshot : null
+    const txNecessity = (data as any)?.necessity ?? null
+    const txRepurchaseIndex = typeof (data as any)?.repurchase_index === 'number' ? (data as any).repurchase_index : 0
 
     if (!itemId) {
       setLastFinanceTx({
@@ -317,6 +319,8 @@ export default function Home() {
         finance_category: financeCategory,
         item_name_snapshot: itemNameSnapshot,
         brand_snapshot: brandSnapshot,
+        necessity: txNecessity,
+        repurchase_index: txRepurchaseIndex,
       })
       return
     }
@@ -343,6 +347,8 @@ export default function Home() {
       finance_category: financeCategory,
       item_name_snapshot: itemNameSnapshot,
       brand_snapshot: brandSnapshot,
+      necessity: txNecessity,
+      repurchase_index: txRepurchaseIndex,
     })
   }
 
@@ -459,7 +465,6 @@ export default function Home() {
 
   const sendReviewSupplement = async (transactionId: string) => {
     const reviewText = text.trim()
-    if (!reviewText) return
 
     if (!supabase) {
       setToast('先配置 Supabase URL/Key')
@@ -468,9 +473,7 @@ export default function Home() {
 
     if (sending) return
 
-    setText('')
     setToast('记录中…')
-
     setSending(true)
     try {
       const { data: tx, error: txError } = await supabase
@@ -487,11 +490,22 @@ export default function Home() {
       const currentAiMetadata = isRecord((tx as any)?.ai_metadata)
         ? ((tx as any).ai_metadata as Record<string, unknown>)
         : {}
-      const nextAiMetadata: Record<string, unknown> = { ...currentAiMetadata, review: reviewText }
+
+      const nextAiMetadata: Record<string, unknown> = { ...currentAiMetadata }
+      if (reviewText) nextAiMetadata.review = reviewText
+
+      const payload: Record<string, unknown> = {
+        ai_metadata: nextAiMetadata,
+      }
+
+      if (reviewText) payload.review = reviewText
+      if (category) payload.finance_category = category
+      if (necessity !== null) payload.necessity = necessity === 'need'
+      if (repurchaseIndex > 0) payload.repurchase_index = repurchaseIndex
 
       const { error: updateError } = await supabase
         .from('transactions')
-        .update({ ai_metadata: nextAiMetadata, review: reviewText })
+        .update(payload)
         .eq('id', transactionId)
 
       if (updateError) {
@@ -501,17 +515,20 @@ export default function Home() {
 
       const itemId = (tx as any)?.item_id ? String((tx as any).item_id) : null
       if (itemId) {
-        const { error: itemUpdateError } = await supabase
-          .from('items')
-          .update({ last_review: reviewText })
-          .eq('id', itemId)
-        if (itemUpdateError) {
-          setToast(itemUpdateError.message || '更新 item 失败')
-          return
+        const itemUpdatePatch: Record<string, unknown> = {}
+        if (reviewText) itemUpdatePatch.last_review = reviewText
+        // Optional: could also update some 'last_repurchase_index' if it existed in items table
+
+        if (Object.keys(itemUpdatePatch).length > 0) {
+          await supabase.from('items').update(itemUpdatePatch).eq('id', itemId)
         }
       }
 
       setReviewTargetId(null)
+      setText('')
+      setCategory(null)
+      setNecessity(null)
+      setRepurchaseIndex(0)
       await fetchLastFinanceTx()
       setToast('已补点评')
     } finally {
@@ -974,9 +991,26 @@ export default function Home() {
             {mode === 'finance' && pendingReviewTx && (
               <button
                 type="button"
-                onClick={() =>
-                  setReviewTargetId((prev) => (prev === pendingReviewTx.id ? null : pendingReviewTx.id))
-                }
+                onClick={() => {
+                  if (reviewTargetId === pendingReviewTx.id) {
+                    setReviewTargetId(null)
+                    setCategory(null)
+                    setNecessity(null)
+                    setRepurchaseIndex(0)
+                  } else {
+                    setReviewTargetId(pendingReviewTx.id)
+                    // Pre-populate
+                    setCategory(pendingReviewTx.finance_category as any)
+                    setNecessity(
+                      pendingReviewTx.necessity === null
+                        ? null
+                        : pendingReviewTx.necessity
+                          ? 'need'
+                          : 'want',
+                    )
+                    setRepurchaseIndex(pendingReviewTx.repurchase_index || 0)
+                  }
+                }}
                 className={`mb-2 w-full rounded-2xl border bg-base-surface p-3 text-left active:opacity-70 ${
                   reviewTargetId === pendingReviewTx.id ? 'border-base-text' : 'border-base-line'
                 }`}
@@ -1116,6 +1150,8 @@ type LastFinanceTx = {
   finance_category: string | null
   item_name_snapshot: string | null
   brand_snapshot: string | null
+  necessity: boolean | null
+  repurchase_index: number | null
 }
 
 function isRecord(v: unknown): v is Record<string, unknown> {
