@@ -1,4 +1,4 @@
-const defaultModel = 'deepseek-chat'
+const defaultModel = process.env.AI_MODEL || 'deepseek-chat'
 
 function resolveChatCompletionsUrl(base: string) {
   const trimmed = base.trim().replace(/\/+$/, '')
