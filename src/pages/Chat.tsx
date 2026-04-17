@@ -55,75 +55,90 @@ function MessageBubble({ msg, isTyping }: { msg: ChatMessage; isTyping?: boolean
   )
 }
 
-const PAGE_SIZE = 30
+const CONTEXT_WINDOW = 30 // 打包最近 30 条对话
 
 export default function Chat() {
   const navigate = useNavigate()
   const messages = useChatStore((s) => s.messages)
   const isLoading = useChatStore((s) => s.isLoading)
-  const hasMore = useChatStore((s) => s.hasMore)
   const addMessage = useChatStore((s) => s.addMessage)
+  const updateMessage = useChatStore((s) => s.updateMessage)
   const setLoading = useChatStore((s) => s.setLoading)
-  const setHasMore = useChatStore((s) => s.setHasMore)
   const clearMessages = useChatStore((s) => s.clearMessages)
-  const loadMoreMessages = useChatStore((s) => s.loadMoreMessages)
+  const syncMessages = useChatStore((s) => s.syncMessages)
 
   const [input, setInput] = useState('')
-  const [displayedMessages, setDisplayedMessages] = useState<ChatMessage[]>([])
-  const [loadingMore, setLoadingMore] = useState(false)
-  const listRef = useRef<HTMLDivElement>(null)
   const bottomRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLTextAreaElement>(null)
-  const loadingIdRef = useRef<string | null>(null)
 
+  // 滚动到底部
   useEffect(() => {
-    if (messages.length <= PAGE_SIZE) {
-      setDisplayedMessages(messages)
-      setHasMore(false)
-    } else {
-      setDisplayedMessages(messages.slice(-PAGE_SIZE))
-      setHasMore(true)
-    }
-  }, [messages.length])
+    bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
+  }, [messages.length, isLoading])
 
+  // 自动同步逻辑
   useEffect(() => {
-    if (!isLoading && loadingIdRef.current) {
-      loadingIdRef.current = null
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'hidden') {
+        void syncMessages()
+      }
     }
-  }, [isLoading])
-
-  useEffect(() => {
-    if (!isLoading) {
-      bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
+    document.addEventListener('visibilitychange', handleVisibilityChange)
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange)
+      void syncMessages()
     }
-  }, [displayedMessages, isLoading])
-
-  const handleLoadMore = async () => {
-    if (loadingMore || !hasMore) return
-    setLoadingMore(true)
-    const older = loadMoreMessages()
-    if (older.length === displayedMessages.length) {
-      setHasMore(false)
-    } else {
-      setDisplayedMessages(older)
-    }
-    setLoadingMore(false)
-  }
+  }, [syncMessages])
 
   const handleSend = async () => {
     const text = input.trim()
     if (!text || isLoading) return
+
     setInput('')
-    addMessage({ role: 'user', content: text, createdAt: Date.now() })
     setLoading(true)
-    const tempId = `${Date.now()}-temp`
-    loadingIdRef.current = tempId
-    addMessage({ role: 'assistant', content: '', createdAt: Date.now() })
-    setTimeout(() => {
-      if (loadingIdRef.current === tempId) {
-        setLoading(false)
+
+    // 1. 添加用户消息
+    addMessage({ role: 'user', content: text, createdAt: Date.now() })
+
+    // 2. 准备 AI 占位消息
+    const aiMsgId = addMessage({ role: 'assistant', content: '', createdAt: Date.now() })
+
+    try {
+      // 3. 打包上下文
+      const context = messages.slice(-CONTEXT_WINDOW).map(m => ({
+        role: m.role,
+        content: m.content
+      }))
+      context.push({ role: 'user', content: text })
+
+      // 4. 调用 API
+      const response = await fetch('/api/chat-completion', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ messages: context })
+      })
+
+      const data = await response.json()
+      
+      if (!response.ok) throw new Error(data.error || '请求失败')
+
+      const aiContent = data.choices?.[0]?.message?.content || 'AI 暂时无法回答。'
+      
+      // 5. 更新 AI 消息
+      updateMessage(aiMsgId, { content: aiContent })
+
+      // 6. 批次同步判断
+      const unsyncedCount = messages.filter(m => !m.isSynced).length
+      if (unsyncedCount >= 10) {
+        void syncMessages()
       }
-    }, 3000)
+
+    } catch (error: any) {
+      console.error('[Chat] Error:', error)
+      updateMessage(aiMsgId, { content: `抱歉，出错了：${error.message}` })
+    } finally {
+      setLoading(false)
+    }
   }
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -145,7 +160,6 @@ export default function Chat() {
             type="button"
             onClick={clearMessages}
             className="h-10 px-3 text-xs text-base-text/50 border border-base-line rounded-full bg-base-surface active:opacity-70"
-            style={{ width: '40px' }}
           >
             清空
           </button>
@@ -158,38 +172,18 @@ export default function Chat() {
       </header>
 
       <div
-        ref={listRef}
         className="flex-1 overflow-y-auto px-4 py-4 flex flex-col gap-3"
-        onScroll={(e) => {
-          const { scrollTop } = e.currentTarget
-          if (scrollTop < 80 && !loadingMore && hasMore) {
-            void handleLoadMore()
-          }
-        }}
       >
-        {displayedMessages.length === 0 && <WelcomeBubble />}
-        {displayedMessages.map((msg, idx) => (
+        {messages.length === 0 && <WelcomeBubble />}
+        {messages.map((msg, idx) => (
           <MessageBubble
             key={msg.id}
             msg={msg}
-            isTyping={isLoading && idx === displayedMessages.length - 1}
+            isTyping={isLoading && idx === messages.length - 1}
           />
         ))}
         <div ref={bottomRef} />
       </div>
-
-      {hasMore && (
-        <div className="flex justify-center py-2">
-          <button
-            type="button"
-            onClick={() => void handleLoadMore()}
-            disabled={loadingMore}
-            className="text-xs text-base-text/40 border border-base-line rounded-full px-3 py-1 bg-base-surface active:opacity-70 disabled:opacity-50"
-          >
-            {loadingMore ? '加载中…' : '加载更多'}
-          </button>
-        </div>
-      )}
 
       <div className="bg-base-bg px-4 py-3 pb-[calc(env(safe-area-inset-bottom)+0.75rem)]">
         <div className="flex items-end gap-2">
