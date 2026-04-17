@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { ArrowLeft, Loader2, Send, Sparkles } from 'lucide-react'
+import { ArrowLeft, Check, Loader2, RefreshCw, Send, Sparkles } from 'lucide-react'
 import { IconButton } from '../shared/ui/IconButton'
 import { useChatStore, type ChatMessage } from '../store/chat'
+import { supabase } from '../supabaseClient'
 
 function formatTime(timestamp: number) {
   const d = new Date(timestamp)
@@ -66,10 +67,108 @@ export default function Chat() {
   const setLoading = useChatStore((s) => s.setLoading)
   const clearMessages = useChatStore((s) => s.clearMessages)
   const syncMessages = useChatStore((s) => s.syncMessages)
+  const upsertMessage = useChatStore((s) => s.upsertMessage)
 
   const [input, setInput] = useState('')
+  const [vectorSyncStatus, setVectorSyncStatus] = useState<'synced' | 'pending' | 'syncing'>('synced')
   const bottomRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLTextAreaElement>(null)
+
+  // 1. 同步云端消息
+  useEffect(() => {
+    const client = supabase
+    if (!client) return
+
+    // 订阅实时更新
+    const channel = client
+      .channel('chat_messages_realtime')
+      .on(
+        'postgres_changes',
+        { event: 'INSERT', schema: 'public', table: 'chat_messages' },
+        (payload) => {
+          const next = payload.new as any
+          if (!next?.id || !next.content) return
+          upsertMessage({
+            id: next.client_id || next.id,
+            role: next.role,
+            content: next.content,
+            createdAt: new Date(next.created_at).getTime(),
+            isSynced: true
+          })
+        }
+      )
+      .subscribe()
+
+    // 初始拉取最新云端消息（补齐离线时主动发送的消息）
+    void (async () => {
+      const { data, error } = await client
+        .from('chat_messages')
+        .select('*')
+        .order('created_at', { ascending: false })
+        .limit(50)
+
+      if (!error && data) {
+        data.reverse().forEach((msg: any) => {
+          upsertMessage({
+            id: msg.client_id || msg.id,
+            role: msg.role,
+            content: msg.content,
+            createdAt: new Date(msg.created_at).getTime(),
+            isSynced: true
+          })
+        })
+      }
+    })()
+
+    return () => {
+      void client.removeChannel(channel)
+    }
+  }, [upsertMessage])
+
+  // 2. 检查向量化状态
+  const checkVectorStatus = async () => {
+    if (!supabase) return
+    const { count, error } = await supabase
+      .from('transactions')
+      .select('*', { count: 'exact', head: true })
+      .is('embedding', null)
+      .in('type', ['记账', 'whisper'])
+
+    if (!error && count !== null) {
+      setVectorSyncStatus(count > 0 ? 'pending' : 'synced')
+    }
+  }
+
+  useEffect(() => {
+    void checkVectorStatus()
+  }, [])
+
+  // 手动触发全量同步
+  const handleManualVectorSync = async () => {
+    if (vectorSyncStatus === 'syncing') return
+    setVectorSyncStatus('syncing')
+    
+    let hasMore = true
+    while (hasMore) {
+      try {
+        const res = await fetch('/api/vectorize', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ mode: 'all' })
+        })
+        const data = await res.json()
+        if (data.results && data.results.length === 50) {
+          hasMore = true
+        } else {
+          hasMore = false
+        }
+      } catch (err) {
+        console.error('Manual sync failed:', err)
+        hasMore = false
+      }
+    }
+    void checkVectorStatus()
+  }
 
   // 滚动到底部
   useEffect(() => {
@@ -158,8 +257,27 @@ export default function Chat() {
         <div className="flex items-center gap-2">
           <button
             type="button"
+            onClick={vectorSyncStatus === 'pending' ? handleManualVectorSync : undefined}
+            disabled={vectorSyncStatus === 'syncing'}
+            className={`h-10 px-3 text-xs border border-base-line rounded-full bg-base-surface flex items-center gap-1 ${
+              vectorSyncStatus === 'pending' ? 'text-[#B4AEE8] active:opacity-70' : 'text-base-text/30 cursor-default'
+            }`}
+            style={{ width: '40px', justifyContent: 'center' }}
+          >
+            {vectorSyncStatus === 'syncing' ? (
+              <Loader2 size={14} className="animate-spin" />
+            ) : vectorSyncStatus === 'synced' ? (
+              <Check size={14} className="text-green-400" />
+            ) : (
+              <RefreshCw size={14} />
+            )}
+            {vectorSyncStatus === 'syncing' ? '' : vectorSyncStatus === 'synced' ? '' : ''}
+          </button>
+          <button
+            type="button"
             onClick={clearMessages}
             className="h-10 px-3 text-xs text-base-text/50 border border-base-line rounded-full bg-base-surface active:opacity-70"
+            style={{ width: '40px' }}
           >
             清空
           </button>

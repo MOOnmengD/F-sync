@@ -18,5 +18,11 @@
       "source": "/((?!api/|.*\\..*).*)",
       "destination": "/"
     }
+  ],
+  "crons": [
+    {
+      "path": "/api/proactive-ai",
+      "schedule": "0 * * * *"
+    }
   ]
 }
