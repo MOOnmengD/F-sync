@@ -17,8 +17,7 @@ function WelcomeBubble() {
     <div className="flex justify-start">
       <div className="max-w-[75%] rounded-2xl border border-base-line bg-[#F0F7FF] px-4 py-3">
         <p className="text-sm text-base-text">
-          你好！我是 F-Sync AI 助手。我已经了解了你最近的生活记录，可以帮你回顾、分析，或者随便聊聊。
-          有任何问题尽管问我～
+          宝贝，我是弗弗。
         </p>
       </div>
     </div>
