@@ -105,42 +105,63 @@ export default async function handler(req: any, res: any) {
 
     const embEndpoint = resolveEmbeddingUrl(apiUrl)
     const results = []
+    let errorCount = 0
 
     for (const tx of tasks) {
       const text = formatTransactionToText(tx)
       
-      const embRes = await fetch(embEndpoint, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${apiKey}`
-        },
-        body: JSON.stringify({
-          model: embeddingModel,
-          input: text
+      try {
+        const embRes = await fetch(embEndpoint, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${apiKey}`
+          },
+          body: JSON.stringify({
+            model: embeddingModel,
+            input: text
+          })
         })
-      })
 
-      if (embRes.ok) {
+        if (!embRes.ok) {
+          const errText = await embRes.text()
+          results.push({ id: tx.id, success: false, error: `Embedding API failed: ${errText}` })
+          errorCount++
+          continue
+        }
+
         const embData = await embRes.json()
         const embedding = embData.data?.[0]?.embedding
         
         if (embedding) {
-          const { error: updateError, count } = await supabaseAdmin
+          // 使用 { count: 'exact' } 强制要求返回受影响行数
+          const { error: updateError, data: updatedData } = await supabaseAdmin
             .from('transactions')
             .update({ embedding })
             .eq('id', tx.id)
-            .select() // 强制返回数据以确认更新成功
-          
-          if (updateError || !count) {
-            results.push({ id: tx.id, success: false, error: updateError?.message || 'RLS policy blocked update' })
+            .select()
+
+          if (updateError) {
+            results.push({ id: tx.id, success: false, error: `DB Update Error: ${updateError.message}` })
+            errorCount++
+          } else if (!updatedData || updatedData.length === 0) {
+            results.push({ id: tx.id, success: false, error: 'DB Update Failed: No rows affected (check RLS)' })
+            errorCount++
           } else {
             results.push({ id: tx.id, success: true })
           }
         }
-      } else {
-        results.push({ id: tx.id, success: false, error: 'Embedding API failed' })
+      } catch (e: any) {
+        results.push({ id: tx.id, success: false, error: e.message })
+        errorCount++
       }
+    }
+
+    // 如果全部失败，返回 500 以停止前端循环
+    if (errorCount === tasks.length && tasks.length > 0) {
+      res.statusCode = 500
+      res.end(JSON.stringify({ error: 'All tasks failed in this batch', results }))
+      return
     }
 
     res.statusCode = 200
