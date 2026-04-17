@@ -1,0 +1,17 @@
+name: Proactive AI Pulse
+
+on:
+  schedule:
+    # 每小时运行一次 (UTC 时间，0 * * * * 表示整点)
+    - cron: '0 * * * *'
+  workflow_dispatch: # 允许手动触发测试
+
+jobs:
+  pulse:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger Proactive AI Endpoint
+        run: |
+          curl -X POST "https://${{ secrets.VERCEL_DOMAIN }}/api/proactive-ai" \
+          -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}" \
+          -H "Content-Type: application/json"

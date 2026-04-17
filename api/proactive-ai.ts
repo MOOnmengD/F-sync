@@ -10,10 +10,11 @@ function resolveChatCompletionsUrl(base: string) {
 }
 
 export default async function handler(req: any, res: any) {
-  // 1. 验证 Cron 密钥（可选，建议在 Vercel 中配置 CRON_SECRET）
-  // if (req.headers.get('Authorization') !== `Bearer ${process.env.CRON_SECRET}`) {
-  //   return res.status(401).end('Unauthorized');
-  // }
+  // 1. 验证 Cron 密钥，防止恶意请求
+  const authHeader = req.headers.authorization || req.headers.get?.('Authorization')
+  if (authHeader !== `Bearer ${process.env.CRON_SECRET}`) {
+    return res.status(401).json({ error: 'Unauthorized' })
+  }
 
   const supabaseUrl = process.env.VITE_SUPABASE_URL
   const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY
