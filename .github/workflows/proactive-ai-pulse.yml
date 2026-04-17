@@ -12,6 +12,11 @@ jobs:
     steps:
       - name: Trigger Proactive AI Endpoint
         run: |
-          curl -X POST "https://${{ secrets.VERCEL_DOMAIN }}/api/proactive-ai" \
+          # 自动处理可能误输入的 https://
+          DOMAIN=$(echo "${{ secrets.VERCEL_DOMAIN }}" | sed -e 's|^https://||' -e 's|/$||')
+          echo "Triggering https://$DOMAIN/api/proactive-ai"
+          curl -X POST "https://$DOMAIN/api/proactive-ai" \
+          -v \
+          -f \
           -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}" \
           -H "Content-Type: application/json"
