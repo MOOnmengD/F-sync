@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { ArrowLeft, Send, Sparkles } from 'lucide-react'
+import { ArrowLeft, Loader2, Send, Sparkles } from 'lucide-react'
 import { IconButton } from '../shared/ui/IconButton'
 import { useChatStore, type ChatMessage } from '../store/chat'
 
@@ -24,28 +24,33 @@ function WelcomeBubble() {
   )
 }
 
-function TypingBubble() {
-  return (
-    <div className="flex justify-start">
-      <div className="max-w-[75%] rounded-2xl border border-base-line bg-[#F0F7FF] px-4 py-3">
-        <p className="text-sm text-base-text/50">思考中…</p>
-      </div>
-    </div>
-  )
-}
-
-function MessageBubble({ msg }: { msg: ChatMessage }) {
+function MessageBubble({ msg, isTyping }: { msg: ChatMessage; isTyping?: boolean }) {
   const isUser = msg.role === 'user'
   return (
-    <div className={`flex ${isUser ? 'justify-end' : 'justify-start'}`}>
-      <div
-        className={`max-w-[75%] rounded-2xl border border-base-line px-4 py-3 ${
-          isUser ? 'bg-[#E8F5E9]' : 'bg-[#F0F7FF]'
-        }`}
-      >
-        <p className="text-sm text-base-text whitespace-pre-wrap break-words">{msg.content}</p>
-        <p className="mt-1 text-xs text-base-text/40">{formatTime(msg.createdAt)}</p>
+    <div className={`flex flex-col ${isUser ? 'items-end' : 'items-start'}`}>
+      <div className="flex items-center gap-2 w-full justify-inherit" style={{ justifyContent: isUser ? 'flex-end' : 'flex-start' }}>
+        <div
+          className={`w-[70%] rounded-2xl border border-base-line px-4 py-3 ${
+            isUser ? 'bg-[#E8F5E9]' : 'bg-[#F0F7FF]'
+          }`}
+        >
+          {msg.content ? (
+            <p className="text-sm text-base-text whitespace-pre-wrap break-words">{msg.content}</p>
+          ) : !isUser && isTyping ? (
+            <div className="h-5 w-8 flex items-center justify-center">
+              <div className="flex gap-1">
+                <div className="w-1 h-1 bg-base-text/30 rounded-full animate-bounce" />
+                <div className="w-1 h-1 bg-base-text/30 rounded-full animate-bounce [animation-delay:0.2s]" />
+                <div className="w-1 h-1 bg-base-text/30 rounded-full animate-bounce [animation-delay:0.4s]" />
+              </div>
+            </div>
+          ) : null}
+        </div>
+        {!isUser && isTyping && (
+          <Loader2 size={16} className="animate-spin text-base-text/30 shrink-0" />
+        )}
       </div>
+      <p className="mt-1 text-xs text-base-text/40">{formatTime(msg.createdAt)}</p>
     </div>
   )
 }
@@ -130,23 +135,26 @@ export default function Chat() {
 
   return (
     <div className="flex flex-col h-dvh bg-base-bg">
-      <header className="flex items-center justify-between border-b border-base-line bg-base-bg px-4 pb-3 pt-[calc(env(safe-area-inset-top)+0.75rem)]">
-        <IconButton
-          label="返回"
-          onClick={() => navigate(-1)}
-          icon={<ArrowLeft size={20} />}
-        />
+      <header className="flex items-center justify-between bg-base-bg px-4 pb-3 pt-[calc(env(safe-area-inset-top)+0.75rem)]">
         <div className="flex items-center gap-2">
           <Sparkles size={16} className="text-[#B4AEE8]" />
           <span className="text-sm font-medium text-base-text">AI 助手</span>
         </div>
-        <button
-          type="button"
-          onClick={clearMessages}
-          className="h-10 px-3 text-xs text-base-text/50 border border-base-line rounded-full bg-base-surface active:opacity-70"
-        >
-          清空
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={clearMessages}
+            className="h-10 px-3 text-xs text-base-text/50 border border-base-line rounded-full bg-base-surface active:opacity-70"
+            style={{ width: '40px' }}
+          >
+            清空
+          </button>
+          <IconButton
+            label="返回"
+            onClick={() => navigate(-1)}
+            icon={<ArrowLeft size={20} />}
+          />
+        </div>
       </header>
 
       <div
@@ -160,10 +168,13 @@ export default function Chat() {
         }}
       >
         {displayedMessages.length === 0 && <WelcomeBubble />}
-        {displayedMessages.map((msg) => (
-          <MessageBubble key={msg.id} msg={msg} />
+        {displayedMessages.map((msg, idx) => (
+          <MessageBubble
+            key={msg.id}
+            msg={msg}
+            isTyping={isLoading && idx === displayedMessages.length - 1}
+          />
         ))}
-        {isLoading && <TypingBubble />}
         <div ref={bottomRef} />
       </div>
 
@@ -180,7 +191,7 @@ export default function Chat() {
         </div>
       )}
 
-      <div className="border-t border-base-line bg-base-bg px-4 py-3 pb-[calc(env(safe-area-inset-bottom)+0.75rem)]">
+      <div className="bg-base-bg px-4 py-3 pb-[calc(env(safe-area-inset-bottom)+0.75rem)]">
         <div className="flex items-end gap-2">
           <textarea
             ref={inputRef}
