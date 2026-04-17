@@ -91,7 +91,7 @@ export default async function handler(req: any, res: any) {
         .select('*')
         .is('embedding', null)
         .in('type', ['记账', 'whisper']) // 仅处理这两类
-        .limit(50) // 每次处理 50 条防止超时
+        .limit(5) // 减小批次到 5 条，防止 Vercel 超时 (Hobby 限制 10s)
       
       if (fetchError) throw new Error(fetchError.message)
       tasks = data || []
