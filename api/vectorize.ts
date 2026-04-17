@@ -39,14 +39,22 @@ export default async function handler(req: any, res: any) {
     return
   }
 
-  const apiKey = process.env.EMBEDDING_API_KEY || process.env.AI_API_KEY
-  const apiUrl = process.env.EMBEDDING_API_URL || process.env.AI_API_URL
+  const apiKey = process.env.EMBEDDING_API_KEY || process.env.CHAT_AI_API_KEY || process.env.AI_API_KEY
+  const apiUrl = process.env.EMBEDDING_API_URL || process.env.CHAT_AI_API_URL || process.env.AI_API_URL
   const supabaseUrl = process.env.VITE_SUPABASE_URL
-  const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY
+  const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.VITE_SUPABASE_SERVICE_ROLE_KEY || process.env.VITE_SUPABASE_ANON_KEY
 
   if (!apiKey || !apiUrl || !supabaseUrl || !supabaseServiceKey) {
     res.statusCode = 500
-    res.end(JSON.stringify({ error: 'Missing configuration' }))
+    res.end(JSON.stringify({ 
+      error: 'Missing configuration', 
+      details: { 
+        hasApiKey: !!apiKey, 
+        hasApiUrl: !!apiUrl, 
+        hasSupabaseUrl: !!supabaseUrl, 
+        hasServiceKey: !!supabaseServiceKey 
+      } 
+    }))
     return
   }
 
