@@ -4,7 +4,7 @@
     "notes": ""
   },
   "columns": [
-    {
+  {
     "table_name": "chat_messages",
     "column_name": "client_id",
     "data_type": "text",
@@ -119,6 +119,18 @@
     "udt_name": "timestamptz",
     "is_nullable": "NO",
     "column_default": "now()",
+    "constraint_name": null,
+    "constraint_type": null,
+    "foreign_table_name": null,
+    "foreign_column_name": null
+  },
+  {
+    "table_name": "items",
+    "column_name": "embedding",
+    "data_type": "USER-DEFINED",
+    "udt_name": "vector",
+    "is_nullable": "YES",
+    "column_default": null,
     "constraint_name": null,
     "constraint_type": null,
     "foreign_table_name": null,
@@ -249,6 +261,18 @@
     "column_name": "duration",
     "data_type": "bigint",
     "udt_name": "int8",
+    "is_nullable": "YES",
+    "column_default": null,
+    "constraint_name": null,
+    "constraint_type": null,
+    "foreign_table_name": null,
+    "foreign_column_name": null
+  },
+  {
+    "table_name": "transactions",
+    "column_name": "embedding",
+    "data_type": "USER-DEFINED",
+    "udt_name": "vector",
     "is_nullable": "YES",
     "column_default": null,
     "constraint_name": null,

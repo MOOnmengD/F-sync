@@ -663,10 +663,19 @@ export default function Home() {
         ).toISOString()
       }
 
-      const { error } = await supabase.from('transactions').insert(payload)
+      const { data: inserted, error } = await supabase.from('transactions').insert(payload).select('id').single()
       if (error) {
         setToast(error.message || '写入失败')
         return
+      }
+
+      // 异步触发向量化
+      if (inserted?.id) {
+        void fetch('/api/vectorize', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ transaction_id: inserted.id }),
+        })
       }
 
       removeOutbox(outboxId)
@@ -712,10 +721,19 @@ export default function Home() {
         mood,
       }
 
-      const { error } = await supabase.from('transactions').insert(payload)
+      const { data: inserted, error } = await supabase.from('transactions').insert(payload).select('id').single()
       if (error) {
         setToast(error.message || '写入失败')
         return
+      }
+
+      // 异步触发向量化
+      if (inserted?.id) {
+        void fetch('/api/vectorize', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ transaction_id: inserted.id }),
+        })
       }
 
       removeOutbox(outboxId)
