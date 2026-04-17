@@ -125,7 +125,11 @@ export default async function handler(req: any, res: any) {
 
         if (!embRes.ok) {
           const errText = await embRes.text()
-          results.push({ id: tx.id, success: false, error: `Embedding API failed: ${errText}` })
+          results.push({ 
+            id: tx.id, 
+            success: false, 
+            error: `Embedding API failed (Model: ${embeddingModel}): ${errText}` 
+          })
           errorCount++
           continue
         }

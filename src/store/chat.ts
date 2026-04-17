@@ -20,6 +20,7 @@ type ChatState = {
   setHasMore: (v: boolean) => void
   clearMessages: () => void
   syncMessages: () => Promise<void>
+  upsertMessage: (msg: ChatMessage) => void
 }
 
 export const useChatStore = create<ChatState>()(
@@ -28,6 +29,20 @@ export const useChatStore = create<ChatState>()(
       messages: [],
       isLoading: false,
       hasMore: false,
+
+      upsertMessage: (msg) => {
+        set((s) => {
+          const exists = s.messages.some(m => m.id === msg.id)
+          if (exists) {
+            return {
+              messages: s.messages.map(m => m.id === msg.id ? msg : m)
+            }
+          }
+          const next = [...s.messages, msg]
+          next.sort((a, b) => a.createdAt - b.createdAt)
+          return { messages: next }
+        })
+      },
 
       addMessage: (msg) => {
         const id = `${Date.now()}-${Math.random().toString(36).slice(2)}`
