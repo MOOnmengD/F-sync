@@ -1,5 +1,6 @@
-import { Menu, Send, Star } from 'lucide-react'
+import { Menu, Send, Star, Sparkles } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type PointerEvent } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { supabase } from '../supabaseClient'
 import { useUi } from '../store/ui'
 import type { QuickMode } from '../types/domain'
@@ -43,6 +44,7 @@ const accentHex: Record<(typeof modeMeta)[QuickMode]['accent'], string> = {
 }
 
 export default function Home() {
+  const navigate = useNavigate()
   const toggleDrawer = useUi((s) => s.toggleDrawer)
   const mode = useUi((s) => s.homeMode)
   const setMode = useUi((s) => s.setHomeMode)
@@ -749,7 +751,7 @@ export default function Home() {
         <div className="flex items-center justify-between">
           <IconButton label="打开导航" onClick={toggleDrawer} icon={<Menu size={18} />} />
           <div className="text-sm font-medium text-base-text">主页</div>
-          <div className="h-10 w-10" />
+          <IconButton label="AI 助手" onClick={() => navigate('/chat')} icon={<Sparkles size={18} />} />
         </div>
 
         <div
