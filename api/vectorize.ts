@@ -126,12 +126,17 @@ export default async function handler(req: any, res: any) {
         const embedding = embData.data?.[0]?.embedding
         
         if (embedding) {
-          const { error: updateError } = await supabaseAdmin
+          const { error: updateError, count } = await supabaseAdmin
             .from('transactions')
             .update({ embedding })
             .eq('id', tx.id)
+            .select() // 强制返回数据以确认更新成功
           
-          results.push({ id: tx.id, success: !updateError })
+          if (updateError || !count) {
+            results.push({ id: tx.id, success: false, error: updateError?.message || 'RLS policy blocked update' })
+          } else {
+            results.push({ id: tx.id, success: true })
+          }
         }
       } else {
         results.push({ id: tx.id, success: false, error: 'Embedding API failed' })
