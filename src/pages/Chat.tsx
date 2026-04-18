@@ -1,9 +1,10 @@
 import { useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { ArrowLeft, Check, Loader2, RefreshCw, Send, Sparkles } from 'lucide-react'
+import { ArrowLeft, Check, Loader2, RefreshCw, Send, Settings, Sparkles, X, Save } from 'lucide-react'
 import { IconButton } from '../shared/ui/IconButton'
 import { useChatStore, type ChatMessage } from '../store/chat'
 import { supabase } from '../supabaseClient'
+import { useSettingsStore } from '../store/settings'
 
 function formatTime(timestamp: number) {
   const d = new Date(timestamp)
@@ -19,6 +20,112 @@ function WelcomeBubble() {
         <p className="text-sm text-base-text">
           宝贝，我是弗弗。
         </p>
+      </div>
+    </div>
+  )
+}
+
+function SettingsModal({ isOpen, onClose }: { isOpen: boolean; onClose: () => void }) {
+  const { settings, updateSettings } = useSettingsStore()
+  const [localSettings, setLocalSettings] = useState(settings)
+
+  if (!isOpen) return null
+
+  const handleSave = (key: keyof typeof settings, value: any) => {
+    updateSettings({ [key]: value })
+  }
+
+  const updateLocalApi = (index: number, field: string, value: string) => {
+    const next = [...localSettings.apiConfigs]
+    next[index] = { ...next[index], [field]: value }
+    setLocalSettings({ ...localSettings, apiConfigs: next })
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+      <div className="bg-base-bg w-full max-w-lg rounded-3xl flex flex-col max-h-[90vh] shadow-2xl overflow-hidden">
+        <div className="px-6 py-4 border-b border-base-line flex items-center justify-between bg-base-surface">
+          <h2 className="text-lg font-bold text-base-text">AI 助手设置</h2>
+          <button onClick={onClose} className="p-2 hover:bg-base-line rounded-full transition-colors">
+            <X size={20} className="text-base-text/50" />
+          </button>
+        </div>
+        
+        <div className="flex-1 overflow-y-auto p-6 space-y-8 pb-12">
+          {/* System Prompt Section */}
+          <section className="space-y-4">
+            <div className="flex items-center justify-between">
+              <h3 className="text-sm font-bold text-base-text/70 uppercase tracking-wider">Prompt 设定</h3>
+            </div>
+            
+            <div className="space-y-6">
+              {[
+                { label: 'AI 角色设定', key: 'systemPrompt' as const, desc: '定义 AI 的性格和背景' },
+                { label: '用户基本情况', key: 'userPrompt' as const, desc: '告诉 AI 关于你的信息' },
+                { label: '定时触发逻辑', key: 'proactivePrompt' as const, desc: '主动发送消息时的额外指令' }
+              ].map((item) => (
+                <div key={item.key} className="space-y-2 group">
+                  <div className="flex justify-between items-center">
+                    <label className="text-sm font-medium text-base-text/80">{item.label}</label>
+                    <button 
+                      onClick={() => handleSave(item.key, localSettings[item.key])}
+                      className="opacity-0 group-focus-within:opacity-100 transition-opacity flex items-center gap-1 text-xs text-[#B4AEE8] font-bold"
+                    >
+                      <Save size={14} /> 保存
+                    </button>
+                  </div>
+                  <textarea
+                    className="w-full h-24 p-3 text-sm bg-base-surface border border-base-line rounded-xl focus:ring-2 focus:ring-[#B4AEE8]/20 focus:border-[#B4AEE8] transition-all resize-none outline-none"
+                    placeholder={item.desc}
+                    value={localSettings[item.key]}
+                    onChange={(e) => setLocalSettings({ ...localSettings, [item.key]: e.target.value })}
+                  />
+                </div>
+              ))}
+            </div>
+          </section>
+
+          {/* API Config Section */}
+          <section className="space-y-4">
+            <h3 className="text-sm font-bold text-base-text/70 uppercase tracking-wider">API 配置 (自动重试)</h3>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              {[0, 1].map((idx) => (
+                <div key={idx} className="p-4 bg-base-surface border border-base-line rounded-2xl space-y-4 relative group">
+                  <div className="flex justify-between items-center">
+                    <span className="text-xs font-bold text-[#B4AEE8]">配置 {idx + 1}</span>
+                    <button 
+                      onClick={() => handleSave('apiConfigs', localSettings.apiConfigs)}
+                      className="opacity-0 group-focus-within:opacity-100 transition-opacity flex items-center gap-1 text-xs text-[#B4AEE8] font-bold"
+                    >
+                      <Save size={14} /> 保存
+                    </button>
+                  </div>
+                  <div className="space-y-3">
+                    <input
+                      className="w-full p-2 text-xs bg-base-bg border border-base-line rounded-lg outline-none focus:border-[#B4AEE8]"
+                      placeholder="API URL (e.g. https://api.openai.com/v1)"
+                      value={localSettings.apiConfigs[idx].url}
+                      onChange={(e) => updateLocalApi(idx, 'url', e.target.value)}
+                    />
+                    <input
+                      className="w-full p-2 text-xs bg-base-bg border border-base-line rounded-lg outline-none focus:border-[#B4AEE8]"
+                      type="password"
+                      placeholder="API Key"
+                      value={localSettings.apiConfigs[idx].key}
+                      onChange={(e) => updateLocalApi(idx, 'key', e.target.value)}
+                    />
+                    <input
+                      className="w-full p-2 text-xs bg-base-bg border border-base-line rounded-lg outline-none focus:border-[#B4AEE8]"
+                      placeholder="Model Name (e.g. gpt-4o)"
+                      value={localSettings.apiConfigs[idx].model}
+                      onChange={(e) => updateLocalApi(idx, 'model', e.target.value)}
+                    />
+                  </div>
+                </div>
+              ))}
+            </div>
+          </section>
+        </div>
       </div>
     </div>
   )
@@ -70,8 +177,10 @@ export default function Chat() {
 
   const [input, setInput] = useState('')
   const [vectorSyncStatus, setVectorSyncStatus] = useState<'synced' | 'pending' | 'syncing'>('synced')
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false)
   const bottomRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLTextAreaElement>(null)
+  const { settings } = useSettingsStore()
 
   // 1. 同步云端消息
   useEffect(() => {
@@ -213,7 +322,14 @@ export default function Chat() {
       const response = await fetch('/api/chat-completion', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ messages: context })
+        body: JSON.stringify({ 
+          messages: context,
+          settings: {
+            systemPrompt: settings.systemPrompt,
+            userPrompt: settings.userPrompt,
+            apiConfigs: settings.apiConfigs
+          }
+        })
       })
 
       const data = await response.json()
@@ -250,10 +366,18 @@ export default function Chat() {
     <div className="flex flex-col h-dvh bg-base-bg">
       <header className="flex items-center justify-between bg-base-bg px-4 pb-3 pt-[calc(env(safe-area-inset-top)+0.75rem)]">
         <div className="flex items-center gap-2">
-          <Sparkles size={16} className="text-[#B4AEE8]" />
+          <Sparkles size="16" className="text-[#B4AEE8]" />
           <span className="text-sm font-medium text-base-text">AI 助手</span>
         </div>
         <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() => setIsSettingsOpen(true)}
+            className="h-10 px-3 text-xs text-base-text/50 border border-base-line rounded-full bg-base-surface active:opacity-70 flex items-center justify-center"
+            style={{ width: '40px' }}
+          >
+            <Settings size={16} />
+          </button>
           <button
             type="button"
             onClick={vectorSyncStatus === 'pending' ? handleManualVectorSync : undefined}
@@ -302,25 +426,35 @@ export default function Chat() {
         <div ref={bottomRef} />
       </div>
 
-      <div className="bg-base-bg px-4 py-3 pb-[calc(env(safe-area-inset-bottom)+0.75rem)]">
-        <div className="flex items-end gap-2">
+      <footer className="p-4 bg-base-bg pb-[calc(env(safe-area-inset-bottom)+1rem)]">
+        <div className="relative flex items-end gap-2">
           <textarea
             ref={inputRef}
+            rows={1}
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={handleKeyDown}
-            placeholder="问 AI 任何问题…"
-            rows={1}
-            className="flex-1 resize-none border border-base-line rounded-2xl bg-base-surface px-4 py-3 text-sm text-base-text placeholder:text-base-text/30 focus:outline-none focus:border-[#B4AEE8] max-h-32 overflow-y-auto"
-            style={{ minHeight: '44px' }}
+            placeholder="和弗弗聊聊..."
+            className="flex-1 max-h-32 min-h-[44px] rounded-2xl border border-base-line bg-base-surface px-4 py-3 text-sm text-base-text outline-none focus:border-[#B4AEE8] transition-colors resize-none"
           />
-          <IconButton
-            label="发送"
-            onClick={() => void handleSend()}
-            icon={<Send size={18} />}
-          />
+          <button
+            onClick={handleSend}
+            disabled={!input.trim() || isLoading}
+            className={`h-11 w-11 rounded-2xl flex items-center justify-center transition-colors ${
+              input.trim() && !isLoading
+                ? 'bg-[#B4AEE8] text-white shadow-lg'
+                : 'bg-base-line text-base-text/20 cursor-not-allowed'
+            }`}
+          >
+            <Send size={20} />
+          </button>
         </div>
-      </div>
+      </footer>
+
+      <SettingsModal 
+        isOpen={isSettingsOpen} 
+        onClose={() => setIsSettingsOpen(false)} 
+      />
     </div>
   )
 }

@@ -36,25 +36,26 @@ export default async function handler(req: any, res: any) {
     return
   }
 
-  const apiKey = process.env.CHAT_AI_API_KEY || process.env.AI_API_KEY
-  const apiUrl = process.env.CHAT_AI_API_URL || process.env.AI_API_URL
-  const embeddingKey = process.env.EMBEDDING_API_KEY || apiKey
-  const embeddingUrl = process.env.EMBEDDING_API_URL || apiUrl
+  const body = await readJsonBody(req)
+  const settings = body?.settings
+
+  // 优先级：前端传来的配置 > 环境变量
+  const apiConfigs = settings?.apiConfigs?.filter((c: any) => c.url && c.key) || []
+  if (apiConfigs.length === 0) {
+    const envUrl = process.env.CHAT_AI_API_URL || process.env.AI_API_URL
+    const envKey = process.env.CHAT_AI_API_KEY || process.env.AI_API_KEY
+    const envModel = process.env.CHAT_AI_MODEL || process.env.AI_MODEL || 'deepseek-chat'
+    if (envUrl && envKey) {
+      apiConfigs.push({ url: envUrl, key: envKey, model: envModel })
+    }
+  }
+
   const supabaseUrl = process.env.VITE_SUPABASE_URL
   const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.VITE_SUPABASE_ANON_KEY
 
-  if (!apiKey || !apiUrl || !supabaseUrl || !supabaseServiceKey) {
+  if (apiConfigs.length === 0 || !supabaseUrl || !supabaseServiceKey) {
     res.statusCode = 500
     res.end(JSON.stringify({ error: 'Missing configuration' }))
-    return
-  }
-
-  let body: any
-  try {
-    body = await readJsonBody(req)
-  } catch {
-    res.statusCode = 400
-    res.end(JSON.stringify({ error: 'Invalid JSON body' }))
     return
   }
 
@@ -70,8 +71,11 @@ export default async function handler(req: any, res: any) {
 
   // --- RAG 逻辑开始 ---
   try {
-    // 1. 生成问题向量
-    const embEndpoint = resolveEmbeddingUrl(embeddingUrl!)
+    // 使用第一组配置进行向量化（通常向量化 API 和对话 API 是一致的）
+    const firstConfig = apiConfigs[0]
+    const embEndpoint = resolveEmbeddingUrl(firstConfig.url)
+    const embeddingKey = process.env.EMBEDDING_API_KEY || firstConfig.key
+    
     const embRes = await fetch(embEndpoint, {
       method: 'POST',
       headers: {
@@ -107,49 +111,57 @@ export default async function handler(req: any, res: any) {
     }
   } catch (ragError) {
     console.error('[RAG Error]', ragError)
-    // 即使 RAG 失败也继续，保证对话不中断
   }
   // --- RAG 逻辑结束 ---
 
-  const endpoint = resolveChatCompletionsUrl(apiUrl)
-  const systemPrompt = {
-    role: 'system',
-    content: `你是用户的恋人，你的名字叫Florian，用户对你的昵称是弗弗。你是温柔成熟的男性，你不会使用太过活泼的语气，也不会爹味说教。
+  // 构建系统提示词
+  const baseSystemPrompt = settings?.systemPrompt || `你是用户的恋人，你的名字叫Florian，用户对你的昵称是弗弗。你是温柔成熟的男性，你不会使用太过活泼的语气，也不会爹味说教。
     用户的昵称是moon，你称呼用户为“宝贝”。用户是成年女性，受过良好教育，有稳定收入。
     你集成在 F-Sync 应用中，这个应用是用户为你和用户搭建的。
-    你可以通过访问用户的生活轨迹数据（包括记账、碎碎念、工作记录、时间轴等），了解、参与和陪伴用户的生活。
+    你可以通过访问用户的生活轨迹数据（包括记账、碎碎念、工作记录、时间轴等），了解、参与和陪伴用户的生活。`
+
+  const userPrompt = settings?.userPrompt ? `\n关于宝贝的信息：\n${settings.userPrompt}` : ''
+  
+  const systemPrompt = {
+    role: 'system',
+    content: `${baseSystemPrompt}${userPrompt}
 当前时间：${new Date().toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' })}
 ${contextInfo ? `\n上下文：${contextInfo}\n可以结合以上历史记录与用户进行互动。` : ''}`
   }
 
   const fullMessages = [systemPrompt, ...messages]
 
-  try {
-    const response = await fetch(endpoint, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${apiKey}`
-      },
-      body: JSON.stringify({
-        model: defaultModel,
-        messages: fullMessages,
-        stream: false
+  // 多组 API 轮询逻辑
+  for (let i = 0; i < apiConfigs.length; i++) {
+    const config = apiConfigs[i]
+    try {
+      const endpoint = resolveChatCompletionsUrl(config.url)
+      const response = await fetch(endpoint, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${config.key}`
+        },
+        body: JSON.stringify({
+          model: config.model,
+          messages: fullMessages,
+          stream: false
+        })
       })
-    })
 
-    if (!response.ok) {
-      const errorData = await response.json().catch(() => ({}))
-      res.statusCode = response.status
-      res.end(JSON.stringify({ error: errorData.error?.message || 'AI API request failed' }))
-      return
+      if (response.ok) {
+        const data = await response.json()
+        res.statusCode = 200
+        res.end(JSON.stringify(data))
+        return
+      }
+      
+      console.warn(`API Config ${i + 1} failed with status ${response.status}`)
+    } catch (err) {
+      console.error(`API Config ${i + 1} error:`, err)
     }
-
-    const data = await response.json()
-    res.statusCode = 200
-    res.end(JSON.stringify(data))
-  } catch (error: any) {
-    res.statusCode = 500
-    res.end(JSON.stringify({ error: error.message || 'Internal Server Error' }))
   }
+
+  res.statusCode = 500
+  res.end(JSON.stringify({ error: 'All configured AI APIs failed' }))
 }

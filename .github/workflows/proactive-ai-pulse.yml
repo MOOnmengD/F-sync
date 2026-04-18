@@ -2,8 +2,8 @@ name: Proactive AI Pulse
 
 on:
   schedule:
-    # 每小时运行一次 (UTC 时间，0 * * * * 表示整点)
-    - cron: '0 * * * *'
+    # 每 15 分钟运行一次，以应对 GitHub Actions 的延迟
+    - cron: '*/15 * * * *'
   workflow_dispatch: # 允许手动触发测试
 
 jobs:
