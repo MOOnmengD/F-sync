@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { ArrowLeft, Check, Loader2, RefreshCw, Send, Settings, Sparkles, X, Save, Eye, EyeOff, ClipboardPaste, Copy } from 'lucide-react'
+import { ArrowLeft, Check, Loader2, RefreshCw, Send, Settings, Sparkles, X, Save, Eye, EyeOff, ClipboardPaste, Copy, FileText } from 'lucide-react'
 import { IconButton } from '../shared/ui/IconButton'
 import { useChatStore, type ChatMessage } from '../store/chat'
 import { supabase } from '../supabaseClient'
@@ -20,6 +20,52 @@ function WelcomeBubble() {
         <p className="text-sm text-base-text">
           宝贝，我是弗弗。
         </p>
+      </div>
+    </div>
+  )
+}
+
+function ContextViewerModal({ isOpen, onClose, context }: { isOpen: boolean; onClose: () => void; context: any[] }) {
+  if (!isOpen) return null
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm">
+      <div className="bg-[#FDFCFB] w-full max-w-2xl rounded-3xl flex flex-col max-h-[90vh] shadow-2xl overflow-hidden border border-base-line">
+        <div className="px-6 py-4 border-b border-base-line flex items-center justify-between bg-[#F7F5F2]">
+          <h2 className="text-lg font-bold text-base-text">发送给 AI 的全量上下文</h2>
+          <button onClick={onClose} className="p-2 hover:bg-base-line rounded-full transition-colors">
+            <X size={20} className="text-base-text/50" />
+          </button>
+        </div>
+        
+        <div className="flex-1 overflow-y-auto p-6 space-y-4 font-mono text-xs">
+          {context.length > 0 ? (
+            context.map((msg, idx) => (
+              <div key={idx} className="p-3 bg-[#F7F5F2] border border-base-line rounded-xl space-y-1">
+                <div className="flex justify-between items-center border-b border-base-line/50 pb-1 mb-2">
+                  <span className={`font-bold ${
+                    msg.role === 'system' ? 'text-red-500' : 
+                    msg.role === 'user' ? 'text-blue-500' : 'text-green-500'
+                  }`}>
+                    {msg.role.toUpperCase()}
+                  </span>
+                  {msg.createdAt && (
+                    <span className="text-base-text/40">
+                      {new Date(msg.createdAt).toLocaleString()}
+                    </span>
+                  )}
+                </div>
+                <div className="whitespace-pre-wrap break-words text-base-text/80">
+                  {msg.content}
+                </div>
+              </div>
+            ))
+          ) : (
+            <div className="text-center py-10 text-base-text/30 italic">
+              暂无发送记录
+            </div>
+          )}
+        </div>
       </div>
     </div>
   )
@@ -231,6 +277,8 @@ export default function Chat() {
   const [input, setInput] = useState('')
   const [vectorSyncStatus, setVectorSyncStatus] = useState<'synced' | 'pending' | 'syncing'>('synced')
   const [isSettingsOpen, setIsSettingsOpen] = useState(false)
+  const [isContextOpen, setIsContextOpen] = useState(false)
+  const [lastFullContext, setLastFullContext] = useState<any[]>([])
   const bottomRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLTextAreaElement>(null)
   const { settings } = useSettingsStore()
@@ -367,9 +415,11 @@ export default function Chat() {
       // 3. 打包上下文
       const context = messages.slice(-CONTEXT_WINDOW).map(m => ({
         role: m.role,
-        content: m.content
+        content: m.content,
+        createdAt: m.createdAt
       }))
-      context.push({ role: 'user', content: text })
+      const userMessage = { role: 'user', content: text, createdAt: Date.now() }
+      context.push(userMessage)
 
       // 4. 调用 API
       const response = await fetch('/api/chat-completion', {
@@ -388,6 +438,14 @@ export default function Chat() {
       const data = await response.json()
       
       if (!response.ok) throw new Error(data.error || '请求失败')
+
+      // 如果后端返回了 fullMessages，则更新最后一次上下文
+      if (data.fullMessages) {
+        setLastFullContext(data.fullMessages)
+      } else {
+        // 降级：仅保存前端已知的
+        setLastFullContext(context)
+      }
 
       const aiContent = data.choices?.[0]?.message?.content || 'AI 暂时无法回答。'
       
@@ -457,6 +515,15 @@ export default function Chat() {
           >
             清空
           </button>
+          <button
+            type="button"
+            onClick={() => setIsContextOpen(true)}
+            className="h-10 px-3 text-xs text-base-text/50 border border-base-line rounded-full bg-base-surface active:opacity-70 flex items-center justify-center"
+            title="全量上下文显示"
+            style={{ width: '40px' }}
+          >
+            <FileText size={16} />
+          </button>
           <IconButton
             label="返回"
             onClick={() => navigate(-1)}
@@ -507,6 +574,11 @@ export default function Chat() {
       <SettingsModal 
         isOpen={isSettingsOpen} 
         onClose={() => setIsSettingsOpen(false)} 
+      />
+      <ContextViewerModal
+        isOpen={isContextOpen}
+        onClose={() => setIsContextOpen(false)}
+        context={lastFullContext}
       />
     </div>
   )
