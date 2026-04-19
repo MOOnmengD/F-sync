@@ -66,6 +66,16 @@ export default async function handler(req: any, res: any) {
     return
   }
 
+  // 为消息添加时间戳前缀，以便 AI 感知时间
+  const formattedMessages = messages.map((m: any) => {
+    if (m.role === 'system') return m
+    const timeStr = m.createdAt ? new Date(m.createdAt).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' }) : ''
+    return {
+      ...m,
+      content: timeStr ? `[时间: ${timeStr}]\n${m.content}` : m.content
+    }
+  })
+
   const userQuery = messages[messages.length - 1].content
   let contextInfo = ''
 
@@ -129,7 +139,7 @@ export default async function handler(req: any, res: any) {
 ${contextInfo ? `\n上下文：${contextInfo}\n可以结合以上历史记录与用户进行互动。` : ''}`
   }
 
-  const fullMessages = [systemPrompt, ...messages]
+  const fullMessages = [systemPrompt, ...formattedMessages]
 
   // 多组 API 轮询逻辑
   for (let i = 0; i < apiConfigs.length; i++) {
@@ -151,6 +161,8 @@ ${contextInfo ? `\n上下文：${contextInfo}\n可以结合以上历史记录与
 
       if (response.ok) {
         const data = await response.json()
+        // 将完整的上下文返回给前端，便于调试显示
+        data.fullMessages = fullMessages
         res.statusCode = 200
         res.end(JSON.stringify(data))
         return

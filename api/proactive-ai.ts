@@ -92,7 +92,10 @@ export default async function handler(req: any, res: any) {
       return `[${time}] [${log.type}] ${log.content || ''} ${log.finance_category || ''}`
     }).join('\n') || '暂无近期记录'
 
-    const chatSummary = [...(recentChats || [])].reverse().map(c => `${c.role}: ${c.content}`).join('\n') || '暂无对话历史'
+    const chatSummary = [...(recentChats || [])].reverse().map(c => {
+      const time = new Date(c.created_at).toLocaleString('zh-CN', { hour: '2-digit', minute: '2-digit' })
+      return `[${time}] ${c.role}: ${c.content}`
+    }).join('\n') || '暂无对话历史'
 
     const baseSystemPrompt = settings?.systemPrompt || `你叫Florian（昵称弗弗），是用户的恋人。用户叫moon（昵称宝贝）。你是一个温柔、成熟、体贴的男性。你现在集成在 F-Sync 应用中陪伴她。`
     const userPrompt = settings?.userPrompt ? `\n关于宝贝的信息：\n${settings.userPrompt}` : ''
