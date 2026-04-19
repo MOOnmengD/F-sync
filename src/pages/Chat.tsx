@@ -310,11 +310,19 @@ export default function Chat() {
 
     // 初始拉取最新云端消息（补齐离线时主动发送的消息）
     void (async () => {
-      const { data, error } = await client
+      const { data: { user } } = await client.auth.getUser()
+      
+      let query = client
         .from('chat_messages')
         .select('*')
+      
+      if (user) {
+        query = query.eq('user_id', user.id)
+      }
+
+      const { data, error } = await query
         .order('created_at', { ascending: false })
-        .limit(50)
+        .limit(100) // 增加拉取数量到 100 条
 
       if (!error && data) {
         data.reverse().forEach((msg: any) => {

@@ -56,12 +56,16 @@ export default async function handler(req: any, res: any) {
 
     // 2. 获取最新数据（近 12 小时的记录）
     const twelveHoursAgo = new Date(Date.now() - 12 * 60 * 60 * 1000).toISOString()
+    const targetUserId = process.env.PROACTIVE_USER_ID || "17bc4400-b67a-45b0-9366-0e689eedfa09"
     
     // 获取最新生活记录
     const { data: recentLogs } = await supabase
       .from('transactions')
       .select('*')
       .gte('created_at', twelveHoursAgo)
+      // 根据 RLS 策略，transactions 表似乎是针对特定用户硬编码的
+      // 但这里为了安全，还是尝试添加 user_id 过滤（如果该表有这个列的话）
+      // 实际上根据 schema.json，transactions 表没有 user_id 列，它是全量可见的或通过 RLS 硬编码 UUID 过滤的
       .order('created_at', { ascending: false })
       .limit(10)
 
@@ -69,6 +73,7 @@ export default async function handler(req: any, res: any) {
     const { data: recentChats } = await supabase
       .from('chat_messages')
       .select('*')
+      .eq('user_id', targetUserId) // 过滤为目标用户的消息
       .neq('role', 'system')
       .order('created_at', { ascending: false })
       .limit(30)
@@ -158,7 +163,7 @@ ${chatSummary}
           const { error: insertError } = await supabase
             .from('chat_messages')
             .insert({
-               user_id: "17bc4400-b67a-45b0-9366-0e689eedfa09",
+              user_id: targetUserId,
               role: 'assistant',
               content: aiContent,
               client_id: `proactive-${Date.now()}` // 标记为主动发送

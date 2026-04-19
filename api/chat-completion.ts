@@ -97,6 +97,12 @@ export default async function handler(req: any, res: any) {
   })
 
   const userQuery = messages[messages.length - 1].content
+  // 优化检索：如果用户当前提问较短，尝试结合上一轮对话增加上下文
+  let searchInput = userQuery
+  if (userQuery.length < 10 && messages.length >= 2) {
+    searchInput = `${messages[messages.length - 2].content} ${userQuery}`
+  }
+
   let contextInfo = ''
 
   // --- RAG 逻辑开始 ---
@@ -114,7 +120,7 @@ export default async function handler(req: any, res: any) {
       },
       body: JSON.stringify({
         model: embeddingModel,
-        input: userQuery
+        input: searchInput // 使用优化后的搜索词
       })
     })
 
@@ -127,7 +133,7 @@ export default async function handler(req: any, res: any) {
         const supabaseAdmin = createClient(supabaseUrl, supabaseServiceKey)
         const { data: matchedLogs, error: matchError } = await supabaseAdmin.rpc('match_life_logs', {
           query_embedding: queryEmbedding,
-          match_threshold: 0.5,
+          match_threshold: 0.3, // 降低阈值，从 0.5 改为 0.3
           match_count: 5
         })
 
@@ -136,6 +142,20 @@ export default async function handler(req: any, res: any) {
             const date = new Date(log.created_at).toLocaleDateString('zh-CN')
             return `[${date}] [${log.type}] ${log.content}`
           }).join('\n')
+        } else {
+          // 如果向量检索没找到，或者匹配度太低，则尝试获取最近的 5 条记录作为兜底
+          const { data: recentLogs } = await supabaseAdmin
+            .from('transactions')
+            .select('*')
+            .order('created_at', { ascending: false })
+            .limit(5)
+          
+          if (recentLogs && recentLogs.length > 0) {
+            contextInfo = '\n以下是最近的生活记录（供参考）：\n' + recentLogs.map((log: any) => {
+              const date = new Date(log.created_at).toLocaleDateString('zh-CN')
+              return `[${date}] [${log.type}] ${log.content}`
+            }).join('\n')
+          }
         }
       }
     }
