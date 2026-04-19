@@ -155,6 +155,7 @@ ${chatSummary}
           const { error: insertError } = await supabase
             .from('chat_messages')
             .insert({
+               user_id: "17bc4400-b67a-45b0-9366-0e689eedfa09",
               role: 'assistant',
               content: aiContent,
               client_id: `proactive-${Date.now()}` // 标记为主动发送
