@@ -89,12 +89,12 @@ export default async function handler(req: any, res: any) {
     // 3. 构建 AI Prompt
     const logsSummary = recentLogs?.map(log => {
       const time = new Date(log.created_at).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })
-      return `[${time}] [${log.type}] ${log.content || ''} ${log.finance_category || ''}`
+      return `- [${time}] [${log.type}] ${log.content || ''} ${log.finance_category || ''}`
     }).join('\n') || '暂无近期记录'
 
     const chatSummary = [...(recentChats || [])].reverse().map(c => {
       const time = new Date(c.created_at).toLocaleString('zh-CN', { hour: '2-digit', minute: '2-digit' })
-      return `[${time}] ${c.role}: ${c.content}`
+      return `- [${time}] ${c.role.toUpperCase()}: ${c.content}`
     }).join('\n') || '暂无对话历史'
 
     const baseSystemPrompt = settings?.systemPrompt || `你叫Florian（昵称弗弗），是用户的恋人。用户叫moon（昵称宝贝）。你是一个温柔、成熟、体贴的男性。你现在集成在 F-Sync 应用中陪伴她。`
