@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { ArrowLeft, Check, Loader2, RefreshCw, Send, Settings, Sparkles, X, Save } from 'lucide-react'
+import { ArrowLeft, Check, Loader2, RefreshCw, Send, Settings, Sparkles, X, Save, Eye, EyeOff, ClipboardPaste, Copy } from 'lucide-react'
 import { IconButton } from '../shared/ui/IconButton'
 import { useChatStore, type ChatMessage } from '../store/chat'
 import { supabase } from '../supabaseClient'
@@ -28,6 +28,7 @@ function WelcomeBubble() {
 function SettingsModal({ isOpen, onClose }: { isOpen: boolean; onClose: () => void }) {
   const { settings, updateSettings } = useSettingsStore()
   const [localSettings, setLocalSettings] = useState(settings)
+  const [showApiKeys, setShowApiKeys] = useState<Record<number, boolean>>({})
 
   if (!isOpen) return null
 
@@ -39,6 +40,25 @@ function SettingsModal({ isOpen, onClose }: { isOpen: boolean; onClose: () => vo
     const next = [...localSettings.apiConfigs]
     next[index] = { ...next[index], [field]: value }
     setLocalSettings({ ...localSettings, apiConfigs: next })
+  }
+
+  const toggleApiKeyVisibility = (index: number) => {
+    setShowApiKeys(prev => ({ ...prev, [index]: !prev[index] }))
+  }
+
+  const handlePaste = async (index: number) => {
+    try {
+      const text = await navigator.clipboard.readText()
+      updateLocalApi(index, 'key', text)
+    } catch (err) {
+      console.error('Paste failed:', err)
+      const text = prompt('请输入 API Key:')
+      if (text) updateLocalApi(index, 'key', text)
+    }
+  }
+
+  const handleCopy = (text: string) => {
+    navigator.clipboard.writeText(text)
   }
 
   return (
@@ -106,19 +126,52 @@ function SettingsModal({ isOpen, onClose }: { isOpen: boolean; onClose: () => vo
                       placeholder="API URL (e.g. https://api.openai.com/v1)"
                       value={localSettings.apiConfigs[idx].url}
                       onChange={(e) => updateLocalApi(idx, 'url', e.target.value)}
+                      inputMode="url"
+                      autoComplete="off"
                     />
-                    <input
-                      className="w-full p-2 text-xs bg-[#FDFCFB] border border-base-line rounded-lg outline-none focus:border-[#B4AEE8]"
-                      type="password"
-                      placeholder="API Key"
-                      value={localSettings.apiConfigs[idx].key}
-                      onChange={(e) => updateLocalApi(idx, 'key', e.target.value)}
-                    />
+                    <div className="relative group/key">
+                      <input
+                        className="w-full p-2 pr-20 text-xs bg-[#FDFCFB] border border-base-line rounded-lg outline-none focus:border-[#B4AEE8]"
+                        type={showApiKeys[idx] ? "text" : "password"}
+                        placeholder="API Key (可直接粘贴)"
+                        value={localSettings.apiConfigs[idx].key}
+                        onChange={(e) => updateLocalApi(idx, 'key', e.target.value)}
+                        inputMode="text"
+                        autoComplete="off"
+                      />
+                      <div className="absolute right-1 top-1/2 -translate-y-1/2 flex items-center gap-0.5">
+                        <button
+                          type="button"
+                          className="p-1.5 text-base-text/40 hover:text-[#B4AEE8] transition-colors"
+                          onClick={() => toggleApiKeyVisibility(idx)}
+                          title={showApiKeys[idx] ? "隐藏" : "显示"}
+                        >
+                          {showApiKeys[idx] ? <EyeOff size={14} /> : <Eye size={14} />}
+                        </button>
+                        <button
+                          type="button"
+                          className="p-1.5 text-base-text/40 hover:text-[#B4AEE8] transition-colors"
+                          onClick={() => handlePaste(idx)}
+                          title="粘贴"
+                        >
+                          <ClipboardPaste size={14} />
+                        </button>
+                        <button
+                          type="button"
+                          className="p-1.5 text-base-text/40 hover:text-[#B4AEE8] transition-colors"
+                          onClick={() => handleCopy(localSettings.apiConfigs[idx].key)}
+                          title="复制"
+                        >
+                          <Copy size={14} />
+                        </button>
+                      </div>
+                    </div>
                     <input
                       className="w-full p-2 text-xs bg-[#FDFCFB] border border-base-line rounded-lg outline-none focus:border-[#B4AEE8]"
                       placeholder="Model Name (e.g. gpt-4o)"
                       value={localSettings.apiConfigs[idx].model}
                       onChange={(e) => updateLocalApi(idx, 'model', e.target.value)}
+                      autoComplete="off"
                     />
                   </div>
                 </div>
