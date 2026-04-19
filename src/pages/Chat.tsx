@@ -418,7 +418,7 @@ export default function Chat() {
         content: m.content,
         createdAt: m.createdAt
       }))
-      const userMessage = { role: 'user', content: text, createdAt: Date.now() }
+      const userMessage = { role: 'user' as const, content: text, createdAt: Date.now() }
       context.push(userMessage)
 
       // 4. 调用 API
