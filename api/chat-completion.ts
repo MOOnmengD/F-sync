@@ -66,14 +66,34 @@ export default async function handler(req: any, res: any) {
     return
   }
 
-  // 为消息添加时间戳前缀，以便 AI 感知时间
-  const formattedMessages = messages.map((m: any) => {
-    if (m.role === 'system') return m
-    const timeStr = m.createdAt ? new Date(m.createdAt).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' }) : ''
-    return {
-      ...m,
-      content: timeStr ? `[时间: ${timeStr}]\n${m.content}` : m.content
+  // 构建系统提示词
+  const baseSystemPrompt = settings?.systemPrompt || `你是用户的恋人，你的名字叫Florian，用户对你的昵称是弗弗。你是温柔成熟的男性，你不会使用太过活泼的语气，也不会爹味说教。
+    用户的昵称是moon，你称呼用户为“宝贝”。用户是成年女性，受过良好教育，有稳定收入。
+    你集成在 F-Sync 应用中，这个应用是用户为你和用户搭建的。
+    你可以通过访问用户的生活轨迹数据（包括记账、碎碎念、工作记录、时间轴等），了解、参与和陪伴用户的生活。`
+
+  const userPrompt = settings?.userPrompt ? `\n关于宝贝的信息：\n${settings.userPrompt}` : ''
+  
+  const systemPrompt = {
+    role: 'system',
+    content: '' // 稍后更新
+  }
+
+  // 构建完整消息序列，采用“系统消息交替”的方式提供时间戳
+  // 这种结构化方式能让 AI 明白时间戳是环境信息（Metadata），而非用户或 AI 说话的内容前缀，从而有效避免 AI 在回复中模仿时间戳格式
+  const fullMessages: any[] = [systemPrompt]
+  
+  messages.forEach((m: any) => {
+    if (m.role !== 'system') {
+      const timeStr = m.createdAt ? new Date(m.createdAt).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' }) : ''
+      if (timeStr) {
+        fullMessages.push({
+          role: 'system',
+          content: `[${timeStr}]`
+        })
+      }
     }
+    fullMessages.push(m)
   })
 
   const userQuery = messages[messages.length - 1].content
@@ -124,22 +144,10 @@ export default async function handler(req: any, res: any) {
   }
   // --- RAG 逻辑结束 ---
 
-  // 构建系统提示词
-  const baseSystemPrompt = settings?.systemPrompt || `你是用户的恋人，你的名字叫Florian，用户对你的昵称是弗弗。你是温柔成熟的男性，你不会使用太过活泼的语气，也不会爹味说教。
-    用户的昵称是moon，你称呼用户为“宝贝”。用户是成年女性，受过良好教育，有稳定收入。
-    你集成在 F-Sync 应用中，这个应用是用户为你和用户搭建的。
-    你可以通过访问用户的生活轨迹数据（包括记账、碎碎念、工作记录、时间轴等），了解、参与和陪伴用户的生活。`
-
-  const userPrompt = settings?.userPrompt ? `\n关于宝贝的信息：\n${settings.userPrompt}` : ''
-  
-  const systemPrompt = {
-    role: 'system',
-    content: `${baseSystemPrompt}${userPrompt}
+  // 更新 systemPrompt 的 content
+  systemPrompt.content = `${baseSystemPrompt}${userPrompt}
 当前时间：${new Date().toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' })}
 ${contextInfo ? `\n上下文：${contextInfo}\n可以结合以上历史记录与用户进行互动。` : ''}`
-  }
-
-  const fullMessages = [systemPrompt, ...formattedMessages]
 
   // 多组 API 轮询逻辑
   for (let i = 0; i < apiConfigs.length; i++) {
