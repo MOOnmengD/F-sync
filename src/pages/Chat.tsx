@@ -42,9 +42,9 @@ function SettingsModal({ isOpen, onClose }: { isOpen: boolean; onClose: () => vo
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-      <div className="bg-base-bg w-full max-w-lg rounded-3xl flex flex-col max-h-[90vh] shadow-2xl overflow-hidden">
-        <div className="px-6 py-4 border-b border-base-line flex items-center justify-between bg-base-surface">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm">
+      <div className="bg-[#FDFCFB] w-full max-w-lg rounded-3xl flex flex-col max-h-[90vh] shadow-2xl overflow-hidden border border-base-line">
+        <div className="px-6 py-4 border-b border-base-line flex items-center justify-between bg-[#F7F5F2]">
           <h2 className="text-lg font-bold text-base-text">AI 助手设置</h2>
           <button onClick={onClose} className="p-2 hover:bg-base-line rounded-full transition-colors">
             <X size={20} className="text-base-text/50" />
@@ -75,7 +75,7 @@ function SettingsModal({ isOpen, onClose }: { isOpen: boolean; onClose: () => vo
                     </button>
                   </div>
                   <textarea
-                    className="w-full h-24 p-3 text-sm bg-base-surface border border-base-line rounded-xl focus:ring-2 focus:ring-[#B4AEE8]/20 focus:border-[#B4AEE8] transition-all resize-none outline-none"
+                    className="w-full h-24 p-3 text-sm bg-[#F7F5F2] border border-base-line rounded-xl focus:ring-2 focus:ring-[#B4AEE8]/20 focus:border-[#B4AEE8] transition-all resize-none outline-none"
                     placeholder={item.desc}
                     value={localSettings[item.key]}
                     onChange={(e) => setLocalSettings({ ...localSettings, [item.key]: e.target.value })}
@@ -90,7 +90,7 @@ function SettingsModal({ isOpen, onClose }: { isOpen: boolean; onClose: () => vo
             <h3 className="text-sm font-bold text-base-text/70 uppercase tracking-wider">API 配置 (自动重试)</h3>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
               {[0, 1].map((idx) => (
-                <div key={idx} className="p-4 bg-base-surface border border-base-line rounded-2xl space-y-4 relative group">
+                <div key={idx} className="p-4 bg-[#F7F5F2] border border-base-line rounded-2xl space-y-4 relative group">
                   <div className="flex justify-between items-center">
                     <span className="text-xs font-bold text-[#B4AEE8]">配置 {idx + 1}</span>
                     <button 
@@ -102,20 +102,20 @@ function SettingsModal({ isOpen, onClose }: { isOpen: boolean; onClose: () => vo
                   </div>
                   <div className="space-y-3">
                     <input
-                      className="w-full p-2 text-xs bg-base-bg border border-base-line rounded-lg outline-none focus:border-[#B4AEE8]"
+                      className="w-full p-2 text-xs bg-[#FDFCFB] border border-base-line rounded-lg outline-none focus:border-[#B4AEE8]"
                       placeholder="API URL (e.g. https://api.openai.com/v1)"
                       value={localSettings.apiConfigs[idx].url}
                       onChange={(e) => updateLocalApi(idx, 'url', e.target.value)}
                     />
                     <input
-                      className="w-full p-2 text-xs bg-base-bg border border-base-line rounded-lg outline-none focus:border-[#B4AEE8]"
+                      className="w-full p-2 text-xs bg-[#FDFCFB] border border-base-line rounded-lg outline-none focus:border-[#B4AEE8]"
                       type="password"
                       placeholder="API Key"
                       value={localSettings.apiConfigs[idx].key}
                       onChange={(e) => updateLocalApi(idx, 'key', e.target.value)}
                     />
                     <input
-                      className="w-full p-2 text-xs bg-base-bg border border-base-line rounded-lg outline-none focus:border-[#B4AEE8]"
+                      className="w-full p-2 text-xs bg-[#FDFCFB] border border-base-line rounded-lg outline-none focus:border-[#B4AEE8]"
                       placeholder="Model Name (e.g. gpt-4o)"
                       value={localSettings.apiConfigs[idx].model}
                       onChange={(e) => updateLocalApi(idx, 'model', e.target.value)}
