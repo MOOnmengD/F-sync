@@ -132,7 +132,7 @@ function SettingsModal({ isOpen, onClose }: { isOpen: boolean; onClose: () => vo
                     <div className="relative group/key">
                       <input
                         className="w-full p-2 pr-20 text-xs bg-[#FDFCFB] border border-base-line rounded-lg outline-none focus:border-[#B4AEE8]"
-                        type={showApiKeys[idx] ? "text" : "password"}
+                        type="text"
                         placeholder="API Key (可直接粘贴)"
                         value={localSettings.apiConfigs[idx].key}
                         onChange={(e) => updateLocalApi(idx, 'key', e.target.value)}
