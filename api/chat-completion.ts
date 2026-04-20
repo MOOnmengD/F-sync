@@ -17,6 +17,59 @@ function resolveEmbeddingUrl(base: string) {
   return `${trimmed}/embeddings`
 }
 
+/**
+ * 分析查询意图，提取时间范围和分类关键词
+ */
+function analyzeQueryIntent(query: string) {
+  const result = {
+    timeRange: null as string | null, // 'today', 'yesterday', 'week', 'month', 'year'
+    timeWindowHours: null as number | null, // 具体的小时数
+    categories: [] as string[], // 可能的分类关键词
+    isFoodRelated: false,
+    isPersonMention: false,
+    isMoodRelated: false
+  }
+  
+  const lowerQuery = query.toLowerCase()
+  
+  // 时间范围检测
+  if (lowerQuery.includes('今天') || lowerQuery.includes('今日')) {
+    result.timeRange = 'today'
+    result.timeWindowHours = 24
+  } else if (lowerQuery.includes('昨天')) {
+    result.timeRange = 'yesterday'
+    result.timeWindowHours = 48
+  } else if (lowerQuery.includes('最近') || lowerQuery.includes('近期') || lowerQuery.includes('这几天')) {
+    result.timeRange = 'week'
+    result.timeWindowHours = 168 // 7天
+  } else if (lowerQuery.includes('上周') || lowerQuery.includes('上星期')) {
+    result.timeRange = 'last_week'
+    result.timeWindowHours = 168
+  } else if (lowerQuery.includes('这个月') || lowerQuery.includes('本月')) {
+    result.timeRange = 'month'
+    result.timeWindowHours = 720 // 30天
+  } else if (lowerQuery.includes('今年')) {
+    result.timeRange = 'year'
+    result.timeWindowHours = 8760 // 365天
+  }
+  
+  // 分类关键词检测
+  const foodKeywords = ['吃', '喝', '饭', '餐', '菜', '餐厅', '外卖', '火锅', '咖啡', '茶', '酒']
+  const personKeywords = ['张三', '李四', '王五', '朋友', '同事', '家人', '妈妈', '爸爸'] // 可以扩展
+  const moodKeywords = ['心情', '情绪', '开心', '难过', '生气', '焦虑', '压力']
+  
+  result.isFoodRelated = foodKeywords.some(keyword => lowerQuery.includes(keyword))
+  result.isPersonMention = personKeywords.some(keyword => lowerQuery.includes(keyword))
+  result.isMoodRelated = moodKeywords.some(keyword => lowerQuery.includes(keyword))
+  
+  // 提取可能的分类
+  if (result.isFoodRelated) result.categories.push('餐饮')
+  if (result.isPersonMention) result.categories.push('人物')
+  if (result.isMoodRelated) result.categories.push('心情')
+  
+  return result
+}
+
 async function readJsonBody(req: any) {
   if (req.body) return req.body
   const chunks: Uint8Array[] = []
@@ -38,6 +91,7 @@ export default async function handler(req: any, res: any) {
 
   const body = await readJsonBody(req)
   const settings = body?.settings
+  const userId = body?.userId
 
   // 优先级：前端传来的配置 > 环境变量
   const apiConfigs = settings?.apiConfigs?.filter((c: any) => c.url && c.key) || []
@@ -97,6 +151,9 @@ export default async function handler(req: any, res: any) {
   })
 
   const userQuery = messages[messages.length - 1].content
+  // 分析查询意图（时间范围、分类等）
+  const queryIntent = analyzeQueryIntent(userQuery)
+  
   // 优化检索：如果用户当前提问较短，尝试结合上一轮对话增加上下文
   let searchInput = userQuery
   if (userQuery.length < 10 && messages.length >= 2) {
@@ -131,31 +188,91 @@ export default async function handler(req: any, res: any) {
       if (queryEmbedding) {
         // 2. 在 Supabase 中检索相关记录
         const supabaseAdmin = createClient(supabaseUrl, supabaseServiceKey)
+        
+        // 策略 1: 向量检索 (RAG)
+        let vectorResults: any[] = []
         const { data: matchedLogs, error: matchError } = await supabaseAdmin.rpc('match_life_logs', {
           query_embedding: queryEmbedding,
           match_threshold: 0.3, // 降低阈值，从 0.5 改为 0.3
           match_count: 5
         })
-
-        if (!matchError && matchedLogs && matchedLogs.length > 0) {
-          contextInfo = '\n以下是与你问题相关的历史记录：\n' + matchedLogs.map((log: any) => {
-            const date = new Date(log.created_at).toLocaleDateString('zh-CN')
-            return `[${date}] [${log.type}] ${log.content}`
-          }).join('\n')
-        } else {
-          // 如果向量检索没找到，或者匹配度太低，则尝试获取最近的 5 条记录作为兜底
-          const { data: recentLogs } = await supabaseAdmin
+        
+        if (!matchError && matchedLogs) {
+          vectorResults = matchedLogs
+        }
+        
+        // 策略 2: 全文检索 (关键词匹配)
+        let fullTextResults: any[] = []
+        try {
+          // 使用 websearch_to_tsquery 支持更自然的查询语法
+          const { data: fullTextData, error: fullTextError } = await supabaseAdmin
+            .from('transactions')
+            .select('*')
+            .filter('search_vector', 'fts', searchInput) // 使用全文搜索
+            .order('created_at', { ascending: false })
+            .limit(5)
+          
+          if (!fullTextError && fullTextData) {
+            fullTextResults = fullTextData
+          }
+        } catch (fullTextErr) {
+          // 如果 search_vector 列不存在或其他错误，静默失败
+          console.warn('[Full-text Search] 全文搜索可能未启用:', fullTextErr.message)
+        }
+        
+        // 策略 3: 时间顺序兜底 (如果前两种方法都没找到足够的结果)
+        let timeBasedResults: any[] = []
+        if (vectorResults.length === 0 && fullTextResults.length === 0) {
+          let timeBasedQuery = supabaseAdmin
             .from('transactions')
             .select('*')
             .order('created_at', { ascending: false })
             .limit(5)
           
-          if (recentLogs && recentLogs.length > 0) {
-            contextInfo = '\n以下是最近的生活记录（供参考）：\n' + recentLogs.map((log: any) => {
+          // 根据查询意图添加时间范围过滤
+          if (queryIntent.timeWindowHours) {
+            const timeAgo = new Date(Date.now() - queryIntent.timeWindowHours * 60 * 60 * 1000).toISOString()
+            timeBasedQuery = timeBasedQuery.gte('created_at', timeAgo)
+            console.log(`[Time Filter] 应用时间范围: ${queryIntent.timeWindowHours}小时 (从${timeAgo})`)
+          }
+          
+          const { data: recentLogs } = await timeBasedQuery
+          
+          if (recentLogs) {
+            timeBasedResults = recentLogs
+          }
+        }
+        
+        // 合并结果：优先向量检索，其次全文检索，最后时间顺序
+        // 去重：基于记录 ID
+        const allResultsMap = new Map()
+        
+        // 添加向量结果
+        vectorResults.forEach(log => allResultsMap.set(log.id, log))
+        // 添加全文结果（不覆盖向量结果）
+        fullTextResults.forEach(log => {
+          if (!allResultsMap.has(log.id)) {
+            allResultsMap.set(log.id, log)
+          }
+        })
+        // 添加时间结果（不覆盖前两种）
+        timeBasedResults.forEach(log => {
+          if (!allResultsMap.has(log.id)) {
+            allResultsMap.set(log.id, log)
+          }
+        })
+        
+        const finalResults = Array.from(allResultsMap.values())
+        
+        if (finalResults.length > 0) {
+          const sourceType = vectorResults.length > 0 ? '向量检索' : 
+                            fullTextResults.length > 0 ? '关键词检索' : '最近记录'
+          
+          contextInfo = `\n以下是与你问题相关的历史记录（来自${sourceType}）：\n` + 
+            finalResults.map((log: any) => {
               const date = new Date(log.created_at).toLocaleDateString('zh-CN')
               return `[${date}] [${log.type}] ${log.content}`
             }).join('\n')
-          }
         }
       }
     }
@@ -164,10 +281,69 @@ export default async function handler(req: any, res: any) {
   }
   // --- RAG 逻辑结束 ---
 
+  // 查询用户画像摘要（如果用户ID存在且已启用该功能）
+  let userProfileInfo = ''
+  if (userId && supabaseUrl && supabaseServiceKey) {
+    try {
+      const supabaseAdmin = createClient(supabaseUrl, supabaseServiceKey)
+      const { data: userProfiles, error: profileError } = await supabaseAdmin
+        .from('user_profiles')
+        .select('*')
+        .eq('user_id', userId)
+        .order('updated_at', { ascending: false })
+      
+      if (!profileError && userProfiles && userProfiles.length > 0) {
+        // 按类型组织摘要信息
+        const profileByType: Record<string, any> = {}
+        userProfiles.forEach(profile => {
+          profileByType[profile.profile_type] = profile.content
+        })
+        
+        // 构建可读的摘要文本
+        const profileTexts: string[] = []
+        
+        if (profileByType.diet_preferences && Object.keys(profileByType.diet_preferences).length > 0) {
+          const prefs = profileByType.diet_preferences
+          if (Array.isArray(prefs) && prefs.length > 0) {
+            profileTexts.push(`饮食偏好：${prefs.join('、')}`)
+          } else if (typeof prefs === 'object') {
+            profileTexts.push(`饮食偏好：${JSON.stringify(prefs)}`)
+          }
+        }
+        
+        if (profileByType.person_mentions && Object.keys(profileByType.person_mentions).length > 0) {
+          const persons = profileByType.person_mentions
+          if (typeof persons === 'object') {
+            const personList = Object.entries(persons).map(([name, relation]) => `${name}（${relation}）`).join('、')
+            profileTexts.push(`常提及的人物：${personList}`)
+          }
+        }
+        
+        if (profileByType.recent_moods && Array.isArray(profileByType.recent_moods) && profileByType.recent_moods.length > 0) {
+          profileTexts.push(`近期心情：${profileByType.recent_moods.join('、')}`)
+        }
+        
+        if (profileByType.spending_patterns && Object.keys(profileByType.spending_patterns).length > 0) {
+          const spending = profileByType.spending_patterns
+          if (typeof spending === 'object') {
+            const spendingList = Object.entries(spending).map(([category, pattern]) => `${category}（${pattern}）`).join('、')
+            profileTexts.push(`消费模式：${spendingList}`)
+          }
+        }
+        
+        if (profileTexts.length > 0) {
+          userProfileInfo = '\n用户画像摘要：' + profileTexts.join('；') + '。\n（你可以利用这些长期记忆更好地理解用户）'
+        }
+      }
+    } catch (profileErr) {
+      console.warn('[User Profile] 查询失败，可能表不存在:', profileErr.message)
+    }
+  }
+
   // 更新 systemPrompt 的 content
   systemPrompt.content = `${baseSystemPrompt}${userPrompt}
 当前时间：${new Date().toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' })}
-${contextInfo ? `\n上下文：${contextInfo}\n可以结合以上历史记录与用户进行互动。` : ''}`
+${contextInfo ? `\n上下文：${contextInfo}\n可以结合以上历史记录与用户进行互动。` : ''}${userProfileInfo}`
 
   // 多组 API 轮询逻辑
   for (let i = 0; i < apiConfigs.length; i++) {

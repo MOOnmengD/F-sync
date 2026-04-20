@@ -1,26 +1,15 @@
-import { Menu, Send, Star, Sparkles } from 'lucide-react'
-import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type PointerEvent } from 'react'
+import { Menu, Send, Sparkles } from 'lucide-react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { supabase } from '../supabaseClient'
 import { useUi } from '../store/ui'
 import type { QuickMode } from '../types/domain'
 import { IconButton } from '../shared/ui/IconButton'
 import { PillButton } from '../shared/ui/PillButton'
-
-type TimelineKind = '睡眠' | '生活' | '工作' | '娱乐'
-
-type TimingType = 'sleep' | 'life' | 'work' | 'play'
-
-function pad2(n: number) {
-  return String(n).padStart(2, '0')
-}
-
-function formatDurationHm(ms: number) {
-  const totalMin = Math.max(0, Math.floor(ms / 60000))
-  const hh = Math.floor(totalMin / 60)
-  const mm = totalMin % 60
-  return `${pad2(hh)}:${pad2(mm)}`
-}
+import { RepurchaseIndexPill } from '../shared/ui/RepurchaseIndexPill'
+import { useTimeline, TIMELINE_KINDS } from '../hooks/useTimeline'
+import { extractDate, formatCompactDateTime } from '../utils/dateUtils'
+import { extractAmount, pickItemNameFallback, formatAmount } from '../utils/amountUtils'
 
 const modeMeta: Record<
   QuickMode,
@@ -68,134 +57,15 @@ export default function Home() {
   const [lastFinanceTx, setLastFinanceTx] = useState<LastFinanceTx | null>(null)
   const [reviewTargetId, setReviewTargetId] = useState<string | null>(null)
 
-  const timelineStorageKey = 'fsync.timeline.active.v1'
-  const timelineKinds = useMemo(() => ['睡眠', '生活', '工作', '娱乐'] as const, [])
-  const [timelineKind, setTimelineKind] = useState<TimelineKind | null>(null)
-  const [timelineRunning, setTimelineRunning] = useState(false)
-  const [timelineStartAt, setTimelineStartAt] = useState<number | null>(null)
-  const [timelineTick, setTimelineTick] = useState(0)
-
-  const timingTypeByKind: Record<TimelineKind, TimingType> = useMemo(
-    () => ({
-      睡眠: 'sleep',
-      生活: 'life',
-      工作: 'work',
-      娱乐: 'play',
-    }),
-    [],
-  )
-
-  const kindByTimingType: Record<TimingType, TimelineKind> = useMemo(
-    () => ({
-      sleep: '睡眠',
-      life: '生活',
-      work: '工作',
-      play: '娱乐',
-    }),
-    [],
-  )
-
-  useEffect(() => {
-    const raw = localStorage.getItem(timelineStorageKey)
-    if (!raw) return
-    try {
-      const parsed = JSON.parse(raw) as { timing_type?: unknown; start_time?: unknown } | null
-      const timingType = typeof parsed?.timing_type === 'string' ? parsed.timing_type : ''
-      const startTime = typeof parsed?.start_time === 'string' ? parsed.start_time : ''
-      if (!timingType || !startTime) {
-        localStorage.removeItem(timelineStorageKey)
-        return
-      }
-      if (!['sleep', 'life', 'work', 'play'].includes(timingType)) {
-        localStorage.removeItem(timelineStorageKey)
-        return
-      }
-      const ms = Date.parse(startTime)
-      if (!Number.isFinite(ms)) {
-        localStorage.removeItem(timelineStorageKey)
-        return
-      }
-
-      setTimelineKind(kindByTimingType[timingType as TimingType])
-      setTimelineStartAt(ms)
-      setTimelineRunning(true)
-    } catch {
-      localStorage.removeItem(timelineStorageKey)
-    }
-  }, [kindByTimingType])
-
-  useEffect(() => {
-    if (!timelineRunning) return
-    const id = window.setInterval(() => setTimelineTick((t) => t + 1), 1000)
-    return () => window.clearInterval(id)
-  }, [timelineRunning])
-
-  const timelineElapsedMs = useMemo(() => {
-    if (!timelineRunning || timelineStartAt === null) return 0
-    return Math.max(0, Date.now() - timelineStartAt)
-  }, [timelineRunning, timelineStartAt, timelineTick])
-
-  const timelineDurationLabel = useMemo(() => formatDurationHm(timelineElapsedMs), [timelineElapsedMs])
-
-  const writeTiming = async (input: { timingType: TimingType; startMs: number; endMs: number }) => {
-    const client = supabase
-    if (!client) {
-      setToast('未配置 Supabase')
-      return false
-    }
-    const duration = Math.max(0, Math.floor((input.endMs - input.startMs) / 1000))
-    const payload = {
-      type: 'timing',
-      content: '',
-      timing_type: input.timingType,
-      start_time: new Date(input.startMs).toISOString(),
-      end_time: new Date(input.endMs).toISOString(),
-      duration,
-    }
-
-    const { error } = await client.from('transactions').insert(payload)
-    if (error) {
-      setToast(error.message || '写入失败')
-      return false
-    }
-    return true
-  }
-
-  const handleTimelineStart = () => {
-    if (timelineRunning) return
-    if (!timelineKind) {
-      setToast('请先选择计时类型')
-      return
-    }
-    const now = Date.now()
-    localStorage.setItem(
-      timelineStorageKey,
-      JSON.stringify({ timing_type: timingTypeByKind[timelineKind], start_time: new Date(now).toISOString() }),
-    )
-    setTimelineStartAt(now)
-    setTimelineRunning(true)
-  }
-
-  const handleTimelineStop = () => {
-    if (!timelineRunning || timelineStartAt === null) return
-    setTimelineRunning(false)
-    setTimelineStartAt(null)
-    localStorage.removeItem(timelineStorageKey)
-
-    if (!timelineKind) return
-    const endMs = Date.now()
-    void (async () => {
-      await writeTiming({ timingType: timingTypeByKind[timelineKind], startMs: timelineStartAt, endMs })
-    })()
-  }
-
-  const handleTimelineCancel = () => {
-    if (!timelineRunning) return
-    setTimelineRunning(false)
-    setTimelineStartAt(null)
-    setTimelineKind(null)
-    localStorage.removeItem(timelineStorageKey)
-  }
+  const {
+    kind: timelineKind,
+    running: timelineRunning,
+    durationLabel: timelineDurationLabel,
+    handleStart: handleTimelineStart,
+    handleStop: handleTimelineStop,
+    handleCancel: handleTimelineCancel,
+    handleKindChange,
+  } = useTimeline(setToast)
 
   const makeClientId = () => {
     const cryptoAny = crypto as unknown as { randomUUID?: () => string } | undefined
@@ -232,14 +102,12 @@ export default function Home() {
 
   const addOutbox = (entry: OutboxEntry) => {
     const prev = loadOutbox()
-    const merged = [...prev, entry]
-    saveOutbox(merged)
+    saveOutbox([...prev, entry])
   }
 
   const removeOutbox = (id: string) => {
     const prev = loadOutbox()
-    const next = prev.filter((e) => e?.id !== id)
-    saveOutbox(next)
+    saveOutbox(prev.filter((e) => e?.id !== id))
   }
 
   const parseTransactionByAi = async (raw: string) => {
@@ -305,7 +173,8 @@ export default function Home() {
     const brandSnapshot =
       typeof (data as any)?.brand_snapshot === 'string' ? (data as any).brand_snapshot : null
     const txNecessity = (data as any)?.necessity ?? null
-    const txRepurchaseIndex = typeof (data as any)?.repurchase_index === 'number' ? (data as any).repurchase_index : 0
+    const txRepurchaseIndex =
+      typeof (data as any)?.repurchase_index === 'number' ? (data as any).repurchase_index : 0
 
     if (!itemId) {
       setLastFinanceTx({
@@ -386,26 +255,18 @@ export default function Home() {
 
     const channel = client
       .channel('home-last-finance')
-      .on(
-        'postgres_changes',
-        { event: 'INSERT', schema: 'public', table: 'transactions' },
-        (payload) => {
-          const next = payload.new as any
-          if (!next?.id || !next?.created_at) return
-          if (next.type !== '记账') return
-          void safeFetch()
-        },
-      )
-      .on(
-        'postgres_changes',
-        { event: 'UPDATE', schema: 'public', table: 'transactions' },
-        (payload) => {
-          const next = payload.new as any
-          if (!next?.id || !next?.created_at) return
-          if (next.type !== '记账') return
-          void safeFetch()
-        },
-      )
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'transactions' }, (payload) => {
+        const next = payload.new as any
+        if (!next?.id || !next?.created_at) return
+        if (next.type !== '记账') return
+        void safeFetch()
+      })
+      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'transactions' }, (payload) => {
+        const next = payload.new as any
+        if (!next?.id || !next?.created_at) return
+        if (next.type !== '记账') return
+        void safeFetch()
+      })
       .subscribe()
 
     return () => {
@@ -455,7 +316,8 @@ export default function Home() {
     if (!lastFinanceTx) return null
     const txReview = typeof lastFinanceTx.review === 'string' ? lastFinanceTx.review : ''
     if (txReview.trim()) return null
-    const metaReview = typeof lastFinanceTx.ai_metadata?.review === 'string' ? lastFinanceTx.ai_metadata.review : ''
+    const metaReview =
+      typeof lastFinanceTx.ai_metadata?.review === 'string' ? lastFinanceTx.ai_metadata.review : ''
     if (metaReview.trim()) return null
     return lastFinanceTx
   }, [lastFinanceTx, mode])
@@ -496,10 +358,7 @@ export default function Home() {
       const nextAiMetadata: Record<string, unknown> = { ...currentAiMetadata }
       if (reviewText) nextAiMetadata.review = reviewText
 
-      const payload: Record<string, unknown> = {
-        ai_metadata: nextAiMetadata,
-      }
-
+      const payload: Record<string, unknown> = { ai_metadata: nextAiMetadata }
       if (reviewText) payload.review = reviewText
       if (category) payload.finance_category = category
       if (necessity !== null) payload.necessity = necessity === 'need'
@@ -519,8 +378,6 @@ export default function Home() {
       if (itemId) {
         const itemUpdatePatch: Record<string, unknown> = {}
         if (reviewText) itemUpdatePatch.last_review = reviewText
-        // Optional: could also update some 'last_repurchase_index' if it existed in items table
-
         if (Object.keys(itemUpdatePatch).length > 0) {
           await supabase.from('items').update(itemUpdatePatch).eq('id', itemId)
         }
@@ -580,12 +437,7 @@ export default function Home() {
       const detailsText = typeof parsed.details === 'string' ? parsed.details.trim() : ''
       const details = detailsText ? detailsText : null
 
-      const aiMetadata: Record<string, unknown> = {
-        item_name: itemName,
-        brand,
-        details,
-        review: reviewText,
-      }
+      const aiMetadata: Record<string, unknown> = { item_name: itemName, brand, details, review: reviewText }
       const contentToStore = raw
 
       const { data: existingItem, error: findError } = await supabase
@@ -604,11 +456,7 @@ export default function Home() {
       if (!itemId) {
         const { data: created, error: createError } = await supabase
           .from('items')
-          .insert({
-            item_name: itemName,
-            last_review: reviewText,
-            brand,
-          })
+          .insert({ item_name: itemName, last_review: reviewText, brand })
           .select('id')
           .single()
 
@@ -623,7 +471,6 @@ export default function Home() {
         if (reviewText) updatePatch.last_review = reviewText
 
         const { error: updateError } = await supabase.from('items').update(updatePatch).eq('id', itemId)
-
         if (updateError) {
           setToast(updateError.message || '更新 item 失败')
           return
@@ -656,10 +503,7 @@ export default function Home() {
           dateResult.date.year,
           dateResult.date.month - 1,
           dateResult.date.day,
-          12,
-          0,
-          0,
-          0,
+          12, 0, 0, 0,
         ).toISOString()
       }
 
@@ -669,7 +513,6 @@ export default function Home() {
         return
       }
 
-      // 异步触发向量化
       if (inserted?.id) {
         void fetch('/api/vectorize', {
           method: 'POST',
@@ -711,23 +554,13 @@ export default function Home() {
 
     setSending(true)
     try {
-      const payload: {
-        type: string
-        content: string
-        mood: string
-      } = {
-        type: 'whisper',
-        content: raw,
-        mood,
-      }
-
+      const payload = { type: 'whisper', content: raw, mood }
       const { data: inserted, error } = await supabase.from('transactions').insert(payload).select('id').single()
       if (error) {
         setToast(error.message || '写入失败')
         return
       }
 
-      // 异步触发向量化
       if (inserted?.id) {
         void fetch('/api/vectorize', {
           method: 'POST',
@@ -772,49 +605,47 @@ export default function Home() {
           <IconButton label="AI 助手" onClick={() => navigate('/chat')} icon={<Sparkles size={18} />} />
         </div>
 
-        <div
-          className="mt-4 rounded-2xl bg-base-surface p-2"
-        >
+        <div className="mt-4 rounded-2xl bg-base-surface p-2">
           <div className="flex flex-wrap gap-2">
-          <PillButton
-            label="记账"
-            active={mode === 'finance'}
-            onClick={() => setMode('finance')}
-            accent={modeMeta.finance.accent}
-          />
-          <PillButton
-            label="点评"
-            active={mode === 'review'}
-            onClick={() => setMode('review')}
-            accent={modeMeta.review.accent}
-          />
-          <PillButton
-            label="碎碎念"
-            active={mode === 'note'}
-            onClick={() => {
-              setMode('note')
-              setMood('😐')
-            }}
-            accent={modeMeta.note.accent}
-          />
-          <PillButton
-            label="工作"
-            active={mode === 'work'}
-            onClick={() => setMode('work')}
-            accent={modeMeta.work.accent}
-          />
-          <PillButton
-            label="收藏"
-            active={mode === 'save'}
-            onClick={() => setMode('save')}
-            accent={modeMeta.save.accent}
-          />
-          <PillButton
-            label="时间轴"
-            active={mode === 'timeline'}
-            onClick={() => setMode('timeline')}
-            accent="timeline"
-          />
+            <PillButton
+              label="记账"
+              active={mode === 'finance'}
+              onClick={() => setMode('finance')}
+              accent={modeMeta.finance.accent}
+            />
+            <PillButton
+              label="点评"
+              active={mode === 'review'}
+              onClick={() => setMode('review')}
+              accent={modeMeta.review.accent}
+            />
+            <PillButton
+              label="碎碎念"
+              active={mode === 'note'}
+              onClick={() => {
+                setMode('note')
+                setMood('😐')
+              }}
+              accent={modeMeta.note.accent}
+            />
+            <PillButton
+              label="工作"
+              active={mode === 'work'}
+              onClick={() => setMode('work')}
+              accent={modeMeta.work.accent}
+            />
+            <PillButton
+              label="收藏"
+              active={mode === 'save'}
+              onClick={() => setMode('save')}
+              accent={modeMeta.save.accent}
+            />
+            <PillButton
+              label="时间轴"
+              active={mode === 'timeline'}
+              onClick={() => setMode('timeline')}
+              accent="timeline"
+            />
           </div>
         </div>
       </header>
@@ -831,53 +662,13 @@ export default function Home() {
             style={{ borderColor: '#F2DEBD' }}
           >
             <div className="grid grid-cols-4 gap-2">
-              {timelineKinds.map((k) => {
+              {TIMELINE_KINDS.map((k) => {
                 const active = timelineKind === k
                 return (
                   <button
                     key={k}
                     type="button"
-                    onClick={() => {
-                      if (!timelineRunning) {
-                        setTimelineKind(active ? null : k)
-                        return
-                      }
-                      if (k === timelineKind) return
-                      if (!timelineKind || timelineStartAt === null) {
-                        const now = Date.now()
-                        setTimelineKind(k)
-                        setTimelineStartAt(now)
-                        localStorage.setItem(
-                          timelineStorageKey,
-                          JSON.stringify({
-                            timing_type: timingTypeByKind[k],
-                            start_time: new Date(now).toISOString(),
-                          }),
-                        )
-                        return
-                      }
-
-                      const prevKind = timelineKind
-                      const prevStartAt = timelineStartAt
-                      const now = Date.now()
-
-                      setTimelineKind(k)
-                      setTimelineStartAt(now)
-                      localStorage.setItem(
-                        timelineStorageKey,
-                        JSON.stringify({
-                          timing_type: timingTypeByKind[k],
-                          start_time: new Date(now).toISOString(),
-                        }),
-                      )
-                      void (async () => {
-                        await writeTiming({
-                          timingType: timingTypeByKind[prevKind],
-                          startMs: prevStartAt,
-                          endMs: now,
-                        })
-                      })()
-                    }}
+                    onClick={() => handleKindChange(k)}
                     className={`rounded-full border border-base-line px-4 py-2 text-sm active:opacity-70 ${
                       active ? 'text-base-text' : 'bg-transparent text-base-muted'
                     }`}
@@ -1019,7 +810,6 @@ export default function Home() {
                     setRepurchaseIndex(0)
                   } else {
                     setReviewTargetId(pendingReviewTx.id)
-                    // Pre-populate
                     setCategory(pendingReviewTx.finance_category as any)
                     setNecessity(
                       pendingReviewTx.necessity === null
@@ -1176,205 +966,4 @@ type LastFinanceTx = {
 
 function isRecord(v: unknown): v is Record<string, unknown> {
   return Boolean(v) && typeof v === 'object' && !Array.isArray(v)
-}
-
-function parseAmountToken(token: string): number | null {
-  const t = token.trim().replace(/[,，]/g, '')
-  const m = t.match(/^(?:¥|￥)?(\d+(?:\.\d+)?)(?:元|块)?$/)
-  if (!m) return null
-  const n = Number(m[1])
-  return Number.isFinite(n) ? n : null
-}
-
-function extractAmount(source: string): { amount: number | null; rest: string } {
-  const s = source.replace(/\u3000/g, ' ').replace(/\s+/g, ' ').trim()
-  if (!s) return { amount: null, rest: '' }
-  const parts = s.split(' ').filter(Boolean)
-  if (parts.length === 0) return { amount: null, rest: '' }
-
-  const leading = parseAmountToken(parts[0] ?? '')
-  if (leading !== null) {
-    return { amount: leading, rest: parts.slice(1).join(' ') }
-  }
-
-  const trailing = parseAmountToken(parts[parts.length - 1] ?? '')
-  if (trailing !== null) {
-    return { amount: trailing, rest: parts.slice(0, -1).join(' ') }
-  }
-
-  return { amount: null, rest: s }
-}
-
-function pickItemNameFallback(source: string): string | null {
-  const tokens = source.split(/\s+/g).filter(Boolean)
-  for (const token of tokens) {
-    if (parseAmountToken(token) !== null) continue
-    return token
-  }
-  return null
-}
-
-function formatCompactDateTime(iso: string) {
-  const t = Date.parse(iso)
-  if (!Number.isFinite(t)) return iso
-  const d = new Date(t)
-  const now = new Date()
-  const sameDay =
-    d.getFullYear() === now.getFullYear() &&
-    d.getMonth() === now.getMonth() &&
-    d.getDate() === now.getDate()
-  const time = new Intl.DateTimeFormat('zh-CN', { hour: '2-digit', minute: '2-digit' }).format(d)
-  if (sameDay) return time
-  const date = new Intl.DateTimeFormat('zh-CN', { month: 'numeric', day: 'numeric' }).format(d)
-  return `${date} ${time}`
-}
-
-function formatAmount(amount: number | null) {
-  if (amount === null || amount === undefined) return '—'
-  if (!Number.isFinite(amount)) return '—'
-  return `¥${amount.toFixed(2)}`
-}
-
-function RepurchaseIndexPill({
-  value,
-  onChange,
-}: {
-  value: number
-  onChange: (v: number) => void
-}) {
-  const starsRef = useRef<HTMLDivElement | null>(null)
-  const dragRef = useRef<{ pointerId: number | null }>({ pointerId: null })
-
-  const clamp = (n: number, min: number, max: number) => Math.min(max, Math.max(min, n))
-  const setFromClientX = (clientX: number) => {
-    const el = starsRef.current
-    if (!el) return
-    const rect = el.getBoundingClientRect()
-    const rel = clientX - rect.left
-    const ratio = rect.width > 0 ? rel / rect.width : 0
-    const next = clamp(Math.ceil(ratio * 5), 0, 5)
-    onChange(next)
-  }
-
-  const handlePointerDown = (e: PointerEvent<HTMLDivElement>) => {
-    if (e.pointerType === 'mouse' && e.button !== 0) return
-    e.preventDefault()
-    dragRef.current.pointerId = e.pointerId
-    e.currentTarget.setPointerCapture(e.pointerId)
-    setFromClientX(e.clientX)
-  }
-
-  const handlePointerMove = (e: PointerEvent<HTMLDivElement>) => {
-    if (dragRef.current.pointerId !== e.pointerId) return
-    setFromClientX(e.clientX)
-  }
-
-  const endDrag = (e: PointerEvent<HTMLDivElement>) => {
-    if (dragRef.current.pointerId !== e.pointerId) return
-    dragRef.current.pointerId = null
-  }
-
-  return (
-    <div
-      className="flex select-none items-center gap-2 rounded-full border border-base-line bg-base-bg px-3 py-2 text-xs text-base-muted"
-      role="group"
-      aria-label="回购指数"
-    >
-      <span className="whitespace-nowrap">回购指数</span>
-      <div
-        ref={starsRef}
-        className="flex items-center gap-1"
-        role="slider"
-        aria-label="回购指数评分"
-        aria-valuemin={0}
-        aria-valuemax={5}
-        aria-valuenow={value}
-        tabIndex={0}
-        style={{ touchAction: 'none' }}
-        onPointerDown={handlePointerDown}
-        onPointerMove={handlePointerMove}
-        onPointerUp={endDrag}
-        onPointerCancel={endDrag}
-        onKeyDown={(e: KeyboardEvent<HTMLDivElement>) => {
-          if (e.key === 'ArrowLeft' || e.key === 'ArrowDown') {
-            e.preventDefault()
-            onChange(clamp(value - 1, 0, 5))
-          }
-          if (e.key === 'ArrowRight' || e.key === 'ArrowUp') {
-            e.preventDefault()
-            onChange(clamp(value + 1, 0, 5))
-          }
-          if (e.key === 'Home') {
-            e.preventDefault()
-            onChange(0)
-          }
-          if (e.key === 'End') {
-            e.preventDefault()
-            onChange(5)
-          }
-        }}
-      >
-        {Array.from({ length: 5 }, (_, i) => {
-          const n = i + 1
-          const selected = value >= n
-          return (
-            <Star
-              key={n}
-              size={14}
-              strokeWidth={2}
-              color={selected ? '#CFF3E5' : '#D1D5DB'}
-              fill={selected ? '#CFF3E5' : 'none'}
-            />
-          )
-        })}
-      </div>
-    </div>
-  )
-}
-
-function extractDate(
-  source: string,
-  now: Date,
-): { date: { year: number; month: number; day: number } | null; rest: string } {
-  const s = source
-
-  if (/(^|\s)昨天(\s|$)/.test(s)) {
-    const d = new Date(now)
-    d.setDate(d.getDate() - 1)
-    return {
-      date: { year: d.getFullYear(), month: d.getMonth() + 1, day: d.getDate() },
-      rest: s.replace(/(^|\s)昨天(\s|$)/g, ' ').trim(),
-    }
-  }
-
-  if (/(^|\s)今天(\s|$)/.test(s)) {
-    return {
-      date: { year: now.getFullYear(), month: now.getMonth() + 1, day: now.getDate() },
-      rest: s.replace(/(^|\s)今天(\s|$)/g, ' ').trim(),
-    }
-  }
-
-  const ymd = s.match(/(\d{4})年(\d{1,2})月(\d{1,2})日/)
-  if (ymd) {
-    const year = Number(ymd[1])
-    const month = Number(ymd[2])
-    const day = Number(ymd[3])
-    return {
-      date: { year, month, day },
-      rest: s.replace(ymd[0], ' ').trim(),
-    }
-  }
-
-  const md = s.match(/(\d{1,2})月(\d{1,2})日/)
-  if (md) {
-    const year = now.getFullYear()
-    const month = Number(md[1])
-    const day = Number(md[2])
-    return {
-      date: { year, month, day },
-      rest: s.replace(md[0], ' ').trim(),
-    }
-  }
-
-  return { date: null, rest: s }
 }

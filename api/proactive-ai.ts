@@ -9,6 +9,129 @@ function resolveChatCompletionsUrl(base: string) {
   return `${trimmed}/chat/completions`
 }
 
+/**
+ * 异步更新用户画像摘要
+ * 不阻塞主动消息发送，失败时仅记录错误
+ */
+async function updateUserProfileSummary(params: {
+  supabase: any,
+  userId: string,
+  recentLogs: any[],
+  recentChats: any[],
+  apiConfigs: any[],
+  settings?: any
+}) {
+  const { supabase, userId, recentLogs, recentChats, apiConfigs, settings } = params
+  
+  try {
+    // 如果没有足够的数据，跳过摘要更新
+    if (recentLogs.length === 0 && recentChats.length === 0) {
+      console.log('[Profile Summary] 无足够数据，跳过摘要更新')
+      return
+    }
+    
+    // 构建摘要生成提示词
+    const summaryPrompt = `你是一个专门分析用户生活记录的 AI 助手。请根据以下数据，生成结构化的用户画像摘要。
+    
+用户最近的生活记录（最近12小时）：
+${recentLogs.map(log => `- [${log.type}] ${log.content} ${log.finance_category ? `(${log.finance_category})` : ''}`).join('\n') || '暂无记录'}
+
+用户最近的对话（最近30条）：
+${recentChats.map(c => `- ${c.role}: ${c.content}`).join('\n') || '暂无对话'}
+
+请生成以下类型的结构化摘要（JSON格式）：
+1. "diet_preferences": 饮食偏好（从记账记录中提取，如常吃菜系、偏好口味）
+2. "person_mentions": 常提及的人物（从碎碎念和对话中提取，记录人物名称和关系）
+3. "recent_moods": 近期心情趋势（从碎碎念中提取情绪变化）
+4. "spending_patterns": 消费模式（从记账记录中提取消费类别和时间规律）
+
+输出要求：仅输出一个纯 JSON 对象，不要有任何额外的解释或标记。
+示例格式：
+{
+  "diet_preferences": ["喜欢吃辣", "常点外卖"],
+  "person_mentions": {"张三": "同事", "李四": "朋友"},
+  "recent_moods": ["平静", "有点焦虑"],
+  "spending_patterns": {"餐饮": "高频", "购物": "低频"}
+}`
+
+    // 使用第一组 API 配置生成摘要
+    const config = apiConfigs[0]
+    const endpoint = resolveChatCompletionsUrl(config.url)
+    
+    const aiRes = await fetch(endpoint, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${config.key}`
+      },
+      body: JSON.stringify({
+        model: config.model,
+        messages: [{ role: 'system', content: summaryPrompt }],
+        temperature: 0.3, // 较低温度以获得更稳定的 JSON 输出
+        response_format: { type: "json_object" } // 请求 JSON 格式输出（如果 API 支持）
+      })
+    })
+    
+    if (!aiRes.ok) {
+      const errorText = await aiRes.text()
+      throw new Error(`摘要生成 API 失败: ${aiRes.status} ${errorText}`)
+    }
+    
+    const aiData = await aiRes.json()
+    const summaryJsonStr = aiData.choices?.[0]?.message?.content
+    
+    if (!summaryJsonStr) {
+      throw new Error('AI 未返回有效摘要内容')
+    }
+    
+    // 解析 JSON
+    let summaryData
+    try {
+      summaryData = JSON.parse(summaryJsonStr)
+    } catch (parseError) {
+      console.error('[Profile Summary] JSON 解析失败:', parseError, '原始内容:', summaryJsonStr)
+      // 尝试提取 JSON（如果 AI 添加了额外文本）
+      const jsonMatch = summaryJsonStr.match(/\{[\s\S]*\}/)
+      if (jsonMatch) {
+        summaryData = JSON.parse(jsonMatch[0])
+      } else {
+        throw new Error('无法解析 JSON 响应')
+      }
+    }
+    
+    // 更新数据库（每种类型单独存储，便于后续检索）
+    const profileTypes = ['diet_preferences', 'person_mentions', 'recent_moods', 'spending_patterns']
+    
+    for (const profileType of profileTypes) {
+      const content = summaryData[profileType] || {}
+      
+      // 使用 upsert 更新或插入记录
+      const { error: upsertError } = await supabase
+        .from('user_profiles')
+        .upsert({
+          user_id: userId,
+          profile_type: profileType,
+          content: content,
+          updated_at: new Date().toISOString()
+        }, {
+          onConflict: 'user_id,profile_type'
+        })
+      
+      if (upsertError) {
+        console.error(`[Profile Summary] 更新 ${profileType} 失败:`, upsertError)
+      } else {
+        console.log(`[Profile Summary] ${profileType} 更新成功`)
+      }
+    }
+    
+    console.log('[Profile Summary] 用户画像摘要更新完成')
+    
+  } catch (error: any) {
+    // 摘要生成失败不应影响主动消息功能
+    console.error('[Profile Summary] 错误:', error.message)
+  }
+}
+
 export default async function handler(req: any, res: any) {
   // 1. 验证 Cron 密钥，防止恶意请求
   const authHeader = req.headers.authorization || req.headers.get?.('Authorization')
@@ -38,6 +161,7 @@ export default async function handler(req: any, res: any) {
 
     // 尝试从 body 获取设置（如果 GitHub Action 支持传参）
     const body = req.body || {}
+    const force = body.force === true // 强制发送标志，用于测试
     const settings = body.settings
 
     const apiConfigs = settings?.apiConfigs?.filter((c: any) => c.url && c.key) || []
@@ -83,7 +207,7 @@ export default async function handler(req: any, res: any) {
     const msSinceLastChat = Date.now() - lastChatTime
     const hoursSinceLastChat = Math.floor(msSinceLastChat / (1000 * 60 * 60))
 
-    if (msSinceLastChat < 60 * 60 * 1000) {
+    if (!force && msSinceLastChat < 60 * 60 * 1000) {
       return res.status(200).json({ 
         message: 'Chatted recently, skip proactive pulse.',
         lastChatTime: recentChats?.[0]?.created_at,
@@ -114,6 +238,16 @@ export default async function handler(req: any, res: any) {
 - 当前时间（如果是深夜提醒她睡觉，如果是饭点问她有没有好好吃饭）
 - 如果已经很久没聊天了（超过 4 小时），即使没有新记录，也可以简单表达思念或关心。`
 
+    const outputInstruction = force
+      ? `输出要求：
+- 必须输出一条关心或问候宝贝的话（不超过30字）。
+- 不要输出 "SKIP"。
+- 不要输出任何解释。`
+      : `输出要求：
+- 如果觉得有必要说话，直接输出给宝贝的话。
+- 如果觉得没必要（例如现在是深夜且宝贝没有新记录，或者刚聊完没多久），输出 "SKIP"。
+- 不要输出任何解释。`
+
     const prompt = `${baseSystemPrompt}${userPrompt}
 现在是 ${new Date().toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' })}。
 距离你们上次对话已经过去了 ${hoursSinceLastChat} 小时。
@@ -126,10 +260,7 @@ ${logsSummary}
 你们之前的对话：
 ${chatSummary}
 
-输出要求：
-- 如果觉得有必要说话，直接输出给宝贝的话。
-- 如果觉得没必要（例如现在是深夜且宝贝没有新记录，或者刚聊完没多久），输出 "SKIP"。
-- 不要输出任何解释。`
+${outputInstruction}`
 
     // 4. 调用 AI (支持多组 API 轮询)
     let lastError = null
@@ -158,7 +289,7 @@ ${chatSummary}
         const aiData = await aiRes.json()
         const aiContent = aiData.choices?.[0]?.message?.content?.trim()
 
-        if (aiContent && aiContent !== 'SKIP' && !aiContent.includes('SKIP')) {
+        if (aiContent && (force || (aiContent !== 'SKIP' && !aiContent.includes('SKIP')))) {
           // 5. 写入数据库
           const { error: insertError } = await supabase
             .from('chat_messages')
@@ -171,13 +302,35 @@ ${chatSummary}
 
           if (insertError) throw insertError
 
-          return res.status(200).json({ 
+          // 异步更新用户画像摘要（不阻塞响应）
+          void updateUserProfileSummary({
+            supabase,
+            userId: targetUserId,
+            recentLogs: recentLogs || [],
+            recentChats: recentChats || [],
+            apiConfigs,
+            settings
+          })
+
+
+
+        return res.status(200).json({ 
             message: 'Proactive message sent', 
             content: aiContent,
             hoursSinceLastChat,
             apiUsed: i + 1
           })
         }
+
+        // 异步更新用户画像摘要（即使AI决定跳过）
+        void updateUserProfileSummary({
+          supabase,
+          userId: targetUserId,
+          recentLogs: recentLogs || [],
+          recentChats: recentChats || [],
+          apiConfigs,
+          settings
+        })
 
         return res.status(200).json({ 
           message: 'AI decided to skip',
