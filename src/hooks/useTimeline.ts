@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { supabase } from '../supabaseClient'
-import { formatDurationHm } from '../utils/dateUtils'
+import { formatDurationHms, formatDurationLabel } from '../utils/dateUtils'
 
 export type TimelineKind = '睡眠' | '生活' | '工作' | '娱乐'
 
@@ -24,8 +24,8 @@ const KIND_BY_TIMING_TYPE: Record<TimingType, TimelineKind> = {
   play: '娱乐',
 }
 
-export function useTimeline(onToast: (msg: string) => void) {
-  const [kind, setKind] = useState<TimelineKind | null>(null)
+export function useTimeline(onToast: (msg: string) => void, onRecordSaved?: () => void) {
+  const [kind, setKind] = useState<TimelineKind>(TIMELINE_KINDS[0])
   const [running, setRunning] = useState(false)
   const [startAt, setStartAt] = useState<number | null>(null)
   const [tick, setTick] = useState(0)
@@ -69,7 +69,7 @@ export function useTimeline(onToast: (msg: string) => void) {
     return Math.max(0, Date.now() - startAt)
   }, [running, startAt, tick])
 
-  const durationLabel = useMemo(() => formatDurationHm(elapsedMs), [elapsedMs])
+  const durationLabel = useMemo(() => formatDurationHms(elapsedMs), [elapsedMs])
 
   const writeTiming = async (input: { timingType: TimingType; startMs: number; endMs: number }) => {
     const client = supabase
@@ -96,10 +96,6 @@ export function useTimeline(onToast: (msg: string) => void) {
 
   const handleStart = () => {
     if (running) return
-    if (!kind) {
-      onToast('请先选择计时类型')
-      return
-    }
     const now = Date.now()
     localStorage.setItem(
       STORAGE_KEY,
@@ -111,29 +107,37 @@ export function useTimeline(onToast: (msg: string) => void) {
 
   const handleStop = () => {
     if (!running || startAt === null) return
+    const endMs = Date.now()
+    const durationMs = endMs - startAt
+    const savedKind = kind
+    const savedStartAt = startAt
     setRunning(false)
     setStartAt(null)
     localStorage.removeItem(STORAGE_KEY)
-    if (!kind) return
-    const endMs = Date.now()
-    void writeTiming({ timingType: TIMING_TYPE_BY_KIND[kind], startMs: startAt, endMs })
+    void (async () => {
+      const ok = await writeTiming({ timingType: TIMING_TYPE_BY_KIND[savedKind], startMs: savedStartAt, endMs })
+      if (ok) {
+        onToast(`已保存 ${savedKind} ${formatDurationLabel(durationMs)}`)
+        onRecordSaved?.()
+      }
+    })()
   }
 
   const handleCancel = () => {
     if (!running) return
     setRunning(false)
     setStartAt(null)
-    setKind(null)
+    setKind(TIMELINE_KINDS[0])
     localStorage.removeItem(STORAGE_KEY)
   }
 
   const handleKindChange = (k: TimelineKind) => {
     if (!running) {
-      setKind(kind === k ? null : k)
+      setKind(k)
       return
     }
     if (k === kind) return
-    if (!kind || startAt === null) {
+    if (startAt === null) {
       const now = Date.now()
       setKind(k)
       setStartAt(now)
@@ -145,6 +149,7 @@ export function useTimeline(onToast: (msg: string) => void) {
     }
     const prevKind = kind
     const prevStartAt = startAt
+    const durationMs = Date.now() - prevStartAt
     const now = Date.now()
     setKind(k)
     setStartAt(now)
@@ -152,7 +157,13 @@ export function useTimeline(onToast: (msg: string) => void) {
       STORAGE_KEY,
       JSON.stringify({ timing_type: TIMING_TYPE_BY_KIND[k], start_time: new Date(now).toISOString() }),
     )
-    void writeTiming({ timingType: TIMING_TYPE_BY_KIND[prevKind], startMs: prevStartAt, endMs: now })
+    void (async () => {
+      const ok = await writeTiming({ timingType: TIMING_TYPE_BY_KIND[prevKind], startMs: prevStartAt, endMs: now })
+      if (ok) {
+        onToast(`已保存 ${prevKind} ${formatDurationLabel(durationMs)}`)
+        onRecordSaved?.()
+      }
+    })()
   }
 
   return {

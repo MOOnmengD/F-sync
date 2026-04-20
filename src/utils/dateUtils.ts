@@ -58,6 +58,32 @@ export function formatCompactDateTime(iso: string) {
   return `${date} ${time}`
 }
 
+export function formatDurationHms(ms: number): string {
+  const totalSec = Math.max(0, Math.floor(ms / 1000))
+  const hh = Math.floor(totalSec / 3600)
+  const mm = Math.floor((totalSec % 3600) / 60)
+  const ss = totalSec % 60
+  return `${pad2(hh)}:${pad2(mm)}:${pad2(ss)}`
+}
+
+export function formatDurationLabel(ms: number): string {
+  const totalMin = Math.max(0, Math.floor(ms / 60000))
+  const hh = Math.floor(totalMin / 60)
+  const mm = totalMin % 60
+  if (hh === 0) return `${mm}min`
+  if (mm === 0) return `${hh}h`
+  return `${hh}h${mm}min`
+}
+
+export function getMondayOfWeek(date: Date): Date {
+  const d = new Date(date)
+  const day = d.getDay()
+  const diff = day === 0 ? -6 : 1 - day
+  d.setDate(d.getDate() + diff)
+  d.setHours(0, 0, 0, 0)
+  return d
+}
+
 export function extractDate(
   source: string,
   now: Date,
