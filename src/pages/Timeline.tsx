@@ -4,19 +4,21 @@ import { supabase } from '../supabaseClient'
 import { IconButton } from '../shared/ui/IconButton'
 import { useUi } from '../store/ui'
 import { useTimeline, TIMELINE_KINDS } from '../hooks/useTimeline'
+import { WeeklyTimeline } from '../components/WeeklyTimeline'
 
 export default function Timeline() {
   const toggleDrawer = useUi((s) => s.toggleDrawer)
   const accent = '#F2DEBD'
 
   const [toast, setToast] = useState<string | null>(null)
+  const [refreshKey, setRefreshKey] = useState(0)
 
   const { kind, running, durationLabel, handleStart, handleStop, handleCancel, handleKindChange } =
-    useTimeline(setToast)
+    useTimeline(setToast, () => setRefreshKey((k) => k + 1))
 
   useEffect(() => {
     if (!toast) return
-    const id = window.setTimeout(() => setToast(null), 1200)
+    const id = window.setTimeout(() => setToast(null), 2500)
     return () => window.clearTimeout(id)
   }, [toast])
 
@@ -25,7 +27,7 @@ export default function Timeline() {
     'rounded-full border border-base-line bg-base-bg px-4 py-2 text-sm text-base-text active:opacity-70 whitespace-nowrap disabled:opacity-40 disabled:active:opacity-40'
 
   return (
-    <div className="mx-auto min-h-dvh max-w-[480px] bg-base-bg px-4 pb-[220px] text-base-text">
+    <div className="mx-auto min-h-dvh max-w-[480px] bg-base-bg px-4 pb-[240px] text-base-text">
       <header className="sticky top-0 z-20 -mx-4 bg-base-bg/95 px-4 pb-3 pt-4 backdrop-blur-sm">
         <div className="flex items-center justify-between">
           <IconButton label="打开导航" onClick={toggleDrawer} icon={<Menu size={18} />} />
@@ -39,6 +41,10 @@ export default function Timeline() {
           未配置 Supabase（请设置 VITE_SUPABASE_URL / VITE_SUPABASE_ANON_KEY）
         </div>
       )}
+
+      <div className="mt-4">
+        <WeeklyTimeline refreshKey={refreshKey} />
+      </div>
 
       <div
         className="fixed left-1/2 z-40 w-full max-w-[480px] -translate-x-1/2 px-4"
@@ -67,7 +73,7 @@ export default function Timeline() {
               开始
             </button>
 
-            <div className="min-w-0 flex-1 text-center text-sm font-bold" style={{ color: '#E49F5E' }}>
+            <div className="min-w-0 flex-1 text-center font-mono text-sm font-bold" style={{ color: '#E49F5E' }}>
               {durationLabel}
             </div>
 
