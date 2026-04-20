@@ -163,22 +163,24 @@ export default async function handler(req: any, res: any) {
   let contextInfo = ''
 
   // --- RAG 逻辑开始 ---
+  const supabaseAdmin = createClient(supabaseUrl, supabaseServiceKey)
+  let vectorResults: any[] = []
+  let fullTextResults: any[] = []
+  let timeBasedResults: any[] = []
+
+  // 策略 1: 向量检索 (独立 try/catch，失败不影响后续策略)
   try {
-    // 使用第一组配置进行向量化（通常向量化 API 和对话 API 是一致的）
     const firstConfig = apiConfigs[0]
     const embEndpoint = resolveEmbeddingUrl(firstConfig.url)
     const embeddingKey = process.env.EMBEDDING_API_KEY || firstConfig.key
-    
+
     const embRes = await fetch(embEndpoint, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         'Authorization': `Bearer ${embeddingKey}`
       },
-      body: JSON.stringify({
-        model: embeddingModel,
-        input: searchInput // 使用优化后的搜索词
-      })
+      body: JSON.stringify({ model: embeddingModel, input: searchInput })
     })
 
     if (embRes.ok) {
@@ -186,98 +188,77 @@ export default async function handler(req: any, res: any) {
       const queryEmbedding = embData.data?.[0]?.embedding
 
       if (queryEmbedding) {
-        // 2. 在 Supabase 中检索相关记录
-        const supabaseAdmin = createClient(supabaseUrl, supabaseServiceKey)
-        
-        // 策略 1: 向量检索 (RAG)
-        let vectorResults: any[] = []
         const { data: matchedLogs, error: matchError } = await supabaseAdmin.rpc('match_life_logs', {
           query_embedding: queryEmbedding,
-          match_threshold: 0.3, // 降低阈值，从 0.5 改为 0.3
+          match_threshold: 0.3,
           match_count: 5
         })
-        
         if (!matchError && matchedLogs) {
           vectorResults = matchedLogs
         }
-        
-        // 策略 2: 全文检索 (关键词匹配)
-        let fullTextResults: any[] = []
-        try {
-          // 使用 websearch_to_tsquery 支持更自然的查询语法
-          const { data: fullTextData, error: fullTextError } = await supabaseAdmin
-            .from('transactions')
-            .select('*')
-            .filter('search_vector', 'fts', searchInput) // 使用全文搜索
-            .order('created_at', { ascending: false })
-            .limit(5)
-          
-          if (!fullTextError && fullTextData) {
-            fullTextResults = fullTextData
-          }
-        } catch (fullTextErr) {
-          // 如果 search_vector 列不存在或其他错误，静默失败
-          console.warn('[Full-text Search] 全文搜索可能未启用:', fullTextErr.message)
-        }
-        
-        // 策略 3: 时间顺序兜底 (如果前两种方法都没找到足够的结果)
-        let timeBasedResults: any[] = []
-        if (vectorResults.length === 0 && fullTextResults.length === 0) {
-          let timeBasedQuery = supabaseAdmin
-            .from('transactions')
-            .select('*')
-            .order('created_at', { ascending: false })
-            .limit(5)
-          
-          // 根据查询意图添加时间范围过滤
-          if (queryIntent.timeWindowHours) {
-            const timeAgo = new Date(Date.now() - queryIntent.timeWindowHours * 60 * 60 * 1000).toISOString()
-            timeBasedQuery = timeBasedQuery.gte('created_at', timeAgo)
-            console.log(`[Time Filter] 应用时间范围: ${queryIntent.timeWindowHours}小时 (从${timeAgo})`)
-          }
-          
-          const { data: recentLogs } = await timeBasedQuery
-          
-          if (recentLogs) {
-            timeBasedResults = recentLogs
-          }
-        }
-        
-        // 合并结果：优先向量检索，其次全文检索，最后时间顺序
-        // 去重：基于记录 ID
-        const allResultsMap = new Map()
-        
-        // 添加向量结果
-        vectorResults.forEach(log => allResultsMap.set(log.id, log))
-        // 添加全文结果（不覆盖向量结果）
-        fullTextResults.forEach(log => {
-          if (!allResultsMap.has(log.id)) {
-            allResultsMap.set(log.id, log)
-          }
-        })
-        // 添加时间结果（不覆盖前两种）
-        timeBasedResults.forEach(log => {
-          if (!allResultsMap.has(log.id)) {
-            allResultsMap.set(log.id, log)
-          }
-        })
-        
-        const finalResults = Array.from(allResultsMap.values())
-        
-        if (finalResults.length > 0) {
-          const sourceType = vectorResults.length > 0 ? '向量检索' : 
-                            fullTextResults.length > 0 ? '关键词检索' : '最近记录'
-          
-          contextInfo = `\n以下是与你问题相关的历史记录（来自${sourceType}）：\n` + 
-            finalResults.map((log: any) => {
-              const date = new Date(log.created_at).toLocaleDateString('zh-CN')
-              return `[${date}] [${log.type}] ${log.content}`
-            }).join('\n')
-        }
       }
     }
-  } catch (ragError) {
-    console.error('[RAG Error]', ragError)
+  } catch (embError: any) {
+    console.warn('[Vector Search] embedding 失败，跳过向量检索:', embError.message)
+  }
+
+  // 策略 2: 全文检索 (独立执行，不依赖 embedding)
+  try {
+    const { data: fullTextData, error: fullTextError } = await supabaseAdmin
+      .from('transactions')
+      .select('*')
+      .filter('search_vector', 'fts', searchInput)
+      .order('created_at', { ascending: false })
+      .limit(5)
+
+    if (!fullTextError && fullTextData) {
+      fullTextResults = fullTextData
+    }
+  } catch (fullTextErr: any) {
+    console.warn('[Full-text Search] 全文搜索可能未启用:', fullTextErr.message)
+  }
+
+  // 策略 3: 时间顺序兜底 (前两种都无结果时执行)
+  if (vectorResults.length === 0 && fullTextResults.length === 0) {
+    try {
+      let timeBasedQuery = supabaseAdmin
+        .from('transactions')
+        .select('*')
+        .order('created_at', { ascending: false })
+        .limit(5)
+
+      if (queryIntent.timeWindowHours) {
+        const timeAgo = new Date(Date.now() - queryIntent.timeWindowHours * 60 * 60 * 1000).toISOString()
+        timeBasedQuery = timeBasedQuery.gte('created_at', timeAgo)
+        console.log(`[Time Filter] 应用时间范围: ${queryIntent.timeWindowHours}小时 (从${timeAgo})`)
+      }
+
+      const { data: recentLogs } = await timeBasedQuery
+      if (recentLogs) {
+        timeBasedResults = recentLogs
+      }
+    } catch (timeErr: any) {
+      console.warn('[Time Search] 时间查询失败:', timeErr.message)
+    }
+  }
+
+  // 合并去重
+  const allResultsMap = new Map()
+  vectorResults.forEach(log => allResultsMap.set(log.id, log))
+  fullTextResults.forEach(log => { if (!allResultsMap.has(log.id)) allResultsMap.set(log.id, log) })
+  timeBasedResults.forEach(log => { if (!allResultsMap.has(log.id)) allResultsMap.set(log.id, log) })
+
+  const finalResults = Array.from(allResultsMap.values())
+
+  if (finalResults.length > 0) {
+    const sourceType = vectorResults.length > 0 ? '向量检索' :
+                      fullTextResults.length > 0 ? '关键词检索' : '最近记录'
+
+    contextInfo = `\n以下是与你问题相关的历史记录（来自${sourceType}）：\n` +
+      finalResults.map((log: any) => {
+        const date = new Date(log.created_at).toLocaleDateString('zh-CN')
+        return `[${date}] [${log.type}] ${log.content}`
+      }).join('\n')
   }
   // --- RAG 逻辑结束 ---
 

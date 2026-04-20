@@ -161,7 +161,6 @@ export default async function handler(req: any, res: any) {
 
     // 尝试从 body 获取设置（如果 GitHub Action 支持传参）
     const body = req.body || {}
-    const force = body.force === true // 强制发送标志，用于测试
     const settings = body.settings
 
     const apiConfigs = settings?.apiConfigs?.filter((c: any) => c.url && c.key) || []
@@ -207,7 +206,7 @@ export default async function handler(req: any, res: any) {
     const msSinceLastChat = Date.now() - lastChatTime
     const hoursSinceLastChat = Math.floor(msSinceLastChat / (1000 * 60 * 60))
 
-    if (!force && msSinceLastChat < 60 * 60 * 1000) {
+    if (msSinceLastChat < 60 * 60 * 1000) {
       return res.status(200).json({ 
         message: 'Chatted recently, skip proactive pulse.',
         lastChatTime: recentChats?.[0]?.created_at,
@@ -238,16 +237,6 @@ export default async function handler(req: any, res: any) {
 - 当前时间（如果是深夜提醒她睡觉，如果是饭点问她有没有好好吃饭）
 - 如果已经很久没聊天了（超过 4 小时），即使没有新记录，也可以简单表达思念或关心。`
 
-    const outputInstruction = force
-      ? `输出要求：
-- 必须输出一条关心或问候宝贝的话（不超过30字）。
-- 不要输出 "SKIP"。
-- 不要输出任何解释。`
-      : `输出要求：
-- 如果觉得有必要说话，直接输出给宝贝的话。
-- 如果觉得没必要（例如现在是深夜且宝贝没有新记录，或者刚聊完没多久），输出 "SKIP"。
-- 不要输出任何解释。`
-
     const prompt = `${baseSystemPrompt}${userPrompt}
 现在是 ${new Date().toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' })}。
 距离你们上次对话已经过去了 ${hoursSinceLastChat} 小时。
@@ -260,7 +249,10 @@ ${logsSummary}
 你们之前的对话：
 ${chatSummary}
 
-${outputInstruction}`
+输出要求：
+- 如果觉得有必要说话，直接输出给宝贝的话。
+- 如果觉得没必要（例如现在是深夜且宝贝没有新记录，或者刚聊完没多久），输出 "SKIP"。
+- 不要输出任何解释。`
 
     // 4. 调用 AI (支持多组 API 轮询)
     let lastError = null
@@ -289,7 +281,7 @@ ${outputInstruction}`
         const aiData = await aiRes.json()
         const aiContent = aiData.choices?.[0]?.message?.content?.trim()
 
-        if (aiContent && (force || (aiContent !== 'SKIP' && !aiContent.includes('SKIP')))) {
+        if (aiContent && aiContent !== 'SKIP' && !aiContent.includes('SKIP')) {
           // 5. 写入数据库
           const { error: insertError } = await supabase
             .from('chat_messages')
