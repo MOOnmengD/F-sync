@@ -1,62 +1,18 @@
 import { Menu } from 'lucide-react'
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { supabase } from '../supabaseClient'
 import { IconButton } from '../shared/ui/IconButton'
 import { useUi } from '../store/ui'
-
-type TimelineKind = '睡眠' | '生活' | '工作' | '娱乐'
-
-type TimingType = 'sleep' | 'life' | 'work' | 'play'
-
-function pad2(n: number) {
-  return String(n).padStart(2, '0')
-}
-
-function formatDurationHm(ms: number) {
-  const totalMin = Math.max(0, Math.floor(ms / 60000))
-  const hh = Math.floor(totalMin / 60)
-  const mm = totalMin % 60
-  return `${pad2(hh)}:${pad2(mm)} 时分`
-}
+import { useTimeline, TIMELINE_KINDS } from '../hooks/useTimeline'
 
 export default function Timeline() {
   const toggleDrawer = useUi((s) => s.toggleDrawer)
   const accent = '#F2DEBD'
-  const storageKey = 'fsync.timeline.active.v1'
 
-  const kinds = useMemo(() => ['睡眠', '生活', '工作', '娱乐'] as const, [])
-  const [kind, setKind] = useState<TimelineKind | null>(null)
-
-  const [running, setRunning] = useState(false)
-  const [startAt, setStartAt] = useState<number | null>(null)
-  const [tick, setTick] = useState(0)
   const [toast, setToast] = useState<string | null>(null)
 
-  const timingTypeByKind: Record<TimelineKind, TimingType> = useMemo(
-    () => ({
-      睡眠: 'sleep',
-      生活: 'life',
-      工作: 'work',
-      娱乐: 'play',
-    }),
-    [],
-  )
-
-  const kindByTimingType: Record<TimingType, TimelineKind> = useMemo(
-    () => ({
-      sleep: '睡眠',
-      life: '生活',
-      work: '工作',
-      play: '娱乐',
-    }),
-    [],
-  )
-
-  useEffect(() => {
-    if (!running) return
-    const id = window.setInterval(() => setTick((t) => t + 1), 1000)
-    return () => window.clearInterval(id)
-  }, [running])
+  const { kind, running, durationLabel, handleStart, handleStop, handleCancel, handleKindChange } =
+    useTimeline(setToast)
 
   useEffect(() => {
     if (!toast) return
@@ -64,110 +20,7 @@ export default function Timeline() {
     return () => window.clearTimeout(id)
   }, [toast])
 
-  useEffect(() => {
-    const raw = localStorage.getItem(storageKey)
-    if (!raw) return
-    try {
-      const parsed = JSON.parse(raw) as { timing_type?: unknown; start_time?: unknown } | null
-      const timingType = typeof parsed?.timing_type === 'string' ? parsed.timing_type : ''
-      const startTime = typeof parsed?.start_time === 'string' ? parsed.start_time : ''
-      if (!timingType || !startTime) {
-        localStorage.removeItem(storageKey)
-        return
-      }
-      if (!['sleep', 'life', 'work', 'play'].includes(timingType)) {
-        localStorage.removeItem(storageKey)
-        return
-      }
-      const ms = Date.parse(startTime)
-      if (!Number.isFinite(ms)) {
-        localStorage.removeItem(storageKey)
-        return
-      }
-
-      setKind(kindByTimingType[timingType as TimingType])
-      setStartAt(ms)
-      setRunning(true)
-    } catch {
-      localStorage.removeItem(storageKey)
-    }
-  }, [kindByTimingType])
-
-  const currentElapsedMs = useMemo(() => {
-    if (!running || startAt === null) return 0
-    return Math.max(0, Date.now() - startAt)
-  }, [running, startAt, tick])
-
-  const durationLabel = useMemo(() => formatDurationHm(currentElapsedMs), [currentElapsedMs])
-
-  const writeTiming = async (input: { timingType: TimingType; startMs: number; endMs: number }) => {
-    const client = supabase
-    if (!client) {
-      setToast('未配置 Supabase')
-      return false
-    }
-    const duration = Math.max(0, Math.floor((input.endMs - input.startMs) / 1000))
-    const payload = {
-      type: 'timing',
-      content: '',
-      timing_type: input.timingType,
-      start_time: new Date(input.startMs).toISOString(),
-      end_time: new Date(input.endMs).toISOString(),
-      duration,
-    }
-
-    console.log('[Timeline] writeTiming payload:', JSON.stringify(payload, null, 2))
-
-    const { error, data } = await client.from('transactions').insert(payload).select()
-    console.log('[Timeline] writeTiming response - error:', error)
-    console.log('[Timeline] writeTiming response - data:', data)
-
-    if (error) {
-      const msg = error.message || error.details || error.hint || '写入失败'
-      console.error('[Timeline] writeTiming failed:', msg, error)
-      setToast(msg)
-      return false
-    }
-    return true
-  }
-
-  const handleStart = () => {
-    if (running) return
-    if (!kind) {
-      setToast('请先选择计时类型')
-      return
-    }
-    const now = Date.now()
-    const timingType = timingTypeByKind[kind]
-    localStorage.setItem(storageKey, JSON.stringify({ timing_type: timingType, start_time: new Date(now).toISOString() }))
-    setStartAt(now)
-    setRunning(true)
-  }
-
-  const handleStop = () => {
-    if (!running || startAt === null) return
-    setRunning(false)
-    setStartAt(null)
-    localStorage.removeItem(storageKey)
-
-    if (!kind) return
-    const endMs = Date.now()
-    const timingType = timingTypeByKind[kind]
-    void (async () => {
-      await writeTiming({ timingType, startMs: startAt, endMs })
-    })()
-  }
-
-  const handleCancel = () => {
-    if (!running) return
-    setRunning(false)
-    setStartAt(null)
-    setKind(null)
-    localStorage.removeItem(storageKey)
-  }
-
-  const kindBtnBase =
-    'rounded-full border border-base-line px-4 py-2 text-sm active:opacity-70'
+  const kindBtnBase = 'rounded-full border border-base-line px-4 py-2 text-sm active:opacity-70'
   const ctrlBtnBase =
     'rounded-full border border-base-line bg-base-bg px-4 py-2 text-sm text-base-text active:opacity-70 whitespace-nowrap disabled:opacity-40 disabled:active:opacity-40'
 
@@ -193,47 +46,13 @@ export default function Timeline() {
       >
         <div className="rounded-2xl border border-base-line bg-base-surface p-3">
           <div className="grid grid-cols-4 gap-2">
-            {kinds.map((k) => {
+            {TIMELINE_KINDS.map((k) => {
               const active = kind === k
               return (
                 <button
                   key={k}
                   type="button"
-                  onClick={() => {
-                    if (!running) {
-                      setKind(active ? null : k)
-                      return
-                    }
-                    if (k === kind) return
-                    if (!kind || startAt === null) {
-                      const now = Date.now()
-                      setKind(k)
-                      setStartAt(now)
-                      localStorage.setItem(
-                        storageKey,
-                        JSON.stringify({ timing_type: timingTypeByKind[k], start_time: new Date(now).toISOString() }),
-                      )
-                      return
-                    }
-
-                    const prevKind = kind
-                    const prevStartAt = startAt
-                    const now = Date.now()
-
-                    setKind(k)
-                    setStartAt(now)
-                    localStorage.setItem(
-                      storageKey,
-                      JSON.stringify({ timing_type: timingTypeByKind[k], start_time: new Date(now).toISOString() }),
-                    )
-                    void (async () => {
-                      await writeTiming({
-                        timingType: timingTypeByKind[prevKind],
-                        startMs: prevStartAt,
-                        endMs: now,
-                      })
-                    })()
-                  }}
+                  onClick={() => handleKindChange(k)}
                   className={`${kindBtnBase} ${active ? 'text-base-text' : 'bg-transparent text-base-muted'}`}
                   style={active ? { backgroundColor: accent } : undefined}
                 >
