@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { ArrowLeft, Check, Loader2, RefreshCw, Send, Settings, Sparkles, X, Save, Eye, EyeOff, ClipboardPaste, Copy, FileText } from 'lucide-react'
 import { IconButton } from '../shared/ui/IconButton'
@@ -261,7 +261,8 @@ function MessageBubble({ msg, isTyping }: { msg: ChatMessage; isTyping?: boolean
   )
 }
 
-const CONTEXT_WINDOW = 30 // 打包最近 30 条对话
+const CONTEXT_WINDOW = 30
+const MAX_INPUT_HEIGHT = 160
 
 export default function Chat() {
   const navigate = useNavigate()
@@ -279,6 +280,7 @@ export default function Chat() {
   const [isSettingsOpen, setIsSettingsOpen] = useState(false)
   const [isContextOpen, setIsContextOpen] = useState(false)
   const [lastFullContext, setLastFullContext] = useState<any[]>([])
+  const [textareaHeight, setTextareaHeight] = useState(44)
   const bottomRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLTextAreaElement>(null)
   const { settings } = useSettingsStore()
@@ -390,7 +392,19 @@ export default function Chat() {
   // 滚动到底部
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
-  }, [messages.length, isLoading])
+  }, [messages.length, isLoading, textareaHeight])
+
+  // 输入框自适应高度
+  useLayoutEffect(() => {
+    const el = inputRef.current
+    if (!el) return
+    el.style.height = 'auto'
+    const scrollH = el.scrollHeight
+    const newHeight = Math.min(scrollH, MAX_INPUT_HEIGHT)
+    el.style.height = `${newHeight}px`
+    el.style.overflowY = scrollH > MAX_INPUT_HEIGHT ? 'auto' : 'hidden'
+    setTextareaHeight(newHeight)
+  }, [input])
 
   // 自动同步逻辑
   useEffect(() => {
@@ -411,6 +425,11 @@ export default function Chat() {
     if (!text || isLoading) return
 
     setInput('')
+    if (inputRef.current) {
+      inputRef.current.style.height = '44px'
+      inputRef.current.style.overflowY = 'hidden'
+    }
+    setTextareaHeight(44)
     setLoading(true)
 
     // 1. 添加用户消息
@@ -475,7 +494,7 @@ export default function Chat() {
   }
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
+    if (e.key === 'Enter' && e.shiftKey) {
       e.preventDefault()
       handleSend()
     }
@@ -563,7 +582,8 @@ export default function Chat() {
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={handleKeyDown}
             placeholder="和弗弗聊聊..."
-            className="flex-1 max-h-32 min-h-[44px] rounded-2xl border border-base-line bg-base-surface px-4 py-3 text-sm text-base-text outline-none focus:border-[#B4AEE8] transition-colors resize-none"
+            className="flex-1 rounded-2xl border border-base-line bg-base-surface px-4 py-3 text-sm text-base-text outline-none focus:border-[#B4AEE8] transition-colors resize-none"
+            style={{ height: '44px', minHeight: '44px', overflowY: 'hidden' }}
           />
           <button
             onClick={handleSend}
