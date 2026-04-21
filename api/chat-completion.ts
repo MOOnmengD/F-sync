@@ -22,16 +22,18 @@ function resolveEmbeddingUrl(base: string) {
  */
 function analyzeQueryIntent(query: string) {
   const result = {
-    timeRange: null as string | null, // 'today', 'yesterday', 'week', 'month', 'year'
-    timeWindowHours: null as number | null, // 具体的小时数
-    categories: [] as string[], // 可能的分类关键词
+    timeRange: null as string | null,
+    timeWindowHours: null as number | null,
+    categories: [] as string[],
     isFoodRelated: false,
     isPersonMention: false,
-    isMoodRelated: false
+    isMoodRelated: false,
+    typeFilters: [] as string[],        // 用于过滤 transactions.type
+    categoryFilter: null as string | null, // 用于过滤 finance_category
   }
-  
+
   const lowerQuery = query.toLowerCase()
-  
+
   // 时间范围检测
   if (lowerQuery.includes('今天') || lowerQuery.includes('今日')) {
     result.timeRange = 'today'
@@ -41,32 +43,53 @@ function analyzeQueryIntent(query: string) {
     result.timeWindowHours = 48
   } else if (lowerQuery.includes('最近') || lowerQuery.includes('近期') || lowerQuery.includes('这几天')) {
     result.timeRange = 'week'
-    result.timeWindowHours = 168 // 7天
+    result.timeWindowHours = 168
   } else if (lowerQuery.includes('上周') || lowerQuery.includes('上星期')) {
     result.timeRange = 'last_week'
     result.timeWindowHours = 168
   } else if (lowerQuery.includes('这个月') || lowerQuery.includes('本月')) {
     result.timeRange = 'month'
-    result.timeWindowHours = 720 // 30天
+    result.timeWindowHours = 720
   } else if (lowerQuery.includes('今年')) {
     result.timeRange = 'year'
-    result.timeWindowHours = 8760 // 365天
+    result.timeWindowHours = 8760
   }
-  
-  // 分类关键词检测
-  const foodKeywords = ['吃', '喝', '饭', '餐', '菜', '餐厅', '外卖', '火锅', '咖啡', '茶', '酒']
-  const personKeywords = ['张三', '李四', '王五', '朋友', '同事', '家人', '妈妈', '爸爸'] // 可以扩展
-  const moodKeywords = ['心情', '情绪', '开心', '难过', '生气', '焦虑', '压力']
-  
-  result.isFoodRelated = foodKeywords.some(keyword => lowerQuery.includes(keyword))
-  result.isPersonMention = personKeywords.some(keyword => lowerQuery.includes(keyword))
-  result.isMoodRelated = moodKeywords.some(keyword => lowerQuery.includes(keyword))
-  
-  // 提取可能的分类
-  if (result.isFoodRelated) result.categories.push('餐饮')
-  if (result.isPersonMention) result.categories.push('人物')
-  if (result.isMoodRelated) result.categories.push('心情')
-  
+
+  // 记录类型 + 分类检测
+  const foodKeywords = ['吃', '喝', '饭', '餐', '菜', '餐厅', '外卖', '火锅', '咖啡', '茶', '酒', '食']
+  const moodKeywords = ['心情', '情绪', '开心', '难过', '生气', '焦虑', '压力', '碎碎念', '感受', '想法']
+  const financeKeywords = ['花了', '消费', '买了', '记账', '花钱', '支出', '收入', '购物', '价格', '多少钱']
+  const workKeywords = ['工作', '任务', '项目', '开发', '代码', '会议', '上班']
+  const personKeywords = ['张三', '李四', '王五', '朋友', '同事', '家人', '妈妈', '爸爸']
+
+  result.isFoodRelated = foodKeywords.some(k => lowerQuery.includes(k))
+  result.isPersonMention = personKeywords.some(k => lowerQuery.includes(k))
+  result.isMoodRelated = moodKeywords.some(k => lowerQuery.includes(k))
+  const isFinanceRelated = financeKeywords.some(k => lowerQuery.includes(k))
+  const isWorkRelated = workKeywords.some(k => lowerQuery.includes(k))
+
+  // 映射到 type 过滤器（精准检索对应记录类型）
+  if (result.isFoodRelated) {
+    result.typeFilters.push('记账')
+    result.categoryFilter = '餐饮'
+    result.categories.push('餐饮')
+  }
+  if (result.isMoodRelated) {
+    result.typeFilters.push('whisper')
+    result.categories.push('心情')
+  }
+  if (isFinanceRelated && !result.isFoodRelated) {
+    result.typeFilters.push('记账')
+    result.categories.push('记账')
+  }
+  if (isWorkRelated) {
+    result.typeFilters.push('timing')
+    result.categories.push('工作')
+  }
+  if (result.isPersonMention) {
+    result.categories.push('人物')
+  }
+
   return result
 }
 
@@ -195,6 +218,13 @@ export default async function handler(req: any, res: any) {
         })
         if (!matchError && matchedLogs) {
           vectorResults = matchedLogs
+          // 元数据过滤：向量检索结果按 type / finance_category 精准筛选
+          if (queryIntent.typeFilters.length > 0) {
+            vectorResults = vectorResults.filter(log => queryIntent.typeFilters.includes(log.type))
+          }
+          if (queryIntent.categoryFilter) {
+            vectorResults = vectorResults.filter(log => log.finance_category === queryIntent.categoryFilter)
+          }
         }
       }
     }
@@ -204,13 +234,23 @@ export default async function handler(req: any, res: any) {
 
   // 策略 2: 全文检索 (独立执行，不依赖 embedding)
   try {
-    const { data: fullTextData, error: fullTextError } = await supabaseAdmin
+    let fullTextQuery = supabaseAdmin
       .from('transactions')
       .select('*')
       .filter('search_vector', 'fts', searchInput)
       .order('created_at', { ascending: false })
       .limit(5)
 
+    if (queryIntent.typeFilters.length === 1) {
+      fullTextQuery = fullTextQuery.eq('type', queryIntent.typeFilters[0])
+    } else if (queryIntent.typeFilters.length > 1) {
+      fullTextQuery = fullTextQuery.in('type', queryIntent.typeFilters)
+    }
+    if (queryIntent.categoryFilter) {
+      fullTextQuery = fullTextQuery.eq('finance_category', queryIntent.categoryFilter)
+    }
+
+    const { data: fullTextData, error: fullTextError } = await fullTextQuery
     if (!fullTextError && fullTextData) {
       fullTextResults = fullTextData
     }
@@ -231,6 +271,15 @@ export default async function handler(req: any, res: any) {
         const timeAgo = new Date(Date.now() - queryIntent.timeWindowHours * 60 * 60 * 1000).toISOString()
         timeBasedQuery = timeBasedQuery.gte('created_at', timeAgo)
         console.log(`[Time Filter] 应用时间范围: ${queryIntent.timeWindowHours}小时 (从${timeAgo})`)
+      }
+
+      if (queryIntent.typeFilters.length === 1) {
+        timeBasedQuery = timeBasedQuery.eq('type', queryIntent.typeFilters[0])
+      } else if (queryIntent.typeFilters.length > 1) {
+        timeBasedQuery = timeBasedQuery.in('type', queryIntent.typeFilters)
+      }
+      if (queryIntent.categoryFilter) {
+        timeBasedQuery = timeBasedQuery.eq('finance_category', queryIntent.categoryFilter)
       }
 
       const { data: recentLogs } = await timeBasedQuery
@@ -262,7 +311,43 @@ export default async function handler(req: any, res: any) {
   }
   // --- RAG 逻辑结束 ---
 
-  // 查询用户画像摘要（如果用户ID存在且已启用该功能）
+  // 查询时间轴状态（宝贝当前/最近在做什么）
+  let currentTimingInfo = ''
+  try {
+    // 优先：正在进行中的计时（end_time 为 null）
+    const { data: activeTimings } = await supabaseAdmin
+      .from('transactions')
+      .select('timing_type, start_time, content')
+      .eq('type', 'timing')
+      .is('end_time', null)
+      .order('start_time', { ascending: false })
+      .limit(1)
+
+    if (activeTimings && activeTimings.length > 0) {
+      const t = activeTimings[0]
+      const minutes = Math.floor((Date.now() - new Date(t.start_time).getTime()) / 60000)
+      currentTimingInfo = `宝贝当前状态：正在进行「${t.timing_type || t.content}」，已持续 ${minutes} 分钟`
+    } else {
+      // 次选：2 小时内最近结束的计时
+      const twoHoursAgo = new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString()
+      const { data: recentTimings } = await supabaseAdmin
+        .from('transactions')
+        .select('timing_type, end_time, content')
+        .eq('type', 'timing')
+        .not('end_time', 'is', null)
+        .gte('end_time', twoHoursAgo)
+        .order('end_time', { ascending: false })
+        .limit(1)
+
+      if (recentTimings && recentTimings.length > 0) {
+        const t = recentTimings[0]
+        const endTime = new Date(t.end_time).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })
+        currentTimingInfo = `宝贝最近完成了：「${t.timing_type || t.content}」（${endTime} 结束）`
+      }
+    }
+  } catch (timingErr: any) {
+    console.warn('[Timing] 查询时间轴状态失败:', timingErr.message)
+  }（如果用户ID存在且已启用该功能）
   let userProfileInfo = ''
   if (userId && supabaseUrl && supabaseServiceKey) {
     try {
@@ -324,7 +409,7 @@ export default async function handler(req: any, res: any) {
   // 更新 systemPrompt 的 content
   systemPrompt.content = `${baseSystemPrompt}${userPrompt}
 当前时间：${new Date().toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' })}
-${contextInfo ? `\n上下文：${contextInfo}\n可以结合以上历史记录与用户进行互动。` : ''}${userProfileInfo}`
+${currentTimingInfo ? `${currentTimingInfo}\n` : ''}${contextInfo ? `\n上下文：${contextInfo}\n可以结合以上历史记录与用户进行互动。` : ''}${userProfileInfo}`
 
   // 多组 API 轮询逻辑
   for (let i = 0; i < apiConfigs.length; i++) {
