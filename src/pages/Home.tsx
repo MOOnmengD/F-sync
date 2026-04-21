@@ -8,6 +8,7 @@ import { IconButton } from '../shared/ui/IconButton'
 import { PillButton } from '../shared/ui/PillButton'
 import { RepurchaseIndexPill } from '../shared/ui/RepurchaseIndexPill'
 import { useTimeline, TIMELINE_KINDS } from '../hooks/useTimeline'
+import { WeeklyTimeline } from '../components/WeeklyTimeline'
 import { extractDate, formatCompactDateTime } from '../utils/dateUtils'
 import { extractAmount, pickItemNameFallback, formatAmount } from '../utils/amountUtils'
 
@@ -57,6 +58,8 @@ export default function Home() {
   const [lastFinanceTx, setLastFinanceTx] = useState<LastFinanceTx | null>(null)
   const [reviewTargetId, setReviewTargetId] = useState<string | null>(null)
 
+  const [refreshKey, setRefreshKey] = useState(0)
+
   const {
     kind: timelineKind,
     running: timelineRunning,
@@ -65,7 +68,7 @@ export default function Home() {
     handleStop: handleTimelineStop,
     handleCancel: handleTimelineCancel,
     handleKindChange,
-  } = useTimeline(setToast)
+  } = useTimeline(setToast, () => setRefreshKey((k) => k + 1))
 
   const makeClientId = () => {
     const cryptoAny = crypto as unknown as { randomUUID?: () => string } | undefined
@@ -650,7 +653,13 @@ export default function Home() {
         </div>
       </header>
 
-      <div className="mt-4 text-sm text-base-muted">{meta.hint}</div>
+      {mode === 'timeline' ? (
+        <div className="mt-4">
+          <WeeklyTimeline refreshKey={refreshKey} />
+        </div>
+      ) : (
+        <div className="mt-4 text-sm text-base-muted">{meta.hint}</div>
+      )}
 
       <div
         className="fixed left-1/2 z-40 w-full max-w-[480px] -translate-x-1/2 px-4"

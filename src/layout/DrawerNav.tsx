@@ -60,6 +60,7 @@ export function DrawerNav() {
           <Item to="/" label="主页 Home" />
           <Item to="/finance" label="记账报表 Finance" />
           <Item to="/whisper" label="碎碎念 Whisper" />
+          <Item to="/timeline" label="时间轴 Timeline" />
           <Item to="/work" label="工作总结 Work" />
           <Item to="/vault" label="知识库 Vault" />
         </nav>

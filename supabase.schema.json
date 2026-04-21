@@ -487,7 +487,7 @@
     }
   ],
   "policies": [
-    {
+  {
     "schemaname": "public",
     "tablename": "chat_messages",
     "policyname": "Users can delete their own messages",
