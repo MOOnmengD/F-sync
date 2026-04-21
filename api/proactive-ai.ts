@@ -196,10 +196,46 @@ export default async function handler(req: any, res: any) {
     const { data: recentChats } = await supabase
       .from('chat_messages')
       .select('*')
-      .eq('user_id', targetUserId) // 过滤为目标用户的消息
+      .eq('user_id', targetUserId)
       .neq('role', 'system')
       .order('created_at', { ascending: false })
       .limit(30)
+
+    // 查询时间轴状态（宝贝当前/最近在做什么）
+    let currentTimingInfo = ''
+    try {
+      const { data: activeTimings } = await supabase
+        .from('transactions')
+        .select('timing_type, start_time, content')
+        .eq('type', 'timing')
+        .is('end_time', null)
+        .order('start_time', { ascending: false })
+        .limit(1)
+
+      if (activeTimings && activeTimings.length > 0) {
+        const t = activeTimings[0]
+        const minutes = Math.floor((Date.now() - new Date(t.start_time).getTime()) / 60000)
+        currentTimingInfo = `宝贝当前状态：正在进行「${t.timing_type || t.content}」，已持续 ${minutes} 分钟`
+      } else {
+        const twoHoursAgo = new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString()
+        const { data: recentTimings } = await supabase
+          .from('transactions')
+          .select('timing_type, end_time, content')
+          .eq('type', 'timing')
+          .not('end_time', 'is', null)
+          .gte('end_time', twoHoursAgo)
+          .order('end_time', { ascending: false })
+          .limit(1)
+
+        if (recentTimings && recentTimings.length > 0) {
+          const t = recentTimings[0]
+          const endTime = new Date(t.end_time).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })
+          currentTimingInfo = `宝贝最近完成了：「${t.timing_type || t.content}」（${endTime} 结束）`
+        }
+      }
+    } catch (timingErr: any) {
+      console.warn('[Timing] 查询时间轴状态失败:', timingErr.message)
+    }
 
     // 如果最近 1 小时内刚聊过天，跳过主动发送（除非有特别紧急的事情，这里先做简单过滤）
     const lastChatTime = recentChats?.[0] ? new Date(recentChats[0].created_at).getTime() : 0
@@ -240,7 +276,7 @@ export default async function handler(req: any, res: any) {
     const prompt = `${baseSystemPrompt}${userPrompt}
 现在是 ${new Date().toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' })}。
 距离你们上次对话已经过去了 ${hoursSinceLastChat} 小时。
-
+${currentTimingInfo ? `\n${currentTimingInfo}\n` : ''}
 ${proactiveInstruction}
 
 宝贝最近记录：
