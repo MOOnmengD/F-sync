@@ -111,8 +111,8 @@ export function WeeklyTimeline({ refreshKey }: { refreshKey: number }) {
       <div className="mb-2 flex">
         <div className="w-14 shrink-0" />
         <div className="flex flex-1 justify-between">
-          {TIME_LABELS.map((h) => (
-            <span key={h} className="text-[9px] leading-none text-base-muted">
+          {TIME_LABELS.map((h, idx) => (
+            <span key={h} className={`text-[9px] leading-none text-base-muted ${idx === 0 ? 'ml-0' : ''}`}>
               {h}
             </span>
           ))}
@@ -146,10 +146,11 @@ export function WeeklyTimeline({ refreshKey }: { refreshKey: number }) {
                 {segments.map((seg, i) => {
                   const left = ((seg.startMs - dayStartMs) / DAY_MS) * 100
                   const width = ((seg.endMs - seg.startMs) / DAY_MS) * 100
+                  const isFirst = i === 0 && left === 0
                   return (
                     <div
                       key={i}
-                      className="absolute top-0 h-full"
+                      className={`absolute top-0 h-full ${isFirst ? 'ml-0' : ''}`}
                       style={{
                         left: `${left}%`,
                         width: `${Math.max(width, 0.3)}%`,

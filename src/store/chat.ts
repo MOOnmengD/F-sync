@@ -16,6 +16,7 @@ type ChatState = {
   hasMore: boolean
   addMessage: (msg: Omit<ChatMessage, 'id'>) => string
   updateMessage: (id: string, updates: Partial<ChatMessage>) => void
+  deleteMessage: (id: string) => Promise<void>
   setLoading: (v: boolean) => void
   setHasMore: (v: boolean) => void
   clearMessages: () => void
@@ -59,6 +60,21 @@ export const useChatStore = create<ChatState>()(
         set((s) => ({
           messages: s.messages.map((m) => (m.id === id ? { ...m, ...updates } : m)),
         })),
+
+      deleteMessage: async (id) => {
+        set((s) => ({ messages: s.messages.filter((m) => m.id !== id) }))
+
+        const client = supabase
+        if (!client) return
+
+        // client_id is text, safe for any string
+        await client.from('chat_messages').delete().eq('client_id', id)
+
+        // also try by actual UUID if the id looks like one
+        if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)) {
+          await client.from('chat_messages').delete().eq('id', id)
+        }
+      },
 
       setLoading: (v) => set({ isLoading: v }),
 

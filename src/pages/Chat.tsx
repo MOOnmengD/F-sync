@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { ArrowLeft, Check, Loader2, RefreshCw, Send, Settings, Sparkles, X, Save, Eye, EyeOff, ClipboardPaste, Copy, FileText } from 'lucide-react'
+import { ArrowLeft, Check, Loader2, RefreshCw, Send, Settings, Sparkles, X, Save, Eye, EyeOff, ClipboardPaste, Copy, FileText, Trash2 } from 'lucide-react'
 import { IconButton } from '../shared/ui/IconButton'
 import { useChatStore, type ChatMessage } from '../store/chat'
 import { supabase } from '../supabaseClient'
@@ -230,7 +230,7 @@ function SettingsModal({ isOpen, onClose }: { isOpen: boolean; onClose: () => vo
   )
 }
 
-function MessageBubble({ msg, isTyping }: { msg: ChatMessage; isTyping?: boolean }) {
+function MessageBubble({ msg, isTyping, onDelete }: { msg: ChatMessage; isTyping?: boolean; onDelete?: (id: string) => void }) {
   const isUser = msg.role === 'user'
   return (
     <div className={`flex flex-col ${isUser ? 'items-end' : 'items-start'}`}>
@@ -256,7 +256,17 @@ function MessageBubble({ msg, isTyping }: { msg: ChatMessage; isTyping?: boolean
           <Loader2 size={16} className="animate-spin text-base-text/30 shrink-0" />
         )}
       </div>
-      <p className="mt-1 text-xs text-base-text/40">{formatTime(msg.createdAt)}</p>
+      <div className={`mt-1 flex items-center gap-2 ${isUser ? 'flex-row-reverse' : 'flex-row'}`}>
+        <p className="text-xs text-base-text/40">{formatTime(msg.createdAt)}</p>
+        {onDelete && !isTyping && (
+          <button
+            onClick={() => onDelete(msg.id)}
+            className="text-base-text/20 hover:text-red-400 active:text-red-500 transition-colors"
+          >
+            <Trash2 size={12} />
+          </button>
+        )}
+      </div>
     </div>
   )
 }
@@ -274,6 +284,7 @@ export default function Chat() {
   const clearMessages = useChatStore((s) => s.clearMessages)
   const syncMessages = useChatStore((s) => s.syncMessages)
   const upsertMessage = useChatStore((s) => s.upsertMessage)
+  const deleteMessage = useChatStore((s) => s.deleteMessage)
 
   const [input, setInput] = useState('')
   const [vectorSyncStatus, setVectorSyncStatus] = useState<'synced' | 'pending' | 'syncing'>('synced')
@@ -575,6 +586,7 @@ export default function Chat() {
             key={msg.id}
             msg={msg}
             isTyping={isLoading && idx === messages.length - 1}
+            onDelete={deleteMessage}
           />
         ))}
         <div ref={bottomRef} />
