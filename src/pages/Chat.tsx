@@ -462,8 +462,15 @@ export default function Chat() {
         })
       })
 
-      const data = await response.json()
-      
+      const responseText = await response.text()
+      if (!responseText) throw new Error('服务器无响应')
+      let data: any
+      try {
+        data = JSON.parse(responseText)
+      } catch {
+        throw new Error(`服务器返回非 JSON：${responseText.slice(0, 120)}`)
+      }
+
       if (!response.ok) throw new Error(data.error || '请求失败')
 
       // 如果后端返回了 fullMessages，则更新最后一次上下文
