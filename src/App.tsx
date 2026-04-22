@@ -17,6 +17,33 @@ export default function App() {
   const [sessionReady, setSessionReady] = useState(false)
   const [session, setSession] = useState<Session | null>(null)
 
+  // 监听主动消息，触发 HarmonyOS 原生通知
+  useEffect(() => {
+    const client = supabase
+    if (!client) return
+    const channel = client
+      .channel('harmony-proactive-notif')
+      .on(
+        'postgres_changes',
+        { event: 'INSERT', schema: 'public', table: 'chat_messages' },
+        (payload) => {
+          const msg = payload.new as { client_id?: string; content?: string }
+          if (msg?.client_id?.startsWith('proactive-') && msg.content) {
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            const harmonyNative = (window as any).harmonyNative
+            if (harmonyNative?.receiveMessage) {
+              harmonyNative.receiveMessage(JSON.stringify({
+                type: 'showNotification',
+                data: { title: '弗弗', content: msg.content }
+              }))
+            }
+          }
+        }
+      )
+      .subscribe()
+    return () => { void client.removeChannel(channel) }
+  }, [])
+
   useEffect(() => {
     const client = supabase
     if (!client) {
