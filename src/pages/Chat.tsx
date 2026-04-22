@@ -232,6 +232,12 @@ function SettingsModal({ isOpen, onClose }: { isOpen: boolean; onClose: () => vo
 
 function MessageBubble({ msg, isTyping, onDelete }: { msg: ChatMessage; isTyping?: boolean; onDelete?: (id: string) => void }) {
   const isUser = msg.role === 'user'
+  const [confirming, setConfirming] = useState(false)
+
+  const handleDeleteClick = () => setConfirming(true)
+  const handleConfirm = () => { setConfirming(false); onDelete?.(msg.id) }
+  const handleCancel = () => setConfirming(false)
+
   return (
     <div className={`flex flex-col ${isUser ? 'items-end' : 'items-start'}`}>
       <div className="flex items-center gap-2 w-full justify-inherit" style={{ justifyContent: isUser ? 'flex-end' : 'flex-start' }}>
@@ -260,13 +266,31 @@ function MessageBubble({ msg, isTyping, onDelete }: { msg: ChatMessage; isTyping
         <p className="text-xs text-base-text/40">{formatTime(msg.createdAt)}</p>
         {onDelete && !isTyping && (
           <button
-            onClick={() => onDelete(msg.id)}
-            className="text-base-text/20 hover:text-red-400 active:text-red-500 transition-colors"
+            onClick={handleDeleteClick}
+            className="p-1 rounded-full text-base-text/20 hover:text-red-400 hover:bg-red-50 active:scale-90 transition-all duration-150"
           >
             <Trash2 size={12} />
           </button>
         )}
       </div>
+      {confirming && (
+        <div className={`mt-1.5 flex items-center gap-2 px-3 py-1.5 rounded-xl border border-red-100 bg-red-50 text-xs ${isUser ? 'self-end' : 'self-start'}`}>
+          <span className="text-base-text/60">真的要删除这条消息吗？</span>
+          <button
+            onClick={handleConfirm}
+            className="font-semibold text-red-500 hover:text-red-600 transition-colors"
+          >
+            是
+          </button>
+          <span className="text-base-text/20">·</span>
+          <button
+            onClick={handleCancel}
+            className="text-base-text/40 hover:text-base-text/70 transition-colors"
+          >
+            否
+          </button>
+        </div>
+      )}
     </div>
   )
 }
@@ -400,9 +424,15 @@ export default function Chat() {
     void checkVectorStatus()
   }
 
-  // 滚动到底部
+  const prevMsgLenRef = useRef(0)
+
+  // 滚动到底部（仅在消息增加时触发，删除时保持位置）
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
+    const prev = prevMsgLenRef.current
+    prevMsgLenRef.current = messages.length
+    if (messages.length >= prev) {
+      bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
+    }
   }, [messages.length, isLoading, textareaHeight])
 
   // 输入框自适应高度
