@@ -106,6 +106,8 @@ export default async function handler(req: any, res: any) {
   res.setHeader('Content-Type', 'application/json; charset=utf-8')
   res.setHeader('Cache-Control', 'no-store')
 
+  try {
+
   if (req.method !== 'POST') {
     res.statusCode = 405
     res.end(JSON.stringify({ error: 'Method Not Allowed' }))
@@ -347,11 +349,12 @@ export default async function handler(req: any, res: any) {
     }
   } catch (timingErr: any) {
     console.warn('[Timing] 查询时间轴状态失败:', timingErr.message)
-  }（如果用户ID存在且已启用该功能）
+  }
+
+  // 查询用户画像摘要（如果用户ID存在且已启用该功能）
   let userProfileInfo = ''
   if (userId && supabaseUrl && supabaseServiceKey) {
     try {
-      const supabaseAdmin = createClient(supabaseUrl, supabaseServiceKey)
       const { data: userProfiles, error: profileError } = await supabaseAdmin
         .from('user_profiles')
         .select('*')
@@ -444,6 +447,14 @@ ${currentTimingInfo ? `${currentTimingInfo}\n` : ''}${contextInfo ? `\n上下文
     }
   }
 
-  res.statusCode = 500
-  res.end(JSON.stringify({ error: 'All configured AI APIs failed' }))
+    res.statusCode = 500
+    res.end(JSON.stringify({ error: 'All configured AI APIs failed' }))
+
+  } catch (unexpectedError: any) {
+    console.error('[Handler] Unhandled error:', unexpectedError)
+    if (!res.writableEnded) {
+      res.statusCode = 500
+      res.end(JSON.stringify({ error: `Server error: ${unexpectedError?.message || 'unknown'}` }))
+    }
+  }
 }
