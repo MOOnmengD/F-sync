@@ -230,6 +230,7 @@ export default async function handler(req: any, res: any) {
     // 尝试从 body 获取设置（如果 GitHub Action 支持传参）
     const body = req.body || {}
     const settings = body.settings
+    const force = body.force === true
 
     const apiConfigs = settings?.apiConfigs?.filter((c: any) => c.url && c.key) || []
     if (apiConfigs.length === 0) {
@@ -310,7 +311,7 @@ export default async function handler(req: any, res: any) {
     const msSinceLastChat = Date.now() - lastChatTime
     const hoursSinceLastChat = Math.floor(msSinceLastChat / (1000 * 60 * 60))
 
-    if (msSinceLastChat < 60 * 60 * 1000) {
+    if (!force && msSinceLastChat < 60 * 60 * 1000) {
       return res.status(200).json({ 
         message: 'Chatted recently, skip proactive pulse.',
         lastChatTime: recentChats?.[0]?.created_at,
