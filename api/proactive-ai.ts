@@ -47,15 +47,21 @@ async function sendHuaweiPush(supabase: any, userId: string, title: string, body
   console.log('[Push] 使用 appId:', appId)
 
   const payload = {
+    validate_only: false,
     message: {
       token: [pushToken],
-      notification: { title, body },
-      hmscore: { targetUserType: 1 }
+      android: {
+        notification: {
+          title,
+          body,
+          click_action: { type: 3 }
+        }
+      }
     }
   }
   console.log('[Push] 请求体:', JSON.stringify(payload))
 
-  const pushRes = await fetch(`https://push-api.cloud.huawei.com/v1/${appId}/messages:send`, {
+  const pushRes = await fetch(`https://push-api.cloud.huawei.com/v2/${appId}/messages:send`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
