@@ -107,9 +107,9 @@ async function sendHuaweiPush(supabase: any, userId: string, title: string, body
   const pushRes = await fetch(`https://push-api.cloud.huawei.com/v3/${projectId}/messages:send`, {
     method: 'POST',
     headers: {
-      'Content-Type': 'application/json',
+      'Content-Type': 'application/json;charset=utf-8',
       'Authorization': `Bearer ${accessToken}`,
-      'push-type': '1'
+      'push-type': '0'
     },
     body: JSON.stringify(payload)
   })
