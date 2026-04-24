@@ -37,6 +37,9 @@ async function sendHuaweiPush(supabase: any, userId: string, title: string, body
     return
   }
 
+  const pushToken = String(tokenRow.token).trim()
+  console.log('[Push] token 长度:', pushToken.length, '前8位:', pushToken.substring(0, 8))
+
   const accessToken = await getHuaweiAccessToken()
   const clientId = process.env.HUAWEI_CLIENT_ID
 
@@ -48,7 +51,7 @@ async function sendHuaweiPush(supabase: any, userId: string, title: string, body
     },
     body: JSON.stringify({
       message: {
-        token: [tokenRow.token],
+        token: [pushToken],
         notification: { title, body },
         data: JSON.stringify({ targetPage: 'chat' })
       }
