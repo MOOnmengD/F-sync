@@ -20,7 +20,6 @@ export default function App() {
   // 监听主动消息，触发 HarmonyOS 原生通知
   useEffect(() => {
     const client = supabase
-    console.log('[HarmonyNotif] init, supabase available:', !!client)
     if (!client) return
     const channel = client
       .channel('harmony-proactive-notif')
@@ -29,24 +28,19 @@ export default function App() {
         { event: 'INSERT', schema: 'public', table: 'chat_messages' },
         (payload) => {
           const msg = payload.new as { client_id?: string; content?: string }
-          console.log('[HarmonyNotif] INSERT event, client_id:', msg?.client_id)
           if (msg?.client_id?.startsWith('proactive-') && msg.content) {
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
             const harmonyNative = (window as any).harmonyNative
-            console.log('[HarmonyNotif] harmonyNative available:', !!harmonyNative?.receiveMessage)
             if (harmonyNative?.receiveMessage) {
               harmonyNative.receiveMessage(JSON.stringify({
                 type: 'showNotification',
                 data: { title: '弗弗', content: msg.content }
               }))
-              console.log('[HarmonyNotif] receiveMessage called')
             }
           }
         }
       )
-      .subscribe((status) => {
-        console.log('[HarmonyNotif] subscription status:', status)
-      })
+      .subscribe()
     return () => { void client.removeChannel(channel) }
   }, [])
 
