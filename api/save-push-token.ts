@@ -17,13 +17,18 @@ export default async function handler(req: any, res: any) {
     return res.status(400).json({ error: 'Missing or invalid token' })
   }
 
+  const cleanToken = token.trim()
+  if (!cleanToken) {
+    return res.status(400).json({ error: 'Token is empty after trimming' })
+  }
+
   const supabase = createClient(supabaseUrl, supabaseServiceKey)
   const userId = process.env.PROACTIVE_USER_ID || '00000000-0000-0000-0000-000000000000'
 
   const { error } = await supabase
     .from('push_tokens')
     .upsert(
-      { user_id: userId, token, platform: 'harmony', updated_at: new Date().toISOString() },
+      { user_id: userId, token: cleanToken, platform: 'harmony', updated_at: new Date().toISOString() },
       { onConflict: 'user_id,platform' }
     )
 
