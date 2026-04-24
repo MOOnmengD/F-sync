@@ -15,6 +15,7 @@ async function getHuaweiAccessToken(): Promise<string> {
   if (!keyId || !subAccount || !rawKey) throw new Error('Missing HUAWEI_KEY_ID / HUAWEI_SUB_ACCOUNT / HUAWEI_PRIVATE_KEY')
 
   const pem = rawKey.replace(/\\n/g, '\n')
+  console.log('[Push] JWT kid:', keyId, '| sub_account:', subAccount, '| key前20字符:', pem.substring(0, 60).replace(/\n/g, '\\n'))
 
   const now = Math.floor(Date.now() / 1000)
   const header = b64url(JSON.stringify({ alg: 'PS256', kid: keyId, typ: 'JWT' }))
