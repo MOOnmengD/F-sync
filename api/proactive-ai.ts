@@ -10,7 +10,8 @@ async function getHuaweiAccessToken(): Promise<string> {
   const params = new URLSearchParams({
     grant_type: 'client_credentials',
     client_id: clientId,
-    client_secret: clientSecret
+    client_secret: clientSecret,
+    scope: 'openid push:message:write'
   })
 
   const res = await fetch('https://oauth-login.cloud.huawei.com/oauth2/v3/token', {
