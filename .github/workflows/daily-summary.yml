@@ -1,0 +1,20 @@
+name: Daily Summary
+
+on:
+  schedule:
+    # 每天 17:00 UTC = 01:00 CST（北京时间次日凌晨）
+    - cron: '0 17 * * *'
+  workflow_dispatch: # 允许手动触发
+
+jobs:
+  summarize:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger Daily Summary Endpoint
+        run: |
+          DOMAIN=$(echo "${{ secrets.VERCEL_DOMAIN }}" | sed -e 's|^https://||' -e 's|/$||')
+          echo "Triggering https://$DOMAIN/api/daily-summary"
+          curl -X POST "https://$DOMAIN/api/daily-summary" \
+            -f \
+            -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}" \
+            -H "Content-Type: application/json"
