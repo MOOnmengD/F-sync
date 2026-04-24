@@ -26,12 +26,12 @@ async function getHuaweiAccessToken(): Promise<string> {
 
   const cryptoKey = await globalThis.crypto.subtle.importKey(
     'pkcs8', keyBytes.buffer,
-    { name: 'RSASSA-PKCS1-v1_5', hash: 'SHA-256' },
+    { name: 'RSA-PSS', hash: 'SHA-256' },
     false, ['sign']
   )
 
   const now = Math.floor(Date.now() / 1000)
-  const header = b64url(JSON.stringify({ alg: 'RS256', kid: keyId, typ: 'JWT' }))
+  const header = b64url(JSON.stringify({ alg: 'PS256', kid: keyId, typ: 'JWT' }))
   const payload = b64url(JSON.stringify({
     iss: subAccount,
     aud: 'https://oauth-login.cloud.huawei.com/oauth2/v3/token',
@@ -42,7 +42,7 @@ async function getHuaweiAccessToken(): Promise<string> {
   const signingInput = `${header}.${payload}`
 
   const sigBuf = await globalThis.crypto.subtle.sign(
-    'RSASSA-PKCS1-v1_5',
+    { name: 'RSA-PSS', saltLength: 32 },
     cryptoKey,
     new TextEncoder().encode(signingInput)
   )
