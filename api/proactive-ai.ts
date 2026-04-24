@@ -1,15 +1,11 @@
 import { createClient } from '@supabase/supabase-js'
+import { sign as nodeCryptoSign, constants as nodeCryptoConstants } from 'crypto'
 
 const chatModel = process.env.CHAT_AI_MODEL || 'deepseek-chat'
 
-function b64url(data: string | Uint8Array): string {
-  let binary = ''
-  if (typeof data === 'string') {
-    new TextEncoder().encode(data).forEach(b => { binary += String.fromCharCode(b) })
-  } else {
-    data.forEach(b => { binary += String.fromCharCode(b) })
-  }
-  return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '')
+function b64url(data: string | Buffer | Uint8Array): string {
+  const buf = typeof data === 'string' ? Buffer.from(data, 'utf8') : Buffer.from(data)
+  return buf.toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '')
 }
 
 async function getHuaweiAccessToken(): Promise<string> {
@@ -19,16 +15,6 @@ async function getHuaweiAccessToken(): Promise<string> {
   if (!keyId || !subAccount || !rawKey) throw new Error('Missing HUAWEI_KEY_ID / HUAWEI_SUB_ACCOUNT / HUAWEI_PRIVATE_KEY')
 
   const pem = rawKey.replace(/\\n/g, '\n')
-  const b64 = pem.replace(/-----BEGIN PRIVATE KEY-----|-----END PRIVATE KEY-----|\s/g, '')
-  const binaryStr = atob(b64)
-  const keyBytes = new Uint8Array(binaryStr.length)
-  for (let i = 0; i < binaryStr.length; i++) keyBytes[i] = binaryStr.charCodeAt(i)
-
-  const cryptoKey = await globalThis.crypto.subtle.importKey(
-    'pkcs8', keyBytes.buffer,
-    { name: 'RSA-PSS', hash: 'SHA-256' },
-    false, ['sign']
-  )
 
   const now = Math.floor(Date.now() / 1000)
   const header = b64url(JSON.stringify({ alg: 'PS256', kid: keyId, typ: 'JWT' }))
@@ -36,17 +22,16 @@ async function getHuaweiAccessToken(): Promise<string> {
     iss: subAccount,
     aud: 'https://oauth-login.cloud.huawei.com/oauth2/v3/token',
     iat: now,
-    exp: now + 3600,
-    scope: 'https://www.huaweicloud.com/auth/push'
+    exp: now + 3600
   }))
   const signingInput = `${header}.${payload}`
 
-  const sigBuf = await globalThis.crypto.subtle.sign(
-    { name: 'RSA-PSS', saltLength: 32 },
-    cryptoKey,
-    new TextEncoder().encode(signingInput)
-  )
-  const jwt = `${signingInput}.${b64url(new Uint8Array(sigBuf))}`
+  const sig = nodeCryptoSign('sha256', Buffer.from(signingInput, 'utf8'), {
+    key: pem,
+    padding: nodeCryptoConstants.RSA_PKCS1_PSS_PADDING,
+    saltLength: nodeCryptoConstants.RSA_PSS_SALTLEN_DIGEST
+  })
+  const jwt = `${signingInput}.${b64url(sig)}`
 
   const params = new URLSearchParams({
     grant_type: 'urn:ietf:params:oauth:grant-type:jwt-bearer',
