@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { ArrowLeft, Check, Loader2, RefreshCw, Send, Settings, Sparkles, X, Save, Eye, EyeOff, ClipboardPaste, Copy, FileText, Trash2 } from 'lucide-react'
+import { ArrowLeft, BookOpen, Check, Loader2, RefreshCw, Send, Settings, Sparkles, User, X, Save, Eye, EyeOff, ClipboardPaste, Copy, FileText, Trash2 } from 'lucide-react'
 import { IconButton } from '../shared/ui/IconButton'
 import { useChatStore, type ChatMessage } from '../store/chat'
 import { supabase } from '../supabaseClient'
@@ -71,7 +71,14 @@ function ContextViewerModal({ isOpen, onClose, context }: { isOpen: boolean; onC
   )
 }
 
-function SettingsModal({ isOpen, onClose }: { isOpen: boolean; onClose: () => void }) {
+function SettingsModal({ isOpen, onClose, vectorSyncStatus, onVectorSync, onClearMessages, onOpenContext }: {
+  isOpen: boolean
+  onClose: () => void
+  vectorSyncStatus: 'synced' | 'pending' | 'syncing'
+  onVectorSync: () => void
+  onClearMessages: () => void
+  onOpenContext: () => void
+}) {
   const { settings, updateSettings } = useSettingsStore()
   const [localSettings, setLocalSettings] = useState(settings)
   const [showApiKeys, setShowApiKeys] = useState<Record<number, boolean>>({})
@@ -224,6 +231,201 @@ function SettingsModal({ isOpen, onClose }: { isOpen: boolean; onClose: () => vo
               ))}
             </div>
           </section>
+
+          {/* 工具 */}
+          <section className="space-y-3">
+            <h3 className="text-sm font-bold text-base-text/70 uppercase tracking-wider">工具</h3>
+            <div className="flex flex-wrap gap-2">
+              <button
+                type="button"
+                onClick={onVectorSync}
+                disabled={vectorSyncStatus === 'syncing'}
+                className={`h-9 px-4 text-xs border border-base-line rounded-full bg-[#FDFCFB] flex items-center gap-2 transition-colors ${
+                  vectorSyncStatus === 'pending' ? 'text-[#B4AEE8] active:opacity-70' : 'text-base-text/30 cursor-default'
+                }`}
+              >
+                {vectorSyncStatus === 'syncing' ? (
+                  <Loader2 size={13} className="animate-spin" />
+                ) : vectorSyncStatus === 'synced' ? (
+                  <Check size={13} className="text-green-400" />
+                ) : (
+                  <RefreshCw size={13} />
+                )}
+                向量同步
+              </button>
+              <button
+                type="button"
+                onClick={() => { onClearMessages(); onClose() }}
+                className="h-9 px-4 text-xs text-base-text/50 border border-base-line rounded-full bg-[#FDFCFB] active:opacity-70"
+              >
+                清空对话
+              </button>
+              <button
+                type="button"
+                onClick={() => { onClose(); onOpenContext() }}
+                className="h-9 px-4 text-xs text-base-text/50 border border-base-line rounded-full bg-[#FDFCFB] active:opacity-70 flex items-center gap-2"
+              >
+                <FileText size={13} />
+                查看上下文
+              </button>
+            </div>
+          </section>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function ProfileContent({ data }: { data: Record<string, any> }) {
+  const sections = [
+    { key: 'diet_preferences', label: '饮食偏好' },
+    { key: 'person_mentions', label: '常提及的人' },
+    { key: 'recent_moods', label: '近期心情' },
+    { key: 'spending_patterns', label: '消费模式' },
+  ]
+
+  if (Object.keys(data).length === 0) {
+    return (
+      <div className="text-center py-20 space-y-2">
+        <p className="text-sm text-base-text/30">暂无画像数据</p>
+        <p className="text-xs text-base-text/20">每天 01:00 自动更新</p>
+      </div>
+    )
+  }
+
+  return (
+    <div className="space-y-6">
+      {sections.map(section => {
+        const content = data[section.key]
+        if (!content) return null
+        return (
+          <div key={section.key} className="space-y-2">
+            <h3 className="text-xs font-bold text-base-text/40 uppercase tracking-wider">{section.label}</h3>
+            <div className="flex flex-wrap gap-2">
+              {Array.isArray(content) ? (
+                content.map((item: string, i: number) => (
+                  <span key={i} className="px-3 py-1 text-sm bg-[#F7F5F2] border border-base-line rounded-full text-base-text/70">
+                    {item}
+                  </span>
+                ))
+              ) : typeof content === 'object' ? (
+                Object.entries(content).map(([k, v]: [string, any]) => (
+                  <span key={k} className="px-3 py-1 text-sm bg-[#F7F5F2] border border-base-line rounded-full text-base-text/70">
+                    {k}<span className="text-base-text/40 ml-1">({v})</span>
+                  </span>
+                ))
+              ) : (
+                <span className="text-sm text-base-text/70">{String(content)}</span>
+              )}
+            </div>
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
+function DiaryContent({ entries }: { entries: any[] }) {
+  if (entries.length === 0) {
+    return (
+      <div className="text-center py-20 space-y-2">
+        <p className="text-sm text-base-text/30">暂无日记</p>
+        <p className="text-xs text-base-text/20">每天 01:00 生成昨日日记</p>
+      </div>
+    )
+  }
+
+  return (
+    <div className="space-y-6">
+      {entries.map(entry => {
+        // date 是 YYYY-MM-DD 字符串，加 T12:00:00 避免时区导致日期偏移
+        const date = new Date(`${entry.date}T12:00:00`)
+        const dateStr = date.toLocaleDateString('zh-CN', { month: 'long', day: 'numeric', weekday: 'short' })
+        return (
+          <div key={entry.id} className="space-y-2">
+            <div className="text-xs font-bold text-base-text/40 uppercase tracking-wider">{dateStr}</div>
+            <div className="p-4 bg-[#F7F5F2] border border-base-line rounded-2xl">
+              <p className="text-sm text-base-text/80 leading-relaxed whitespace-pre-wrap">{entry.content}</p>
+            </div>
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
+function ProfileDiaryModal({ isOpen, onClose, initialTab }: {
+  isOpen: boolean
+  onClose: () => void
+  initialTab: 'profile' | 'diary'
+}) {
+  const [tab, setTab] = useState<'profile' | 'diary'>(initialTab)
+  const [profileData, setProfileData] = useState<Record<string, any>>({})
+  const [diaryEntries, setDiaryEntries] = useState<any[]>([])
+  const [loading, setLoading] = useState(false)
+
+  useEffect(() => {
+    if (!isOpen) return
+    setTab(initialTab)
+    setLoading(true)
+    void (async () => {
+      const client = supabase
+      if (!client) { setLoading(false); return }
+
+      const [profileRes, diaryRes] = await Promise.all([
+        client.from('user_profiles').select('*'),
+        client.from('daily_logs').select('*').order('date', { ascending: false }).limit(60)
+      ])
+
+      if (profileRes.data) {
+        const byType: Record<string, any> = {}
+        profileRes.data.forEach((p: any) => { byType[p.profile_type] = p.content })
+        setProfileData(byType)
+      }
+      if (diaryRes.data) setDiaryEntries(diaryRes.data)
+      setLoading(false)
+    })()
+  }, [isOpen, initialTab])
+
+  if (!isOpen) return null
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm">
+      <div className="bg-[#FDFCFB] w-full max-w-lg rounded-3xl flex flex-col max-h-[90vh] overflow-hidden border border-base-line">
+        <div className="px-6 py-4 border-b border-base-line flex items-center justify-between bg-[#F7F5F2]">
+          <div className="flex items-center gap-1 p-1 bg-base-bg rounded-full border border-base-line">
+            <button
+              onClick={() => setTab('profile')}
+              className={`px-4 py-1.5 text-sm rounded-full transition-colors ${
+                tab === 'profile' ? 'bg-[#B4AEE8] text-white font-medium' : 'text-base-text/50'
+              }`}
+            >
+              用户画像
+            </button>
+            <button
+              onClick={() => setTab('diary')}
+              className={`px-4 py-1.5 text-sm rounded-full transition-colors ${
+                tab === 'diary' ? 'bg-[#B4AEE8] text-white font-medium' : 'text-base-text/50'
+              }`}
+            >
+              每日日记
+            </button>
+          </div>
+          <button onClick={onClose} className="p-2 hover:bg-base-line rounded-full transition-colors">
+            <X size={20} className="text-base-text/50" />
+          </button>
+        </div>
+
+        <div className="flex-1 overflow-y-auto p-6">
+          {loading ? (
+            <div className="flex items-center justify-center py-20">
+              <Loader2 size={24} className="animate-spin text-base-text/30" />
+            </div>
+          ) : tab === 'profile' ? (
+            <ProfileContent data={profileData} />
+          ) : (
+            <DiaryContent entries={diaryEntries} />
+          )}
         </div>
       </div>
     </div>
@@ -315,6 +517,8 @@ export default function Chat() {
   const [isSettingsOpen, setIsSettingsOpen] = useState(false)
   const [isContextOpen, setIsContextOpen] = useState(false)
   const [lastFullContext, setLastFullContext] = useState<any[]>([])
+  const [isProfileDiaryOpen, setIsProfileDiaryOpen] = useState(false)
+  const [profileDiaryInitialTab, setProfileDiaryInitialTab] = useState<'profile' | 'diary'>('profile')
   const [textareaHeight, setTextareaHeight] = useState(44)
   const bottomRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLTextAreaElement>(null)
@@ -559,45 +763,25 @@ export default function Chat() {
           <button
             type="button"
             onClick={() => setIsSettingsOpen(true)}
-            className="h-10 px-3 text-xs text-base-text/50 border border-base-line rounded-full bg-base-surface active:opacity-70 flex items-center justify-center"
-            style={{ width: '40px' }}
+            className="h-10 w-10 text-base-text/50 border border-base-line rounded-full bg-base-surface active:opacity-70 flex items-center justify-center"
           >
             <Settings size={16} />
           </button>
           <button
             type="button"
-            onClick={vectorSyncStatus === 'pending' ? handleManualVectorSync : undefined}
-            disabled={vectorSyncStatus === 'syncing'}
-            className={`h-10 px-3 text-xs border border-base-line rounded-full bg-base-surface flex items-center gap-1 ${
-              vectorSyncStatus === 'pending' ? 'text-[#B4AEE8] active:opacity-70' : 'text-base-text/30 cursor-default'
-            }`}
-            style={{ width: '40px', justifyContent: 'center' }}
+            onClick={() => { setProfileDiaryInitialTab('profile'); setIsProfileDiaryOpen(true) }}
+            className="h-10 w-10 text-base-text/50 border border-base-line rounded-full bg-base-surface active:opacity-70 flex items-center justify-center"
+            title="用户画像"
           >
-            {vectorSyncStatus === 'syncing' ? (
-              <Loader2 size={14} className="animate-spin" />
-            ) : vectorSyncStatus === 'synced' ? (
-              <Check size={14} className="text-green-400" />
-            ) : (
-              <RefreshCw size={14} />
-            )}
-            {vectorSyncStatus === 'syncing' ? '' : vectorSyncStatus === 'synced' ? '' : ''}
+            <User size={16} />
           </button>
           <button
             type="button"
-            onClick={clearMessages}
-            className="h-10 px-3 text-xs text-base-text/50 border border-base-line rounded-full bg-base-surface active:opacity-70"
-            style={{ width: '40px' }}
+            onClick={() => { setProfileDiaryInitialTab('diary'); setIsProfileDiaryOpen(true) }}
+            className="h-10 w-10 text-base-text/50 border border-base-line rounded-full bg-base-surface active:opacity-70 flex items-center justify-center"
+            title="每日日记"
           >
-            清空
-          </button>
-          <button
-            type="button"
-            onClick={() => setIsContextOpen(true)}
-            className="h-10 px-3 text-xs text-base-text/50 border border-base-line rounded-full bg-base-surface active:opacity-70 flex items-center justify-center"
-            title="全量上下文显示"
-            style={{ width: '40px' }}
-          >
-            <FileText size={16} />
+            <BookOpen size={16} />
           </button>
           <IconButton
             label="返回"
@@ -648,14 +832,23 @@ export default function Chat() {
         </div>
       </footer>
 
-      <SettingsModal 
-        isOpen={isSettingsOpen} 
-        onClose={() => setIsSettingsOpen(false)} 
+      <SettingsModal
+        isOpen={isSettingsOpen}
+        onClose={() => setIsSettingsOpen(false)}
+        vectorSyncStatus={vectorSyncStatus}
+        onVectorSync={handleManualVectorSync}
+        onClearMessages={clearMessages}
+        onOpenContext={() => setIsContextOpen(true)}
       />
       <ContextViewerModal
         isOpen={isContextOpen}
         onClose={() => setIsContextOpen(false)}
         context={lastFullContext}
+      />
+      <ProfileDiaryModal
+        isOpen={isProfileDiaryOpen}
+        onClose={() => setIsProfileDiaryOpen(false)}
+        initialTab={profileDiaryInitialTab}
       />
     </div>
   )

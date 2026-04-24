@@ -36,7 +36,8 @@ async function getHuaweiAccessToken(): Promise<string> {
     iss: subAccount,
     aud: 'https://oauth-login.cloud.huawei.com/oauth2/v3/token',
     iat: now,
-    exp: now + 3600
+    exp: now + 3600,
+    scope: 'https://www.huaweicloud.com/auth/push'
   }))
   const signingInput = `${header}.${payload}`
 
