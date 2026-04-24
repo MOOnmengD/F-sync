@@ -2,6 +2,74 @@ import { createClient } from '@supabase/supabase-js'
 
 const chatModel = process.env.CHAT_AI_MODEL || 'deepseek-chat'
 
+async function getHuaweiAccessToken(): Promise<string> {
+  const clientId = process.env.HUAWEI_CLIENT_ID
+  const clientSecret = process.env.HUAWEI_CLIENT_SECRET
+  if (!clientId || !clientSecret) throw new Error('Missing HUAWEI_CLIENT_ID / HUAWEI_CLIENT_SECRET')
+
+  const params = new URLSearchParams({
+    grant_type: 'client_credentials',
+    client_id: clientId,
+    client_secret: clientSecret
+  })
+
+  const res = await fetch('https://oauth-login.cloud.huawei.com/oauth2/v3/token', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: params.toString()
+  })
+
+  if (!res.ok) throw new Error(`Huawei OAuth failed: ${res.status}`)
+  const data = await res.json()
+  return data.access_token
+}
+
+async function sendHuaweiPush(supabase: any, userId: string, title: string, body: string): Promise<void> {
+  const { data: tokenRow } = await supabase
+    .from('push_tokens')
+    .select('token')
+    .eq('user_id', userId)
+    .eq('platform', 'harmony')
+    .single()
+
+  if (!tokenRow?.token) {
+    console.log('[Push] 未找到设备 token，跳过推送')
+    return
+  }
+
+  const accessToken = await getHuaweiAccessToken()
+  const clientId = process.env.HUAWEI_CLIENT_ID
+
+  const pushRes = await fetch(`https://push-api.cloud.huawei.com/v1/${clientId}/messages:send`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${accessToken}`
+    },
+    body: JSON.stringify({
+      message: {
+        token: [tokenRow.token],
+        notification: { title, body },
+        android: {
+          notification: {
+            click_action: {
+              type: 1,
+              intent: '#Intent;action=com.example.fsync.OPEN_CHAT;end'
+            }
+          }
+        },
+        data: JSON.stringify({ targetPage: 'chat' })
+      }
+    })
+  })
+
+  const pushData = await pushRes.json()
+  if (pushData.code !== '80000000') {
+    throw new Error(`Huawei Push failed: ${pushData.code} ${pushData.msg}`)
+  }
+  console.log('[Push] 华为推送成功:', pushData.requestId)
+}
+
 function resolveChatCompletionsUrl(base: string) {
   const trimmed = base.trim().replace(/\/+$/, '')
   if (!trimmed) return ''
@@ -330,7 +398,7 @@ ${chatSummary}
 
           if (insertError) throw insertError
 
-          // 异步更新用户画像摘要（不阻塞响应）
+          // 异步更新用户画像摘要 + 发送华为推送（不阻塞响应）
           void updateUserProfileSummary({
             supabase,
             userId: targetUserId,
@@ -339,10 +407,10 @@ ${chatSummary}
             apiConfigs,
             settings
           })
+          void sendHuaweiPush(supabase, targetUserId, '弗弗', aiContent)
+            .catch(err => console.error('[Push] 华为推送失败:', err.message))
 
-
-
-        return res.status(200).json({ 
+        return res.status(200).json({
             message: 'Proactive message sent', 
             content: aiContent,
             hoursSinceLastChat,
