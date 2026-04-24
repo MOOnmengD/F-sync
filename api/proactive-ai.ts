@@ -32,8 +32,10 @@ async function getHuaweiAccessToken(): Promise<string> {
 
   const now = Math.floor(Date.now() / 1000)
   const header = b64url(JSON.stringify({ alg: 'RS256', kid: keyId, typ: 'JWT' }))
+  const projectId = process.env.HUAWEI_PROJECT_ID!
   const payload = b64url(JSON.stringify({
-    iss: subAccount,
+    iss: projectId,
+    sub: subAccount,
     aud: 'https://oauth-login.cloud.huawei.com/oauth2/v3/token',
     iat: now,
     exp: now + 3600
