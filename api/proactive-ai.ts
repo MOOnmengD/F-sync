@@ -32,10 +32,8 @@ async function getHuaweiAccessToken(): Promise<string> {
 
   const now = Math.floor(Date.now() / 1000)
   const header = b64url(JSON.stringify({ alg: 'RS256', kid: keyId, typ: 'JWT' }))
-  const projectId = process.env.HUAWEI_PROJECT_ID!
   const payload = b64url(JSON.stringify({
-    iss: projectId,
-    sub: subAccount,
+    iss: subAccount,
     aud: 'https://oauth-login.cloud.huawei.com/oauth2/v3/token',
     iat: now,
     exp: now + 3600
@@ -49,24 +47,7 @@ async function getHuaweiAccessToken(): Promise<string> {
   )
   const jwt = `${signingInput}.${b64url(new Uint8Array(sigBuf))}`
 
-  const params = new URLSearchParams({
-    grant_type: 'urn:ietf:params:oauth:grant-type:jwt-bearer',
-    assertion: jwt
-  })
-
-  const res = await fetch('https://oauth-login.cloud.huawei.com/oauth2/v3/token', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body: params.toString()
-  })
-
-  if (!res.ok) {
-    const text = await res.text()
-    throw new Error(`Huawei JWT exchange failed: ${res.status} ${text}`)
-  }
-  const data = await res.json()
-  if (!data.access_token) throw new Error(`No access_token in response: ${JSON.stringify(data)}`)
-  return data.access_token
+  return jwt
 }
 
 async function sendHuaweiPush(supabase: any, userId: string, title: string, body: string): Promise<void> {
