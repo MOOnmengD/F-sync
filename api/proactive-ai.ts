@@ -79,13 +79,7 @@ async function sendHuaweiPush(supabase: any, userId: string, title: string, body
     validate_only: false,
     message: {
       token: [pushToken],
-      android: {
-        notification: {
-          title,
-          body,
-          click_action: { type: 3 }
-        }
-      }
+      notification: { title, body }
     }
   }
   console.log('[Push] 请求体:', JSON.stringify(payload))
