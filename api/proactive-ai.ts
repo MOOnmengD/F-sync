@@ -18,7 +18,7 @@ async function getHuaweiAccessToken(): Promise<string> {
   console.log('[Push] JWT kid:', keyId, '| sub_account:', subAccount, '| key前20字符:', pem.substring(0, 60).replace(/\n/g, '\\n'))
 
   const now = Math.floor(Date.now() / 1000)
-  const header = b64url(JSON.stringify({ alg: 'PS256', kid: keyId, typ: 'JWT' }))
+  const header = b64url(JSON.stringify({ alg: 'RS256', kid: keyId, typ: 'JWT' }))
   const payload = b64url(JSON.stringify({
     iss: subAccount,
     aud: 'https://oauth-login.cloud.huawei.com/oauth2/v3/token',
@@ -29,8 +29,7 @@ async function getHuaweiAccessToken(): Promise<string> {
 
   const sig = nodeCryptoSign('sha256', Buffer.from(signingInput, 'utf8'), {
     key: pem,
-    padding: nodeCryptoConstants.RSA_PKCS1_PSS_PADDING,
-    saltLength: nodeCryptoConstants.RSA_PSS_SALTLEN_DIGEST
+    padding: nodeCryptoConstants.RSA_PKCS1_PADDING
   })
   const jwt = `${signingInput}.${b64url(sig)}`
 
