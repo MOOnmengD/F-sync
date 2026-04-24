@@ -399,7 +399,11 @@ ${chatSummary}
 
           if (insertError) throw insertError
 
-          // 异步更新用户画像摘要 + 发送华为推送（不阻塞响应）
+          // 等待推送完成再返回响应（Vercel 在 return 后会终止异步任务）
+          await sendHuaweiPush(supabase, targetUserId, '弗弗', aiContent)
+            .catch(err => console.error('[Push] 华为推送失败:', err.message))
+
+          // 摘要更新不重要，继续用 void
           void updateUserProfileSummary({
             supabase,
             userId: targetUserId,
@@ -408,8 +412,6 @@ ${chatSummary}
             apiConfigs,
             settings
           })
-          void sendHuaweiPush(supabase, targetUserId, '弗弗', aiContent)
-            .catch(err => console.error('[Push] 华为推送失败:', err.message))
 
         return res.status(200).json({
             message: 'Proactive message sent', 
