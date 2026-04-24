@@ -108,7 +108,8 @@ async function sendHuaweiPush(supabase: any, userId: string, title: string, body
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      'Authorization': `Bearer ${accessToken}`
+      'Authorization': `Bearer ${accessToken}`,
+      'push-type': '1'
     },
     body: JSON.stringify(payload)
   })
