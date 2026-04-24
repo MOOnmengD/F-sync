@@ -50,14 +50,6 @@ async function sendHuaweiPush(supabase: any, userId: string, title: string, body
       message: {
         token: [tokenRow.token],
         notification: { title, body },
-        android: {
-          notification: {
-            click_action: {
-              type: 1,
-              intent: '#Intent;action=com.example.fsync.OPEN_CHAT;end'
-            }
-          }
-        },
         data: JSON.stringify({ targetPage: 'chat' })
       }
     })
