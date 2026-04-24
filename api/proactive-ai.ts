@@ -49,7 +49,8 @@ async function sendHuaweiPush(supabase: any, userId: string, title: string, body
   const payload = {
     message: {
       token: [pushToken],
-      notification: { title, body }
+      notification: { title, body },
+      hmscore: { targetUserType: 1 }
     }
   }
   console.log('[Push] 请求体:', JSON.stringify(payload))
