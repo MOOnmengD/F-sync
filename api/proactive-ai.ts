@@ -2,16 +2,54 @@ import { createClient } from '@supabase/supabase-js'
 
 const chatModel = process.env.CHAT_AI_MODEL || 'deepseek-chat'
 
+function b64url(data: string | Uint8Array): string {
+  let binary = ''
+  if (typeof data === 'string') {
+    new TextEncoder().encode(data).forEach(b => { binary += String.fromCharCode(b) })
+  } else {
+    data.forEach(b => { binary += String.fromCharCode(b) })
+  }
+  return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '')
+}
+
 async function getHuaweiAccessToken(): Promise<string> {
-  const clientId = process.env.HUAWEI_CLIENT_ID
-  const clientSecret = process.env.HUAWEI_CLIENT_SECRET
-  if (!clientId || !clientSecret) throw new Error('Missing HUAWEI_CLIENT_ID / HUAWEI_CLIENT_SECRET')
+  const keyId = process.env.HUAWEI_KEY_ID
+  const subAccount = process.env.HUAWEI_SUB_ACCOUNT
+  const rawKey = process.env.HUAWEI_PRIVATE_KEY
+  if (!keyId || !subAccount || !rawKey) throw new Error('Missing HUAWEI_KEY_ID / HUAWEI_SUB_ACCOUNT / HUAWEI_PRIVATE_KEY')
+
+  const pem = rawKey.replace(/\\n/g, '\n')
+  const b64 = pem.replace(/-----BEGIN PRIVATE KEY-----|-----END PRIVATE KEY-----|\s/g, '')
+  const binaryStr = atob(b64)
+  const keyBytes = new Uint8Array(binaryStr.length)
+  for (let i = 0; i < binaryStr.length; i++) keyBytes[i] = binaryStr.charCodeAt(i)
+
+  const cryptoKey = await globalThis.crypto.subtle.importKey(
+    'pkcs8', keyBytes.buffer,
+    { name: 'RSA-PSS', hash: 'SHA-256' },
+    false, ['sign']
+  )
+
+  const now = Math.floor(Date.now() / 1000)
+  const header = b64url(JSON.stringify({ alg: 'PS256', kid: keyId, typ: 'JWT' }))
+  const payload = b64url(JSON.stringify({
+    iss: subAccount,
+    aud: 'https://oauth-login.cloud.huawei.com/oauth2/v3/token',
+    iat: now,
+    exp: now + 3600
+  }))
+  const signingInput = `${header}.${payload}`
+
+  const sigBuf = await globalThis.crypto.subtle.sign(
+    { name: 'RSA-PSS', saltLength: 32 },
+    cryptoKey,
+    new TextEncoder().encode(signingInput)
+  )
+  const jwt = `${signingInput}.${b64url(new Uint8Array(sigBuf))}`
 
   const params = new URLSearchParams({
-    grant_type: 'client_credentials',
-    client_id: clientId,
-    client_secret: clientSecret,
-    scope: 'openid push:message:write'
+    grant_type: 'urn:ietf:params:oauth:grant-type:jwt-bearer',
+    assertion: jwt
   })
 
   const res = await fetch('https://oauth-login.cloud.huawei.com/oauth2/v3/token', {
@@ -20,8 +58,12 @@ async function getHuaweiAccessToken(): Promise<string> {
     body: params.toString()
   })
 
-  if (!res.ok) throw new Error(`Huawei OAuth failed: ${res.status}`)
+  if (!res.ok) {
+    const text = await res.text()
+    throw new Error(`Huawei JWT exchange failed: ${res.status} ${text}`)
+  }
   const data = await res.json()
+  if (!data.access_token) throw new Error(`No access_token in response: ${JSON.stringify(data)}`)
   return data.access_token
 }
 
@@ -44,8 +86,8 @@ async function sendHuaweiPush(supabase: any, userId: string, title: string, body
   const accessToken = await getHuaweiAccessToken()
   console.log('[Push] access_token 前12位:', accessToken.substring(0, 12))
 
-  const appId = process.env.HUAWEI_APP_ID || process.env.HUAWEI_CLIENT_ID
-  console.log('[Push] 使用 appId:', appId)
+  const projectId = process.env.HUAWEI_PROJECT_ID
+  console.log('[Push] 使用 projectId:', projectId)
 
   const payload = {
     validate_only: false,
@@ -62,7 +104,7 @@ async function sendHuaweiPush(supabase: any, userId: string, title: string, body
   }
   console.log('[Push] 请求体:', JSON.stringify(payload))
 
-  const pushRes = await fetch(`https://push-api.cloud.huawei.com/v2/${appId}/messages:send`, {
+  const pushRes = await fetch(`https://push-api.cloud.huawei.com/v3/${projectId}/messages:send`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
