@@ -41,24 +41,30 @@ async function sendHuaweiPush(supabase: any, userId: string, title: string, body
   console.log('[Push] token 长度:', pushToken.length, '前8位:', pushToken.substring(0, 8))
 
   const accessToken = await getHuaweiAccessToken()
-  const clientId = process.env.HUAWEI_CLIENT_ID
+  console.log('[Push] access_token 前12位:', accessToken.substring(0, 12))
 
-  const pushRes = await fetch(`https://push-api.cloud.huawei.com/v1/${clientId}/messages:send`, {
+  const appId = process.env.HUAWEI_APP_ID || process.env.HUAWEI_CLIENT_ID
+  console.log('[Push] 使用 appId:', appId)
+
+  const payload = {
+    message: {
+      token: [pushToken],
+      notification: { title, body }
+    }
+  }
+  console.log('[Push] 请求体:', JSON.stringify(payload))
+
+  const pushRes = await fetch(`https://push-api.cloud.huawei.com/v1/${appId}/messages:send`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
       'Authorization': `Bearer ${accessToken}`
     },
-    body: JSON.stringify({
-      message: {
-        token: [pushToken],
-        notification: { title, body },
-        data: JSON.stringify({ targetPage: 'chat' })
-      }
-    })
+    body: JSON.stringify(payload)
   })
 
   const pushData = await pushRes.json()
+  console.log('[Push] 完整响应:', JSON.stringify(pushData))
   if (pushData.code !== '80000000') {
     throw new Error(`Huawei Push failed: ${pushData.code} ${pushData.msg}`)
   }
