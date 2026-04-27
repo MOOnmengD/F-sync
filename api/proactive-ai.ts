@@ -47,10 +47,16 @@ async function sendHuaweiPush(supabase: any, userId: string, title: string, body
   console.log('[Push] 使用 projectId:', projectId)
 
   const payload = {
-    validate_only: false,
-    message: {
-      token: [pushToken],
-      notification: { title, body }
+    payload: {
+      notification: {
+        category: 'MARKETING',
+        title,
+        body,
+        clickAction: { actionType: 0 }
+      }
+    },
+    target: {
+      token: [pushToken]
     }
   }
   console.log('[Push] 请求体:', JSON.stringify(payload))
