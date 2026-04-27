@@ -49,7 +49,7 @@ async function sendHuaweiPush(supabase: any, userId: string, title: string, body
   const payload = {
     payload: {
       notification: {
-        category: 'MARKETING',
+        category: 'IM',
         title,
         body,
         clickAction: { actionType: 0 }
