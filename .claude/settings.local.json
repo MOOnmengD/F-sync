@@ -10,7 +10,8 @@
       "WebFetch(domain:developer.huawei.com)",
       "WebFetch(domain:dev.to)",
       "WebFetch(domain:blog.csdn.net)",
-      "WebFetch(domain:forums.developer.huawei.com)"
+      "WebFetch(domain:forums.developer.huawei.com)",
+      "Bash(npm install *)"
     ]
   }
 }
