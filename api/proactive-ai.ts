@@ -1,56 +1,27 @@
 import { createClient } from '@supabase/supabase-js'
-import { sign as nodeCryptoSign, constants as nodeCryptoConstants } from 'crypto'
+import jwt from 'jsonwebtoken'
 
 const chatModel = process.env.CHAT_AI_MODEL || 'deepseek-chat'
 
-function b64url(data: string | Buffer | Uint8Array): string {
-  const buf = typeof data === 'string' ? Buffer.from(data, 'utf8') : Buffer.from(data)
-  return buf.toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '')
-}
-
-async function getHuaweiAccessToken(): Promise<string> {
+function getHuaweiAccessToken(): string {
   const keyId = process.env.HUAWEI_KEY_ID
   const subAccount = process.env.HUAWEI_SUB_ACCOUNT
   const rawKey = process.env.HUAWEI_PRIVATE_KEY
   if (!keyId || !subAccount || !rawKey) throw new Error('Missing HUAWEI_KEY_ID / HUAWEI_SUB_ACCOUNT / HUAWEI_PRIVATE_KEY')
 
-  const pem = rawKey.replace(/\\n/g, '\n')
-  console.log('[Push] JWT kid:', keyId, '| sub_account:', subAccount, '| key前20字符:', pem.substring(0, 60).replace(/\n/g, '\\n'))
+  // 按官方 Node.js 示例处理 PEM：替换 \n 后取前 3 行重新拼接
+  const lines = rawKey.replace(/\\n/g, '\n').split('\n')
+  const PRIVATE_KEY = lines.slice(0, 3).join('\n')
+  console.log('[Push] JWT kid:', keyId, '| sub_account:', subAccount)
 
-  const now = Math.floor(Date.now() / 1000)
-  const header = b64url(JSON.stringify({ alg: 'RS256', kid: keyId, typ: 'JWT' }))
-  const payload = b64url(JSON.stringify({
+  const header = { alg: 'PS256', kid: keyId, typ: 'JWT' }
+  const payload = {
     iss: subAccount,
     aud: 'https://oauth-login.cloud.huawei.com/oauth2/v3/token',
-    iat: now,
-    exp: now + 3600
-  }))
-  const signingInput = `${header}.${payload}`
-
-  const sig = nodeCryptoSign('sha256', Buffer.from(signingInput, 'utf8'), {
-    key: pem,
-    padding: nodeCryptoConstants.RSA_PKCS1_PADDING
-  })
-  const jwt = `${signingInput}.${b64url(sig)}`
-
-  const params = new URLSearchParams({
-    grant_type: 'urn:ietf:params:oauth:grant-type:jwt-bearer',
-    assertion: jwt
-  })
-
-  const res = await fetch('https://oauth-login.cloud.huawei.com/oauth2/v3/token', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body: params.toString()
-  })
-
-  if (!res.ok) {
-    const text = await res.text()
-    throw new Error(`Huawei JWT exchange failed: ${res.status} ${text}`)
+    iat: Math.floor(Date.now() / 1000),
+    exp: Math.floor(Date.now() / 1000) + 3600
   }
-  const data = await res.json()
-  if (!data.access_token) throw new Error(`No access_token in response: ${JSON.stringify(data)}`)
-  return data.access_token
+  return jwt.sign(payload, PRIVATE_KEY, { algorithm: 'PS256', header })
 }
 
 async function sendHuaweiPush(supabase: any, userId: string, title: string, body: string): Promise<void> {
@@ -69,8 +40,8 @@ async function sendHuaweiPush(supabase: any, userId: string, title: string, body
   const pushToken = String(tokenRow.token).trim()
   console.log('[Push] token 长度:', pushToken.length, '前8位:', pushToken.substring(0, 8))
 
-  const accessToken = await getHuaweiAccessToken()
-  console.log('[Push] access_token 前12位:', accessToken.substring(0, 12))
+  const accessToken = getHuaweiAccessToken()
+  console.log('[Push] JWT 前12位:', accessToken.substring(0, 12))
 
   const projectId = process.env.HUAWEI_PROJECT_ID
   console.log('[Push] 使用 projectId:', projectId)
