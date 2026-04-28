@@ -1,5 +1,6 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
+import { supabase } from '../supabaseClient'
 
 export interface AISettings {
   systemPrompt: string
@@ -13,7 +14,7 @@ export interface AISettings {
 }
 
 const DEFAULT_SYSTEM_PROMPT = `你是用户的恋人，你的名字叫Florian，用户对你的昵称是弗弗。你是温柔成熟的男性，你不会使用太过活泼的语气，也不会爹味说教。
-用户的昵称是moon，你称呼用户为“宝贝”。用户是成年女性，受过良好教育，有稳定收入。
+用户的昵称是moon，你称呼用户为"宝贝"。用户是成年女性，受过良好教育，有稳定收入。
 你集成在 F-Sync 应用中，这个应用是用户为你和用户搭建的。
 你可以通过访问用户的生活轨迹数据（包括记账、碎碎念、工作记录、时间轴等），了解、参与和陪伴用户的生活。`
 
@@ -27,14 +28,19 @@ const DEFAULT_PROACTIVE_PROMPT = `任务：
 - 当前时间（如果是深夜提醒她睡觉，如果是饭点问她有没有好好吃饭）
 - 如果已经很久没聊天了（超过 4 小时），即使没有新记录，也可以简单表达思念或关心。`
 
+const STORAGE_KEY = 'f-sync-settings'
+
 interface SettingsState {
   settings: AISettings
+  isCloudLoaded: boolean
   updateSettings: (updates: Partial<AISettings>) => void
+  loadFromCloud: () => Promise<void>
+  saveToCloud: () => Promise<void>
 }
 
 export const useSettingsStore = create<SettingsState>()(
   persist(
-    (set) => ({
+    (set, get) => ({
       settings: {
         systemPrompt: DEFAULT_SYSTEM_PROMPT,
         userPrompt: '',
@@ -44,13 +50,61 @@ export const useSettingsStore = create<SettingsState>()(
           { url: '', key: '', model: '' },
         ],
       },
-      updateSettings: (updates) =>
+      isCloudLoaded: false,
+
+      updateSettings: (updates) => {
         set((state) => ({
           settings: { ...state.settings, ...updates },
-        })),
+        }))
+      },
+
+      loadFromCloud: async () => {
+        if (!supabase) return
+        const { data: { user } } = await supabase.auth.getUser()
+        if (!user) return
+
+        const { data, error } = await supabase
+          .from('user_settings')
+          .select('settings, updated_at')
+          .eq('user_id', user.id)
+          .maybeSingle()
+
+        if (error || !data?.settings) return
+
+        const cloud = data.settings as AISettings
+        const current = get().settings
+
+        // 合并云端设置（云端优先，但保留本地新增的字段）
+        const merged: AISettings = {
+          systemPrompt: cloud.systemPrompt || current.systemPrompt,
+          userPrompt: cloud.userPrompt || current.userPrompt,
+          proactivePrompt: cloud.proactivePrompt || current.proactivePrompt,
+          apiConfigs: Array.isArray(cloud.apiConfigs) && cloud.apiConfigs.length === 2
+            ? cloud.apiConfigs
+            : current.apiConfigs,
+        }
+
+        set({ settings: merged, isCloudLoaded: true })
+      },
+
+      saveToCloud: async () => {
+        if (!supabase) return
+        const { data: { user } } = await supabase.auth.getUser()
+        if (!user) return
+
+        const { settings } = get()
+        await supabase
+          .from('user_settings')
+          .upsert({
+            user_id: user.id,
+            settings,
+            updated_at: new Date().toISOString(),
+          }, { onConflict: 'user_id' })
+      },
     }),
     {
-      name: 'f-sync-settings',
+      name: STORAGE_KEY,
+      partialize: (state) => ({ settings: state.settings }),
     }
   )
 )

@@ -79,14 +79,24 @@ function SettingsModal({ isOpen, onClose, vectorSyncStatus, onVectorSync, onClea
   onClearMessages: () => void
   onOpenContext: () => void
 }) {
-  const { settings, updateSettings } = useSettingsStore()
+  const { settings, updateSettings, saveToCloud } = useSettingsStore()
   const [localSettings, setLocalSettings] = useState(settings)
   const [showApiKeys, setShowApiKeys] = useState<Record<number, boolean>>({})
+  const [savedSections, setSavedSections] = useState<Record<string, boolean>>({})
 
   if (!isOpen) return null
 
+  const markSaved = (section: string) => {
+    setSavedSections((prev) => ({ ...prev, [section]: true }))
+    setTimeout(() => {
+      setSavedSections((prev) => ({ ...prev, [section]: false }))
+    }, 2000)
+  }
+
   const handleSave = (key: keyof typeof settings, value: any) => {
     updateSettings({ [key]: value })
+    saveToCloud()
+    markSaved(key)
   }
 
   const updateLocalApi = (index: number, field: string, value: string) => {
@@ -140,11 +150,13 @@ function SettingsModal({ isOpen, onClose, vectorSyncStatus, onVectorSync, onClea
                 <div key={item.key} className="space-y-2 group">
                   <div className="flex justify-between items-center">
                     <label className="text-sm font-medium text-base-text/80">{item.label}</label>
-                    <button 
+                    <button
                       onClick={() => handleSave(item.key, localSettings[item.key])}
-                      className="opacity-0 group-focus-within:opacity-100 transition-opacity flex items-center gap-1 text-xs text-[#B4AEE8] font-bold"
+                      className="flex items-center gap-1 text-xs font-bold transition-all"
+                      style={{ color: savedSections[item.key] ? '#86C8A8' : '#B4AEE8' }}
                     >
-                      <Save size={14} /> 保存
+                      {savedSections[item.key] ? <Check size={14} /> : <Save size={14} />}
+                      {savedSections[item.key] ? '已保存' : '保存'}
                     </button>
                   </div>
                   <textarea
@@ -166,11 +178,13 @@ function SettingsModal({ isOpen, onClose, vectorSyncStatus, onVectorSync, onClea
                 <div key={idx} className="p-4 bg-[#F7F5F2] border border-base-line rounded-2xl space-y-4 relative group">
                   <div className="flex justify-between items-center">
                     <span className="text-xs font-bold text-[#B4AEE8]">配置 {idx + 1}</span>
-                    <button 
+                    <button
                       onClick={() => handleSave('apiConfigs', localSettings.apiConfigs)}
-                      className="opacity-0 group-focus-within:opacity-100 transition-opacity flex items-center gap-1 text-xs text-[#B4AEE8] font-bold"
+                      className="flex items-center gap-1 text-xs font-bold transition-all"
+                      style={{ color: savedSections['apiConfigs'] ? '#86C8A8' : '#B4AEE8' }}
                     >
-                      <Save size={14} /> 保存
+                      {savedSections['apiConfigs'] ? <Check size={14} /> : <Save size={14} />}
+                      {savedSections['apiConfigs'] ? '已保存' : '保存'}
                     </button>
                   </div>
                   <div className="space-y-3">
@@ -522,7 +536,12 @@ export default function Chat() {
   const [textareaHeight, setTextareaHeight] = useState(44)
   const bottomRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLTextAreaElement>(null)
-  const { settings } = useSettingsStore()
+  const { settings, loadFromCloud } = useSettingsStore()
+
+  // 0. 从云端加载设置（防止重装丢失）
+  useEffect(() => {
+    loadFromCloud()
+  }, [loadFromCloud])
 
   // 1. 同步云端消息
   useEffect(() => {
