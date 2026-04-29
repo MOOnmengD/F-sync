@@ -4,9 +4,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## 项目背景
 
-F-Sync 是一个个人生活记录 + AI 生活助手 Web 应用，部署在 https://www.fsync.top。个人开发、个人使用（单一用户）。通过 HarmonyOS WebAbility 封装为移动端应用（类 PWA）。
+F-Sync 是一个个人生活记录 + AI 生活助手 Web 应用，部署在 https://www.fsync.top。个人开发、个人使用（单一用户，无其他用户）。通过 HarmonyOS WebAbility 封装为移动端应用（类 PWA）。
 
-**开发者背景**：工科生，软件开发新手，用词可能不够专业，需要耐心解释。
+**开发者背景**：工科生，软件开发新手，用词可能不够专业，先确认需求再编程。
 
 **两个代码仓库**：
 - Web 端：`D:/F-Sync/`（本仓库）
@@ -45,54 +45,129 @@ npm run preview
 
 **数据流**：
 ```
+=== 记账/记录流程 ===
 用户输入（Home.tsx）
   → 前端预处理（extractDate / extractAmount）
+  → 离线草稿箱（localStorage fsync_outkey，失败时暂存）
   → POST /api/parse-transaction（AI 解析）
   → 写入 Supabase transactions 表
   → 异步触发 POST /api/vectorize（生成 embedding）
-  → Supabase Realtime 推送 → 各页面实时更新
+  → Supabase Realtime 推送 → Finance/Whisper 等页面实时更新
+
+=== AI 对话流程 ===
+用户发消息（Chat.tsx）
+  → 本地状态更新（Zustand persist）
+  → POST /api/chat-completion（RAG 检索 + AI 回复）
+  → 同步到 Supabase chat_messages（含 client_id 防重）
+  → 页面卸载/隐藏时自动同步未发送消息
+
+=== 主动消息 + 推送流程 ===
+GitHub Actions 定时触发（每 15 分钟）
+  → POST /api/proactive-ai（CRON_SECRET 鉴权）
+  → AI 决策是否发消息
+  → 写入 chat_messages（client_id = proactive-{timestamp}）
+  → 调用华为 Push Kit v3 API 推送通知
+  → 设备收到通知（横幅 + 振动）
+
+=== 每日日记 + 画像更新 ===
+GitHub Actions 定时触发（每天 UTC 17:00）
+  → POST /api/daily-summary（CRON_SECRET 鉴权）
+  → 收集过去 24h 记录 + 对话
+  → AI 生成日记（Florian 第一人称）
+  → 写入 daily_logs
+  → 判断是否需要更新画像，如有必要则更新 user_profiles
+
+=== 设置云端同步 ===
+Chat 页挂载 → loadFromCloud()
+  → 从 Supabase user_settings 拉取
+  → 云端优先合并到本地 Zustand
+保存设置 → saveToCloud()
+  → upsert 到 user_settings
 ```
 
-**数据库表结构**（详见 `supabase.schema.json`）：
+**数据库表结构**（详见 `supabase.schema.json` 和 `migrations/` 目录）：
 
-- **transactions**（核心表，存所有记录）：`type` 字段区分记录类型（`'记账'` / `'whisper'` / `'timing'` / `'review'` 等）；`embedding` 字段（pgvector）用于 RAG 检索；`ai_metadata` JSONB 存 AI 解析结构化数据
-- **items**（物品/品牌档案）：每次记账时 AI 解析出 `item_name`，自动 upsert 到此表
-- **chat_messages**（对话历史）：`client_id` 为前端生成的幂等 ID（UNIQUE），防止重复插入；主动消息的 `client_id` 格式为 `proactive-{timestamp}`
+**核心表**（supabase.schema.json 中有记录）：
 
-**RLS 策略**：transactions 和 items 表通过硬编码 UUID（`17bc4400-b67a-45b0-9366-0e689eedfa09`）限制为单一用户；chat_messages 通过 `auth.uid()` 限制。
+| 表名 | 用途 | 关键字段 |
+|------|------|----------|
+| `transactions` | 所有生活记录（记账/碎碎念/计时/点评等） | `type`, `content`, `amount`, `embedding`(pgvector), `search_vector`(tsvector), `ai_metadata`(JSONB), `mood`, `finance_category`, `start_time/end_time/duration`(计时) |
+| `items` | 物品/品牌档案（去重） | `item_name`(UNIQUE), `brand`, `category`, `last_review`, `embedding` |
+| `chat_messages` | AI 对话历史 | `role`, `content`, `client_id`(UNIQUE 幂等), `user_id` |
+
+**迁移添加的表**（`migrations/` 目录）：
+
+| 表名 | 用途 | 关键字段 | 迁移文件 |
+|------|------|----------|----------|
+| `user_profiles` | AI 生成的用户画像（长期记忆） | `user_id`, `profile_type`(diet_preferences/person_mentions/recent_moods/spending_patterns), `content`(JSONB) | 002 |
+| `user_settings` | 云端 AI 设置存储 | `user_id`(UNIQUE), `settings`(JSONB) | 003 |
+| `push_tokens` | 华为推送设备 Token | `user_id`, `token`, `platform`(harmony), UNIQUE(user_id, platform) | 004 |
+| `daily_logs` | AI 每日日记 | `user_id`, `date`(YYYY-MM-DD), `content` | 005 |
+
+**数据库函数**：
+- `match_life_logs(query_embedding, match_threshold, match_count)` — pgvector 余弦相似度搜索，用于 RAG 向量检索策略（迁移 006）
+- `transactions_search_vector_update()` — 触发器函数，自动更新 tsvector 全文搜索列（迁移 001）
+
+**RLS 策略**：transactions 和 items 表通过硬编码 UUID（`17bc4400-b67a-45b0-9366-0e689eedfa09`）限制为单一用户；chat_messages、user_profiles、user_settings、push_tokens、daily_logs 通过 `auth.uid()` 限制。
 
 **Serverless API**（`api/` 目录）：
 
-| 文件 | 功能 |
-|------|------|
-| `parse-transaction.ts` | AI 解析记账文本 → 结构化 JSON |
-| `vectorize.ts` | 生成 embedding；支持单条（`transaction_id`）和全量（`mode:'all'`）模式 |
-| `chat-completion.ts` | AI 对话，含 RAG（向量检索 + 全文检索 + 时间兜底三策略），读取 user_profiles 表作为长期记忆 |
-| `proactive-ai.ts` | 定时主动发消息（GitHub Actions 触发），写入 chat_messages，同步更新 user_profiles |
+| 文件 | 功能 | 触达方式 |
+|------|------|----------|
+| `parse-transaction.ts` | AI 解析记账文本 → 结构化 JSON | 前端 Home 页输入 |
+| `vectorize.ts` | 生成 embedding；支持单条（`transaction_id`）和全量（`mode:'all'`）模式 | 前端调用 + 异步触发 |
+| `chat-completion.ts` | AI 对话，含 RAG（向量检索 + 全文检索 + 时间兜底三策略），读取 user_profiles 表作为长期记忆 | 前端 Chat 页 |
+| `proactive-ai.ts` | 定时主动发消息（GitHub Actions 触发），调用 AI 决策是否发送，写入 chat_messages，通过华为 Push Kit 推送通知，更新 user_profiles | GitHub Actions 每 15 分钟 |
+| `save-push-token.ts` | 保存 HarmonyOS Push Token 到 push_tokens 表（upsert by user_id+platform） | 前端 WebView 桥接调用 |
+| `daily-summary.ts` | 每日 AI 日记生成 + 用户画像更新（cron 触发），写入 daily_logs 和 user_profiles | GitHub Actions 每天 UTC 17:00 |
 
-**环境变量**（Vercel 配置）：
-- `VITE_SUPABASE_URL` / `VITE_SUPABASE_ANON_KEY`：前端 Supabase 连接
-- `SUPABASE_SERVICE_ROLE_KEY`：API 端 Supabase 管理员权限
-- `AI_API_URL` / `AI_API_KEY` / `AI_MODEL`：记账解析 AI
-- `CHAT_AI_API_URL` / `CHAT_AI_API_KEY` / `CHAT_AI_MODEL`：对话 AI
-- `EMBEDDING_API_URL` / `EMBEDDING_API_KEY` / `EMBEDDING_MODEL`：向量化
-- `CRON_SECRET`：proactive-ai 接口鉴权
-- `PROACTIVE_USER_ID`：主动消息目标用户 UUID
+**API 依赖的 npm 包**：仅 `@supabase/supabase-js`（数据读写）和 `jsonwebtoken`（proactive-ai 中生成华为推送 JWT）。
+
+**环境变量**（Vercel + GitHub Secrets）：
+
+| 变量 | 用途 | 使用位置 |
+|------|------|----------|
+| `VITE_SUPABASE_URL` | Supabase 项目 URL | 前端 + API |
+| `VITE_SUPABASE_ANON_KEY` | Supabase 匿名密钥 | 前端 |
+| `SUPABASE_SERVICE_ROLE_KEY` | Supabase 管理员密钥（绕过 RLS） | 所有 API 端 |
+| `AI_API_URL` / `AI_API_KEY` / `AI_MODEL` | 记账解析 AI（OpenAI 兼容） | parse-transaction，其他 API 的 fallback |
+| `CHAT_AI_API_URL` / `CHAT_AI_API_KEY` / `CHAT_AI_MODEL` | 对话 AI（优先使用） | chat-completion, proactive-ai, daily-summary |
+| `EMBEDDING_API_URL` / `EMBEDDING_API_KEY` / `EMBEDDING_MODEL` | 向量化（text-embedding-3-small） | vectorize, chat-completion |
+| `CRON_SECRET` | cron 接口鉴权（Bearer Token） | proactive-ai, daily-summary, GitHub Actions |
+| `PROACTIVE_USER_ID` | 主动消息目标用户 UUID | proactive-ai, daily-summary, save-push-token |
+| `HUAWEI_KEY_ID` / `HUAWEI_SUB_ACCOUNT` | 华为 AGC 服务账号 | proactive-ai |
+| `HUAWEI_PRIVATE_KEY` | 华为 Push Kit JWT 私钥（PS256） | proactive-ai |
+| `HUAWEI_PROJECT_ID` | 华为 AGC 项目 ID | proactive-ai |
+| `VERCEL_DOMAIN` | 部署域名 | GitHub Actions（cron curl 目标） |
+
+> 注意：API 代码中多处使用 fallback 链（如 `EMBEDDING_API_KEY \|\| CHAT_AI_API_KEY \|\| AI_API_KEY`），确保同类型 AI 服务至少配置一组。
 
 **前端页面结构**：
-- `/`（Home）：主输入界面，顶部 mode 切换（记账/点评/碎碎念/工作/收藏/时间轴），底部固定输入框
-- `/finance`（Finance）：记账月度报表，按天分组
-- `/whisper`（Whisper）：碎碎念月度回显，支持展开/折叠
-- `/chat`（Chat）：AI 对话界面，含设置面板（API 配置、Prompt 设定）
-- `/timeline`、`/work`、`/vault`：时间轴、工作记录、知识库（部分未完善）
+- `/`（Home）：主输入界面，顶部 mode 切换（记账/点评/碎碎念/工作/收藏/时间轴），底部固定输入框。含离线草稿箱（localStorage 暂存发送失败的记录）。时间轴 mode 含计时功能（useTimeline hook，localStorage 持久化进行中的计时）
+- `/finance`（Finance）：记账月度报表，按天分组，支持月份选择
+- `/whisper`（Whisper）：碎碎念月度回显，支持展开/折叠，按心情筛选
+- `/chat`（Chat）：AI 对话界面，含设置面板（API 配置、Prompt 设定、向量同步）、AI 日记+用户画像查看（ProfileDiaryModal）。消息支持删除（含二次确认）。支持设置云端存储/加载
+- `/timeline`：占位页面（时间轴功能已内嵌在 Home 页的时间轴 mode 中）
+- `/work`、`/vault`：占位页面（待开发）
 - `/login`（Login）：GitHub OAuth 登录
 
 侧边栏（DrawerNav）：全局导航，点击左上角 Menu 图标触发。
 
 **状态管理**（`src/store/`）：
-- `ui.ts`：UI 状态（抽屉开关、当前 mode、记账分类/必要性、心情）
-- `chat.ts`：聊天消息（本地持久化 + Supabase 同步），含 `upsertMessage` 防重
-- `settings.ts`：AI 设置（system prompt、API 配置），持久化到 localStorage
+- `ui.ts`：UI 状态（抽屉开关、当前 mode、记账分类/必要性、心情），无持久化
+- `chat.ts`：聊天消息（Zustand persist → localStorage `f-sync-chat-v2`），含 `upsertMessage` 防重（by client_id）、`deleteMessage`（本地 + Supabase 级联删除）、`syncMessages`（批量同步未同步消息到 Supabase）。页面卸载/隐藏时自动触发同步
+- `settings.ts`：AI 设置（system prompt、user prompt、proactive prompt、apiConfigs），持久化到 localStorage `f-sync-settings`。支持 `loadFromCloud()` / `saveToCloud()` — 从 Supabase `user_settings` 表拉取/推送，云端优先合并
+
+### GitHub Actions 定时任务
+
+`.github/workflows/` 目录下有两个定时工作流，通过 `curl` 调用 Vercel 上的 API 端点：
+
+| 工作流文件 | 调度频率 | 调用端点 | 功能 |
+|-----------|---------|----------|------|
+| `proactive-ai-pulse.yml` | 每 15 分钟 | `POST /api/proactive-ai` | AI 决策是否发送主动消息 + 推送通知 |
+| `daily-summary.yml` | 每天 UTC 17:00（CST 次日 01:00） | `POST /api/daily-summary` | 生成 AI 日记 + 更新用户画像 |
+
+两个工作流均使用 GitHub Secrets：`VERCEL_DOMAIN`（目标 URL）、`CRON_SECRET`（Bearer Token 鉴权），也支持 `workflow_dispatch` 手动触发。
 
 ### 设计规范
 
@@ -102,14 +177,15 @@ npm run preview
 - **背景色**：`#FDFCFB`（base-bg）/ `#F7F5F2`（base-surface）
 - **文字色**：`#4B5563`（base-text）/ `#6B7280`（base-muted）
 - **边框色**：`#E7E5E4`（base-line）
-- 新 UI 组件复用 `src/shared/ui/`（IconButton、PillButton、SegmentToggle）
+- 新 UI 组件复用 `src/shared/ui/`（IconButton、PillButton、SegmentToggle、RepurchaseIndexPill、MonthPicker）
 
 ### 修改 Supabase 的流程
 
 涉及表结构变更时：
-1. 提供 SQL 代码给用户在 Supabase Dashboard 执行
-2. 用户执行后会更新 `supabase.schema.json`
-3. 读取最新的 `supabase.schema.json` 了解当前表结构
+1. 在 `migrations/` 目录创建 SQL 迁移文件（按序号命名，如 `007_xxx.sql`）
+2. 提供 SQL 代码给用户在 Supabase Dashboard 执行
+3. 用户执行后可更新 `supabase.schema.json`（通过 Supabase Dashboard 导出）
+4. 读取最新的 `supabase.schema.json` 了解当前部分表结构；迁移中的表参见 `migrations/` 目录
 
 ---
 
@@ -117,7 +193,7 @@ npm run preview
 
 ### 开发工具
 
-使用 **DevEco Studio** 开发，不在命令行构建。构建/运行/调试均在 DevEco Studio IDE 内完成。
+使用 **DevEco Studio** 开发，不在命令行构建。构建/运行/调试均在 DevEco Studio IDE 内完成。由于HarmonyOS开发的特殊性，在调用系统权限/api时主动向开发者要求获取官方说明文档/示例代码，获取足够信息后再开始编程。
 
 ### 架构
 
@@ -161,9 +237,10 @@ GitHub Actions 定时触发
 
 ### 已知问题 / 待完善
 
-- WebView 桥接中 `postMessage` 拦截方式较脆弱，消息从 Web 到原生的链路尚未完全打通（`harmonyMessageHandler` 只打了 log，未实际回调到 `handleWebViewMessage`）
-- 主动消息通知依赖 WebView 保持在前台运行，应用退出后台后 Supabase Realtime 连接会断开
-- `WebAbilityPage.ets` 中 `onPageBegin`/`onPageEnd` 各注册了两次（重复注册）
+- 消息从 Web 到原生的桥接链路已通过 Push Kit v3 实现（华为推送），不依赖 WebView postMessage 桥接
+- 主动消息通知通过华为 Push Kit 推送，即使应用在后台也能收到横幅通知（IM 自分类权益已申请）
+- Push Token 保存链路：WebView 内 JS → `POST /api/save-push-token` → Supabase push_tokens 表
+- `WebAbilityPage.ets` 中 `onPageBegin`/`onPageEnd` 各注册了两次（重复注册，待清理）
 
 ---
 

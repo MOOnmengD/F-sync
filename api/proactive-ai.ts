@@ -412,16 +412,6 @@ ${chatSummary}
           await sendHuaweiPush(supabase, targetUserId, '弗弗', aiContent)
             .catch(err => console.error('[Push] 华为推送失败:', err.message))
 
-          // 摘要更新不重要，继续用 void
-          void updateUserProfileSummary({
-            supabase,
-            userId: targetUserId,
-            recentLogs: recentLogs || [],
-            recentChats: recentChats || [],
-            apiConfigs,
-            settings
-          })
-
         return res.status(200).json({
             message: 'Proactive message sent', 
             content: aiContent,
@@ -430,17 +420,7 @@ ${chatSummary}
           })
         }
 
-        // 异步更新用户画像摘要（即使AI决定跳过）
-        void updateUserProfileSummary({
-          supabase,
-          userId: targetUserId,
-          recentLogs: recentLogs || [],
-          recentChats: recentChats || [],
-          apiConfigs,
-          settings
-        })
-
-        return res.status(200).json({ 
+        return res.status(200).json({
           message: 'AI decided to skip',
           aiResponse: aiContent,
           hoursSinceLastChat,

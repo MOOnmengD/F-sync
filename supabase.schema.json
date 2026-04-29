@@ -1,7 +1,7 @@
 {
   "meta": {
-    "capturedAt": "",
-    "notes": ""
+    "capturedAt": "2026-04-29",
+    "notes": "完整包含全部 8 张表。transactions/items/chat_messages 来自 Dashboard 导出，其余来自 migrations/ 目录。"
   },
   "columns": [
   {
@@ -390,6 +390,18 @@
   },
   {
     "table_name": "transactions",
+    "column_name": "search_vector",
+    "data_type": "USER-DEFINED",
+    "udt_name": "tsvector",
+    "is_nullable": "YES",
+    "column_default": null,
+    "constraint_name": null,
+    "constraint_type": null,
+    "foreign_table_name": null,
+    "foreign_column_name": null
+  },
+  {
+    "table_name": "transactions",
     "column_name": "start_time",
     "data_type": "timestamp with time zone",
     "udt_name": "timestamptz",
@@ -419,6 +431,282 @@
     "udt_name": "text",
     "is_nullable": "NO",
     "column_default": null,
+    "constraint_name": null,
+    "constraint_type": null,
+    "foreign_table_name": null,
+    "foreign_column_name": null
+  },
+  {
+    "table_name": "user_profiles",
+    "column_name": "id",
+    "data_type": "uuid",
+    "udt_name": "uuid",
+    "is_nullable": "NO",
+    "column_default": "gen_random_uuid()",
+    "constraint_name": "user_profiles_pkey",
+    "constraint_type": "PRIMARY KEY",
+    "foreign_table_name": "user_profiles",
+    "foreign_column_name": "id"
+  },
+  {
+    "table_name": "user_profiles",
+    "column_name": "user_id",
+    "data_type": "uuid",
+    "udt_name": "uuid",
+    "is_nullable": "NO",
+    "column_default": null,
+    "constraint_name": "fk_user_profiles_user_id",
+    "constraint_type": "FOREIGN KEY",
+    "foreign_table_name": "auth.users",
+    "foreign_column_name": "id"
+  },
+  {
+    "table_name": "user_profiles",
+    "column_name": "profile_type",
+    "data_type": "text",
+    "udt_name": "text",
+    "is_nullable": "NO",
+    "column_default": null,
+    "constraint_name": "user_profiles_user_id_profile_type_key",
+    "constraint_type": "UNIQUE",
+    "foreign_table_name": "user_profiles",
+    "foreign_column_name": "user_id"
+  },
+  {
+    "table_name": "user_profiles",
+    "column_name": "content",
+    "data_type": "jsonb",
+    "udt_name": "jsonb",
+    "is_nullable": "NO",
+    "column_default": "'{}'::jsonb",
+    "constraint_name": null,
+    "constraint_type": null,
+    "foreign_table_name": null,
+    "foreign_column_name": null
+  },
+  {
+    "table_name": "user_profiles",
+    "column_name": "created_at",
+    "data_type": "timestamp with time zone",
+    "udt_name": "timestamptz",
+    "is_nullable": "NO",
+    "column_default": "now()",
+    "constraint_name": null,
+    "constraint_type": null,
+    "foreign_table_name": null,
+    "foreign_column_name": null
+  },
+  {
+    "table_name": "user_profiles",
+    "column_name": "updated_at",
+    "data_type": "timestamp with time zone",
+    "udt_name": "timestamptz",
+    "is_nullable": "NO",
+    "column_default": "now()",
+    "constraint_name": null,
+    "constraint_type": null,
+    "foreign_table_name": null,
+    "foreign_column_name": null
+  },
+  {
+    "table_name": "user_settings",
+    "column_name": "id",
+    "data_type": "uuid",
+    "udt_name": "uuid",
+    "is_nullable": "NO",
+    "column_default": "gen_random_uuid()",
+    "constraint_name": "user_settings_pkey",
+    "constraint_type": "PRIMARY KEY",
+    "foreign_table_name": "user_settings",
+    "foreign_column_name": "id"
+  },
+  {
+    "table_name": "user_settings",
+    "column_name": "user_id",
+    "data_type": "uuid",
+    "udt_name": "uuid",
+    "is_nullable": "NO",
+    "column_default": null,
+    "constraint_name": "user_settings_user_id_key",
+    "constraint_type": "UNIQUE",
+    "foreign_table_name": "user_settings",
+    "foreign_column_name": "user_id"
+  },
+  {
+    "table_name": "user_settings",
+    "column_name": "settings",
+    "data_type": "jsonb",
+    "udt_name": "jsonb",
+    "is_nullable": "NO",
+    "column_default": "'{}'::jsonb",
+    "constraint_name": null,
+    "constraint_type": null,
+    "foreign_table_name": null,
+    "foreign_column_name": null
+  },
+  {
+    "table_name": "user_settings",
+    "column_name": "created_at",
+    "data_type": "timestamp with time zone",
+    "udt_name": "timestamptz",
+    "is_nullable": "NO",
+    "column_default": "now()",
+    "constraint_name": null,
+    "constraint_type": null,
+    "foreign_table_name": null,
+    "foreign_column_name": null
+  },
+  {
+    "table_name": "user_settings",
+    "column_name": "updated_at",
+    "data_type": "timestamp with time zone",
+    "udt_name": "timestamptz",
+    "is_nullable": "NO",
+    "column_default": "now()",
+    "constraint_name": null,
+    "constraint_type": null,
+    "foreign_table_name": null,
+    "foreign_column_name": null
+  },
+  {
+    "table_name": "push_tokens",
+    "column_name": "id",
+    "data_type": "uuid",
+    "udt_name": "uuid",
+    "is_nullable": "NO",
+    "column_default": "gen_random_uuid()",
+    "constraint_name": "push_tokens_pkey",
+    "constraint_type": "PRIMARY KEY",
+    "foreign_table_name": "push_tokens",
+    "foreign_column_name": "id"
+  },
+  {
+    "table_name": "push_tokens",
+    "column_name": "user_id",
+    "data_type": "uuid",
+    "udt_name": "uuid",
+    "is_nullable": "NO",
+    "column_default": null,
+    "constraint_name": "fk_push_tokens_user_id",
+    "constraint_type": "FOREIGN KEY",
+    "foreign_table_name": "auth.users",
+    "foreign_column_name": "id"
+  },
+  {
+    "table_name": "push_tokens",
+    "column_name": "token",
+    "data_type": "text",
+    "udt_name": "text",
+    "is_nullable": "NO",
+    "column_default": null,
+    "constraint_name": null,
+    "constraint_type": null,
+    "foreign_table_name": null,
+    "foreign_column_name": null
+  },
+  {
+    "table_name": "push_tokens",
+    "column_name": "platform",
+    "data_type": "text",
+    "udt_name": "text",
+    "is_nullable": "NO",
+    "column_default": "'harmony'::text",
+    "constraint_name": "push_tokens_user_id_platform_key",
+    "constraint_type": "UNIQUE",
+    "foreign_table_name": "push_tokens",
+    "foreign_column_name": "user_id"
+  },
+  {
+    "table_name": "push_tokens",
+    "column_name": "created_at",
+    "data_type": "timestamp with time zone",
+    "udt_name": "timestamptz",
+    "is_nullable": "NO",
+    "column_default": "now()",
+    "constraint_name": null,
+    "constraint_type": null,
+    "foreign_table_name": null,
+    "foreign_column_name": null
+  },
+  {
+    "table_name": "push_tokens",
+    "column_name": "updated_at",
+    "data_type": "timestamp with time zone",
+    "udt_name": "timestamptz",
+    "is_nullable": "NO",
+    "column_default": "now()",
+    "constraint_name": null,
+    "constraint_type": null,
+    "foreign_table_name": null,
+    "foreign_column_name": null
+  },
+  {
+    "table_name": "daily_logs",
+    "column_name": "id",
+    "data_type": "uuid",
+    "udt_name": "uuid",
+    "is_nullable": "NO",
+    "column_default": "gen_random_uuid()",
+    "constraint_name": "daily_logs_pkey",
+    "constraint_type": "PRIMARY KEY",
+    "foreign_table_name": "daily_logs",
+    "foreign_column_name": "id"
+  },
+  {
+    "table_name": "daily_logs",
+    "column_name": "user_id",
+    "data_type": "uuid",
+    "udt_name": "uuid",
+    "is_nullable": "NO",
+    "column_default": null,
+    "constraint_name": "fk_daily_logs_user_id",
+    "constraint_type": "FOREIGN KEY",
+    "foreign_table_name": "auth.users",
+    "foreign_column_name": "id"
+  },
+  {
+    "table_name": "daily_logs",
+    "column_name": "date",
+    "data_type": "text",
+    "udt_name": "text",
+    "is_nullable": "NO",
+    "column_default": null,
+    "constraint_name": "daily_logs_user_id_date_key",
+    "constraint_type": "UNIQUE",
+    "foreign_table_name": "daily_logs",
+    "foreign_column_name": "user_id"
+  },
+  {
+    "table_name": "daily_logs",
+    "column_name": "content",
+    "data_type": "text",
+    "udt_name": "text",
+    "is_nullable": "NO",
+    "column_default": null,
+    "constraint_name": null,
+    "constraint_type": null,
+    "foreign_table_name": null,
+    "foreign_column_name": null
+  },
+  {
+    "table_name": "daily_logs",
+    "column_name": "created_at",
+    "data_type": "timestamp with time zone",
+    "udt_name": "timestamptz",
+    "is_nullable": "NO",
+    "column_default": "now()",
+    "constraint_name": null,
+    "constraint_type": null,
+    "foreign_table_name": null,
+    "foreign_column_name": null
+  },
+  {
+    "table_name": "daily_logs",
+    "column_name": "updated_at",
+    "data_type": "timestamp with time zone",
+    "udt_name": "timestamptz",
+    "is_nullable": "NO",
+    "column_default": "now()",
     "constraint_name": null,
     "constraint_type": null,
     "foreign_table_name": null,
@@ -467,6 +755,108 @@
     "tablename": "transactions",
     "indexname": "transactions_pkey",
     "indexdef": "CREATE UNIQUE INDEX transactions_pkey ON public.transactions USING btree (id)"
+  },
+  {
+    "schemaname": "public",
+    "tablename": "transactions",
+    "indexname": "idx_transactions_search_vector",
+    "indexdef": "CREATE INDEX idx_transactions_search_vector ON public.transactions USING gin (search_vector)"
+  },
+  {
+    "schemaname": "public",
+    "tablename": "user_profiles",
+    "indexname": "user_profiles_pkey",
+    "indexdef": "CREATE UNIQUE INDEX user_profiles_pkey ON public.user_profiles USING btree (id)"
+  },
+  {
+    "schemaname": "public",
+    "tablename": "user_profiles",
+    "indexname": "user_profiles_user_id_profile_type_key",
+    "indexdef": "CREATE UNIQUE INDEX user_profiles_user_id_profile_type_key ON public.user_profiles USING btree (user_id, profile_type)"
+  },
+  {
+    "schemaname": "public",
+    "tablename": "user_profiles",
+    "indexname": "idx_user_profiles_user_id",
+    "indexdef": "CREATE INDEX idx_user_profiles_user_id ON public.user_profiles USING btree (user_id)"
+  },
+  {
+    "schemaname": "public",
+    "tablename": "user_profiles",
+    "indexname": "idx_user_profiles_profile_type",
+    "indexdef": "CREATE INDEX idx_user_profiles_profile_type ON public.user_profiles USING btree (profile_type)"
+  },
+  {
+    "schemaname": "public",
+    "tablename": "user_profiles",
+    "indexname": "idx_user_profiles_updated_at",
+    "indexdef": "CREATE INDEX idx_user_profiles_updated_at ON public.user_profiles USING btree (updated_at DESC)"
+  },
+  {
+    "schemaname": "public",
+    "tablename": "user_settings",
+    "indexname": "user_settings_pkey",
+    "indexdef": "CREATE UNIQUE INDEX user_settings_pkey ON public.user_settings USING btree (id)"
+  },
+  {
+    "schemaname": "public",
+    "tablename": "user_settings",
+    "indexname": "user_settings_user_id_key",
+    "indexdef": "CREATE UNIQUE INDEX user_settings_user_id_key ON public.user_settings USING btree (user_id)"
+  },
+  {
+    "schemaname": "public",
+    "tablename": "user_settings",
+    "indexname": "idx_user_settings_user_id",
+    "indexdef": "CREATE INDEX idx_user_settings_user_id ON public.user_settings USING btree (user_id)"
+  },
+  {
+    "schemaname": "public",
+    "tablename": "push_tokens",
+    "indexname": "push_tokens_pkey",
+    "indexdef": "CREATE UNIQUE INDEX push_tokens_pkey ON public.push_tokens USING btree (id)"
+  },
+  {
+    "schemaname": "public",
+    "tablename": "push_tokens",
+    "indexname": "push_tokens_user_id_platform_key",
+    "indexdef": "CREATE UNIQUE INDEX push_tokens_user_id_platform_key ON public.push_tokens USING btree (user_id, platform)"
+  },
+  {
+    "schemaname": "public",
+    "tablename": "push_tokens",
+    "indexname": "idx_push_tokens_user_id",
+    "indexdef": "CREATE INDEX idx_push_tokens_user_id ON public.push_tokens USING btree (user_id)"
+  },
+  {
+    "schemaname": "public",
+    "tablename": "push_tokens",
+    "indexname": "idx_push_tokens_platform",
+    "indexdef": "CREATE INDEX idx_push_tokens_platform ON public.push_tokens USING btree (platform)"
+  },
+  {
+    "schemaname": "public",
+    "tablename": "daily_logs",
+    "indexname": "daily_logs_pkey",
+    "indexdef": "CREATE UNIQUE INDEX daily_logs_pkey ON public.daily_logs USING btree (id)"
+  },
+  {
+    "schemaname": "public",
+    "tablename": "daily_logs",
+    "indexname": "daily_logs_user_id_date_key",
+    "indexdef": "CREATE UNIQUE INDEX daily_logs_user_id_date_key ON public.daily_logs USING btree (user_id, date)"
+  },
+  {
+    "schemaname": "public",
+    "tablename": "daily_logs",
+    "indexname": "idx_daily_logs_user_id",
+    "indexdef": "CREATE INDEX idx_daily_logs_user_id ON public.daily_logs USING btree (user_id)"
+  },
+  {
+    "schemaname": "public",
+    "tablename": "daily_logs",
+    "indexname": "idx_daily_logs_date",
+    "indexdef": "CREATE INDEX idx_daily_logs_date ON public.daily_logs USING btree (date DESC)"
   }
   ],
   "rls": [
@@ -482,6 +872,26 @@
     },
     {
       "table_name": "chat_messages",
+      "rls_enabled": true,
+      "rls_forced": false
+    },
+    {
+      "table_name": "user_profiles",
+      "rls_enabled": true,
+      "rls_forced": false
+    },
+    {
+      "table_name": "user_settings",
+      "rls_enabled": true,
+      "rls_forced": false
+    },
+    {
+      "table_name": "push_tokens",
+      "rls_enabled": true,
+      "rls_forced": false
+    },
+    {
+      "table_name": "daily_logs",
       "rls_enabled": true,
       "rls_forced": false
     }
@@ -596,6 +1006,126 @@
     "cmd": "UPDATE",
     "qual": "(auth.uid() = '17bc4400-b67a-45b0-9366-0e689eedfa09'::uuid)",
     "with_check": "(auth.uid() = '17bc4400-b67a-45b0-9366-0e689eedfa09'::uuid)"
+  },
+  {
+    "schemaname": "public",
+    "tablename": "user_profiles",
+    "policyname": "Users can view their own profiles",
+    "permissive": "PERMISSIVE",
+    "roles": "{authenticated}",
+    "cmd": "SELECT",
+    "qual": "(auth.uid() = user_id)",
+    "with_check": null
+  },
+  {
+    "schemaname": "public",
+    "tablename": "user_profiles",
+    "policyname": "Users can insert their own profiles",
+    "permissive": "PERMISSIVE",
+    "roles": "{authenticated}",
+    "cmd": "INSERT",
+    "qual": null,
+    "with_check": "(auth.uid() = user_id)"
+  },
+  {
+    "schemaname": "public",
+    "tablename": "user_profiles",
+    "policyname": "Users can update their own profiles",
+    "permissive": "PERMISSIVE",
+    "roles": "{authenticated}",
+    "cmd": "UPDATE",
+    "qual": "(auth.uid() = user_id)",
+    "with_check": "(auth.uid() = user_id)"
+  },
+  {
+    "schemaname": "public",
+    "tablename": "user_profiles",
+    "policyname": "Users can delete their own profiles",
+    "permissive": "PERMISSIVE",
+    "roles": "{authenticated}",
+    "cmd": "DELETE",
+    "qual": "(auth.uid() = user_id)",
+    "with_check": null
+  },
+  {
+    "schemaname": "public",
+    "tablename": "user_settings",
+    "policyname": "Users can view their own settings",
+    "permissive": "PERMISSIVE",
+    "roles": "{authenticated}",
+    "cmd": "SELECT",
+    "qual": "(auth.uid() = user_id)",
+    "with_check": null
+  },
+  {
+    "schemaname": "public",
+    "tablename": "user_settings",
+    "policyname": "Users can insert their own settings",
+    "permissive": "PERMISSIVE",
+    "roles": "{authenticated}",
+    "cmd": "INSERT",
+    "qual": null,
+    "with_check": "(auth.uid() = user_id)"
+  },
+  {
+    "schemaname": "public",
+    "tablename": "user_settings",
+    "policyname": "Users can update their own settings",
+    "permissive": "PERMISSIVE",
+    "roles": "{authenticated}",
+    "cmd": "UPDATE",
+    "qual": "(auth.uid() = user_id)",
+    "with_check": "(auth.uid() = user_id)"
+  },
+  {
+    "schemaname": "public",
+    "tablename": "user_settings",
+    "policyname": "Users can delete their own settings",
+    "permissive": "PERMISSIVE",
+    "roles": "{authenticated}",
+    "cmd": "DELETE",
+    "qual": "(auth.uid() = user_id)",
+    "with_check": null
+  },
+  {
+    "schemaname": "public",
+    "tablename": "push_tokens",
+    "policyname": "Users can manage their own push tokens",
+    "permissive": "PERMISSIVE",
+    "roles": "{authenticated}",
+    "cmd": "ALL",
+    "qual": "(auth.uid() = user_id)",
+    "with_check": "(auth.uid() = user_id)"
+  },
+  {
+    "schemaname": "public",
+    "tablename": "daily_logs",
+    "policyname": "Users can view their own daily logs",
+    "permissive": "PERMISSIVE",
+    "roles": "{authenticated}",
+    "cmd": "SELECT",
+    "qual": "(auth.uid() = user_id)",
+    "with_check": null
+  },
+  {
+    "schemaname": "public",
+    "tablename": "daily_logs",
+    "policyname": "Users can insert their own daily logs",
+    "permissive": "PERMISSIVE",
+    "roles": "{authenticated}",
+    "cmd": "INSERT",
+    "qual": null,
+    "with_check": "(auth.uid() = user_id)"
+  },
+  {
+    "schemaname": "public",
+    "tablename": "daily_logs",
+    "policyname": "Users can update their own daily logs",
+    "permissive": "PERMISSIVE",
+    "roles": "{authenticated}",
+    "cmd": "UPDATE",
+    "qual": "(auth.uid() = user_id)",
+    "with_check": "(auth.uid() = user_id)"
   }
   ]
 }
