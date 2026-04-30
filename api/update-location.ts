@@ -44,6 +44,58 @@ export default async function handler(req: any, res: any) {
       return
     }
 
+    // 高德逆地理编码：坐标 → 结构化地址 + 附近 POI
+    let amapAddress = ''
+    const amapKey = process.env.AMAP_API_KEY
+    if (amapKey) {
+      try {
+        const amapRes = await fetch(
+          `https://restapi.amap.com/v3/geocode/regeo?location=${longitude.toFixed(6)},${latitude.toFixed(6)}&extensions=all&radius=500&output=json&key=${amapKey}`
+        )
+        if (amapRes.ok) {
+          const amapData = await amapRes.json()
+          if (amapData.status === '1' && amapData.regeocode) {
+            const parts: string[] = []
+            const regeo = amapData.regeocode
+
+            // 结构化地址
+            if (regeo.formatted_address) {
+              parts.push(regeo.formatted_address)
+            }
+
+            // 建筑名
+            const building = regeo.addressComponent?.building
+            if (building && building.name && typeof building.name === 'string') {
+              parts.push(building.name)
+            }
+
+            // 最近 POI（200 米内）
+            const pois = regeo.pois
+            if (Array.isArray(pois) && pois.length > 0) {
+              const nearest = pois[0]
+              if (nearest.name && nearest.distance != null) {
+                const dist = parseInt(nearest.distance, 10)
+                if (dist <= 200) {
+                  const poiStr = dist === 0 ? nearest.name : `${nearest.name}${dist}米`
+                  parts.push(`靠近${poiStr}`)
+                }
+              }
+            }
+
+            amapAddress = parts.join(' ')
+            console.log(`[update-location] Amap address: "${amapAddress}"`)
+          }
+        } else {
+          console.warn(`[update-location] Amap API failed: ${amapRes.status}`)
+        }
+      } catch (amapErr: any) {
+        console.warn(`[update-location] Amap error: ${amapErr.message}`)
+      }
+    }
+
+    // 地址优先级：高德 > HarmonyOS Location Kit
+    const finalAddress = amapAddress || address
+
     const supabase = createClient(supabaseUrl, supabaseKey)
 
     const { error } = await supabase
@@ -53,7 +105,7 @@ export default async function handler(req: any, res: any) {
         latitude,
         longitude,
         accuracy,
-        address,
+        address: finalAddress,
         source,
         updated_at: new Date().toISOString()
       }, {

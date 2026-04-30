@@ -14,7 +14,8 @@
       "Bash(npm install *)",
       "WebFetch(domain:gitee.com)",
       "WebFetch(domain:raw.giteeusercontent.com)",
-      "WebFetch(domain:gitcode.com)"
+      "WebFetch(domain:gitcode.com)",
+      "WebFetch(domain:lbs.amap.com)"
     ]
   },
   "skipWebFetchPreflight": true
