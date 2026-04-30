@@ -15,6 +15,7 @@ export default async function handler(req: any, res: any) {
     const latitude = typeof body.latitude === 'number' ? body.latitude : parseFloat(body.latitude)
     const longitude = typeof body.longitude === 'number' ? body.longitude : parseFloat(body.longitude)
     const accuracy = body.accuracy != null ? parseFloat(body.accuracy) : null
+    const address = body.address || null
     const source = body.source || 'foreground'
 
     if (!userId) {
@@ -52,6 +53,7 @@ export default async function handler(req: any, res: any) {
         latitude,
         longitude,
         accuracy,
+        address,
         source,
         updated_at: new Date().toISOString()
       }, {

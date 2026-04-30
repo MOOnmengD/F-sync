@@ -7,18 +7,18 @@ import { supabase } from '../supabaseClient'
 import { useSettingsStore } from '../store/settings'
 
 // 位置缓存，避免频繁调用原生定位（5 分钟窗口）
-let locationCache: { latitude: number; longitude: number; accuracy: number; timestamp: number } | null = null
+let locationCache: { latitude: number; longitude: number; accuracy: number; address?: string; timestamp: number } | null = null
 const LOCATION_CACHE_MS = 5 * 60 * 1000
 const LOCATION_TOTAL_TIMEOUT_MS = 8000
 
-async function getCurrentLocation(): Promise<{ latitude: number; longitude: number; accuracy: number } | null> {
+async function getCurrentLocation(): Promise<{ latitude: number; longitude: number; accuracy: number; address?: string } | null> {
   if (locationCache && Date.now() - locationCache.timestamp < LOCATION_CACHE_MS) {
-    return { latitude: locationCache.latitude, longitude: locationCache.longitude, accuracy: locationCache.accuracy }
+    return { latitude: locationCache.latitude, longitude: locationCache.longitude, accuracy: locationCache.accuracy, address: locationCache.address }
   }
 
   return new Promise((resolve) => {
     let settled = false
-    const done = (result: { latitude: number; longitude: number; accuracy: number } | null) => {
+    const done = (result: { latitude: number; longitude: number; accuracy: number; address?: string } | null) => {
       if (settled) return
       settled = true
       if (timer) clearTimeout(timer)
@@ -38,7 +38,7 @@ async function getCurrentLocation(): Promise<{ latitude: number; longitude: numb
         try {
           const nativeLoc = await bridge.requestLocation()
           if (nativeLoc && !settled) {
-            console.log(`[Location] 原生定位成功: lat=${nativeLoc.latitude}, lng=${nativeLoc.longitude}`)
+            console.log(`[Location] 原生定位成功: lat=${nativeLoc.latitude}, lng=${nativeLoc.longitude}${nativeLoc.address ? ', addr=' + nativeLoc.address : ''}`)
             locationCache = { ...nativeLoc, timestamp: Date.now() }
             done(nativeLoc)
             return

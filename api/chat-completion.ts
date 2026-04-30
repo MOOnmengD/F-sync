@@ -125,12 +125,16 @@ export default async function handler(req: any, res: any) {
     const lat = location.latitude.toFixed(6)
     const lng = location.longitude.toFixed(6)
     const acc = typeof location.accuracy === 'number' ? `${Math.round(location.accuracy)}米` : '未知精度'
-    locationInfo = `宝贝当前位置：坐标 (${lat}, ${lng})，精度 ${acc}。
+    if (location.address && typeof location.address === 'string') {
+      locationInfo = `宝贝当前位置：${location.address}（坐标 ${lat}, ${lng}，精度 ${acc}）。`
+    } else {
+      locationInfo = `宝贝当前位置：坐标 (${lat}, ${lng})，精度 ${acc}。
 【地点场景参考】（坐标约值，供你判断宝贝当前所在场景）：
+- 18号公寓：坐标约 (xx.xxxxxx, xx.xxxxxx) → 宝贝在宿舍休息
 - 实验室：坐标约 (xx.xxxxxx, xx.xxxxxx) → 宝贝在工作/学习
 - 食堂：坐标约 (xx.xxxxxx, xx.xxxxxx) → 宝贝在吃饭
-- 宿舍/18号公寓：坐标约 (xx.xxxxxx, xx.xxxxxx) → 宝贝在宿舍休息
 - 不匹配以上 → 可能在室外/校外/其他地方`
+    }
   }
 
   // 优先级：前端传来的配置 > 环境变量
