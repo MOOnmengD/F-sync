@@ -47,6 +47,7 @@ export default async function handler(req: any, res: any) {
     // 高德逆地理编码：坐标 → 结构化地址 + 附近 POI
     let amapAddress = ''
     const amapKey = process.env.AMAP_API_KEY
+    console.log(`[update-location] AMAP_API_KEY configured: ${amapKey ? 'yes' : 'NO'}`)
     if (amapKey) {
       try {
         const amapRes = await fetch(
