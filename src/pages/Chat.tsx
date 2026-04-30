@@ -59,6 +59,10 @@ function formatTime(timestamp: number) {
   return `${hh}:${mm}`
 }
 
+function splitContent(content: string): string[] {
+  return content.split(/\n{2,}/).map(s => s.trim()).filter(s => s.length > 0)
+}
+
 function WelcomeBubble() {
   return (
     <div className="flex justify-start">
@@ -495,63 +499,122 @@ function ProfileDiaryModal({ isOpen, onClose, initialTab }: {
 function MessageBubble({ msg, isTyping, onDelete }: { msg: ChatMessage; isTyping?: boolean; onDelete?: (id: string) => void }) {
   const isUser = msg.role === 'user'
   const [confirming, setConfirming] = useState(false)
+  const segments = msg.content ? splitContent(msg.content) : []
 
   const handleDeleteClick = () => setConfirming(true)
   const handleConfirm = () => { setConfirming(false); onDelete?.(msg.id) }
   const handleCancel = () => setConfirming(false)
 
+  const bubbleBg = isUser ? 'bg-[#E8F5E9]' : 'bg-[#F0F7FF]'
+  const justify = isUser ? 'flex-end' : 'flex-start'
+
+  const renderBubble = (content: string, key: number) => (
+    <div key={key} className="flex items-center gap-2 w-full" style={{ justifyContent: justify }}>
+      <div className={`w-[70%] rounded-2xl border border-base-line px-4 py-3 ${bubbleBg}`}>
+        <p className="text-sm text-base-text whitespace-pre-wrap break-words">{content}</p>
+      </div>
+    </div>
+  )
+
   return (
-    <div className={`flex flex-col ${isUser ? 'items-end' : 'items-start'}`}>
-      <div className="flex items-center gap-2 w-full justify-inherit" style={{ justifyContent: isUser ? 'flex-end' : 'flex-start' }}>
-        <div
-          className={`w-[70%] rounded-2xl border border-base-line px-4 py-3 ${
-            isUser ? 'bg-[#E8F5E9]' : 'bg-[#F0F7FF]'
-          }`}
-        >
-          {msg.content ? (
-            <p className="text-sm text-base-text whitespace-pre-wrap break-words">{msg.content}</p>
-          ) : !isUser && isTyping ? (
-            <div className="h-5 w-8 flex items-center justify-center">
-              <div className="flex gap-1">
-                <div className="w-1 h-1 bg-base-text/30 rounded-full animate-bounce" />
-                <div className="w-1 h-1 bg-base-text/30 rounded-full animate-bounce [animation-delay:0.2s]" />
-                <div className="w-1 h-1 bg-base-text/30 rounded-full animate-bounce [animation-delay:0.4s]" />
+    <div className={`flex flex-col gap-1.5 ${isUser ? 'items-end' : 'items-start'}`}>
+      {segments.length > 0 ? (
+        <>
+          {segments.map((segment, i) => {
+            const isLast = i === segments.length - 1
+            return (
+              <div key={i} className="contents">
+                {renderBubble(segment, i)}
+                {isLast && (
+                  <>
+                    {!isUser && isTyping && (
+                      <div className="flex justify-start w-full">
+                        <Loader2 size={16} className="animate-spin text-base-text/30 shrink-0 ml-1" />
+                      </div>
+                    )}
+                    <div className={`flex items-center gap-2 ${isUser ? 'flex-row-reverse' : 'flex-row'}`}>
+                      <p className="text-xs text-base-text/40">{formatTime(msg.createdAt)}</p>
+                      {onDelete && !isTyping && (
+                        <button
+                          onClick={handleDeleteClick}
+                          className="p-1 rounded-full text-base-text/20 hover:text-red-400 hover:bg-red-50 active:scale-90 transition-all duration-150"
+                        >
+                          <Trash2 size={12} />
+                        </button>
+                      )}
+                    </div>
+                    {confirming && (
+                      <div className={`flex items-center gap-2 px-3 py-1.5 rounded-xl border border-red-100 bg-red-50 text-xs ${isUser ? 'self-end' : 'self-start'}`}>
+                        <span className="text-base-text/60">真的要删除这条消息吗？</span>
+                        <button
+                          onClick={handleConfirm}
+                          className="font-semibold text-red-500 hover:text-red-600 transition-colors"
+                        >
+                          是
+                        </button>
+                        <span className="text-base-text/20">·</span>
+                        <button
+                          onClick={handleCancel}
+                          className="text-base-text/40 hover:text-base-text/70 transition-colors"
+                        >
+                          否
+                        </button>
+                      </div>
+                    )}
+                  </>
+                )}
               </div>
+            )
+          })}
+        </>
+      ) : (
+        <>
+          <div className="flex items-center gap-2 w-full" style={{ justifyContent: justify }}>
+            <div className={`w-[70%] rounded-2xl border border-base-line px-4 py-3 ${bubbleBg}`}>
+              {!isUser && isTyping ? (
+                <div className="h-5 w-8 flex items-center justify-center">
+                  <div className="flex gap-1">
+                    <div className="w-1 h-1 bg-base-text/30 rounded-full animate-bounce" />
+                    <div className="w-1 h-1 bg-base-text/30 rounded-full animate-bounce [animation-delay:0.2s]" />
+                    <div className="w-1 h-1 bg-base-text/30 rounded-full animate-bounce [animation-delay:0.4s]" />
+                  </div>
+                </div>
+              ) : null}
             </div>
-          ) : null}
-        </div>
-        {!isUser && isTyping && (
-          <Loader2 size={16} className="animate-spin text-base-text/30 shrink-0" />
-        )}
-      </div>
-      <div className={`mt-1 flex items-center gap-2 ${isUser ? 'flex-row-reverse' : 'flex-row'}`}>
-        <p className="text-xs text-base-text/40">{formatTime(msg.createdAt)}</p>
-        {onDelete && !isTyping && (
-          <button
-            onClick={handleDeleteClick}
-            className="p-1 rounded-full text-base-text/20 hover:text-red-400 hover:bg-red-50 active:scale-90 transition-all duration-150"
-          >
-            <Trash2 size={12} />
-          </button>
-        )}
-      </div>
-      {confirming && (
-        <div className={`mt-1.5 flex items-center gap-2 px-3 py-1.5 rounded-xl border border-red-100 bg-red-50 text-xs ${isUser ? 'self-end' : 'self-start'}`}>
-          <span className="text-base-text/60">真的要删除这条消息吗？</span>
-          <button
-            onClick={handleConfirm}
-            className="font-semibold text-red-500 hover:text-red-600 transition-colors"
-          >
-            是
-          </button>
-          <span className="text-base-text/20">·</span>
-          <button
-            onClick={handleCancel}
-            className="text-base-text/40 hover:text-base-text/70 transition-colors"
-          >
-            否
-          </button>
-        </div>
+            {!isUser && isTyping && (
+              <Loader2 size={16} className="animate-spin text-base-text/30 shrink-0" />
+            )}
+          </div>
+          <div className={`flex items-center gap-2 ${isUser ? 'flex-row-reverse' : 'flex-row'}`}>
+            <p className="text-xs text-base-text/40">{formatTime(msg.createdAt)}</p>
+            {onDelete && !isTyping && (
+              <button
+                onClick={handleDeleteClick}
+                className="p-1 rounded-full text-base-text/20 hover:text-red-400 hover:bg-red-50 active:scale-90 transition-all duration-150"
+              >
+                <Trash2 size={12} />
+              </button>
+            )}
+          </div>
+          {confirming && (
+            <div className={`flex items-center gap-2 px-3 py-1.5 rounded-xl border border-red-100 bg-red-50 text-xs ${isUser ? 'self-end' : 'self-start'}`}>
+              <span className="text-base-text/60">真的要删除这条消息吗？</span>
+              <button
+                onClick={handleConfirm}
+                className="font-semibold text-red-500 hover:text-red-600 transition-colors"
+              >
+                是
+              </button>
+              <span className="text-base-text/20">·</span>
+              <button
+                onClick={handleCancel}
+                className="text-base-text/40 hover:text-base-text/70 transition-colors"
+              >
+                否
+              </button>
+            </div>
+          )}
+        </>
       )}
     </div>
   )
