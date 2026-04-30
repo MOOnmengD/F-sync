@@ -44,51 +44,53 @@ export default async function handler(req: any, res: any) {
       return
     }
 
-    // 高德逆地理编码：坐标 → 结构化地址 + 附近 POI
+    // 高德逆地理编码 (regeo → 地址底子) + POI 搜索 v2 (周边建筑物)
     let amapAddress = ''
     const amapKey = process.env.AMAP_API_KEY
-    console.log(`[update-location] AMAP_API_KEY configured: ${amapKey ? 'yes' : 'NO'}`)
     if (amapKey) {
       try {
-        const amapRes = await fetch(
-          `https://restapi.amap.com/v3/geocode/regeo?location=${longitude.toFixed(6)},${latitude.toFixed(6)}&extensions=all&radius=500&output=json&key=${amapKey}`
-        )
-        if (amapRes.ok) {
-          const amapData = await amapRes.json()
-          if (amapData.status === '1' && amapData.regeocode) {
-            const parts: string[] = []
-            const regeo = amapData.regeocode
+        const lngLat = `${longitude.toFixed(6)},${latitude.toFixed(6)}`
 
-            // 结构化地址
-            if (regeo.formatted_address) {
-              parts.push(regeo.formatted_address)
-            }
+        // 并行：regeo 拿地址 + POI 搜索拿最近建筑物
+        const [regeoRes, poiRes] = await Promise.all([
+          fetch(`https://restapi.amap.com/v3/geocode/regeo?location=${lngLat}&extensions=all&radius=500&output=json&key=${amapKey}`),
+          fetch(`https://restapi.amap.com/v5/place/around?location=${lngLat}&radius=200&sortrule=distance&page_size=3&show_fields=children,indoor&output=json&key=${amapKey}`)
+        ])
 
-            // 建筑名
-            const building = regeo.addressComponent?.building
-            if (building && building.name && typeof building.name === 'string') {
-              parts.push(building.name)
-            }
+        const parts: string[] = []
 
-            // 最近 POI（200 米内）
-            const pois = regeo.pois
-            if (Array.isArray(pois) && pois.length > 0) {
-              const nearest = pois[0]
-              if (nearest.name && nearest.distance != null) {
-                const dist = parseInt(nearest.distance, 10)
-                if (dist <= 200) {
-                  const poiStr = dist === 0 ? nearest.name : `${nearest.name}${dist}米`
-                  parts.push(`靠近${poiStr}`)
-                }
+        // regeo → 结构化地址
+        if (regeoRes.ok) {
+          const d = await regeoRes.json()
+          if (d.status === '1' && d.regeocode) {
+            if (d.regeocode.formatted_address) parts.push(d.regeocode.formatted_address)
+            const b = d.regeocode.addressComponent?.building
+            if (b && b.name && typeof b.name === 'string') parts.push(b.name)
+          }
+        }
+
+        // POI 搜索 v2 → 最近建筑物名称
+        if (poiRes.ok) {
+          const pd = await poiRes.json()
+          if (pd.status === '1' && Array.isArray(pd.pois) && pd.pois.length > 0) {
+            const nearest = pd.pois[0]
+            const dist = parseInt(nearest.distance, 10) || 0
+            if (nearest.name && dist <= 200) {
+              const distStr = dist < 5 ? '' : `${dist}米`
+              parts.push(`靠近${nearest.name}${distStr}`)
+
+              // 子POI：如果是建筑物，列出子楼宇
+              const children = nearest.children
+              if (Array.isArray(children) && children.length > 0) {
+                const childNames = children.slice(0, 3).map((c: any) => c.name || '').filter(Boolean).join('、')
+                if (childNames) parts.push(`(${childNames})`)
               }
             }
-
-            amapAddress = parts.join(' ')
-            console.log(`[update-location] Amap address: "${amapAddress}"`)
           }
-        } else {
-          console.warn(`[update-location] Amap API failed: ${amapRes.status}`)
         }
+
+        amapAddress = parts.join(' ')
+        if (amapAddress) console.log(`[update-location] Amap address: "${amapAddress}"`)
       } catch (amapErr: any) {
         console.warn(`[update-location] Amap error: ${amapErr.message}`)
       }
