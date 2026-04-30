@@ -9,44 +9,68 @@ import { useSettingsStore } from '../store/settings'
 // 位置缓存，避免频繁调用原生定位（5 分钟窗口）
 let locationCache: { latitude: number; longitude: number; accuracy: number; timestamp: number } | null = null
 const LOCATION_CACHE_MS = 5 * 60 * 1000
+const LOCATION_TOTAL_TIMEOUT_MS = 8000
 
 async function getCurrentLocation(): Promise<{ latitude: number; longitude: number; accuracy: number } | null> {
   if (locationCache && Date.now() - locationCache.timestamp < LOCATION_CACHE_MS) {
+    console.log('[Location] 使用缓存位置')
     return { latitude: locationCache.latitude, longitude: locationCache.longitude, accuracy: locationCache.accuracy }
   }
 
-  // 优先尝试浏览器 Geolocation API（HarmonyOS WebView 支持）
-  try {
-    const pos = await new Promise<GeolocationPosition>((resolve, reject) => {
-      if (!navigator.geolocation) return reject(new Error('Geolocation not supported'))
-      navigator.geolocation.getCurrentPosition(resolve, reject, {
-        enableHighAccuracy: true,
-        timeout: 10000,
-        maximumAge: LOCATION_CACHE_MS
-      })
-    })
-    locationCache = {
-      latitude: pos.coords.latitude,
-      longitude: pos.coords.longitude,
-      accuracy: pos.coords.accuracy,
-      timestamp: Date.now()
+  console.log('[Location] 开始获取位置...')
+
+  const acquire = async (): Promise<{ latitude: number; longitude: number; accuracy: number } | null> => {
+    // 优先尝试浏览器 Geolocation API
+    if (navigator.geolocation) {
+      try {
+        const pos = await new Promise<GeolocationPosition>((resolve, reject) => {
+          navigator.geolocation.getCurrentPosition(resolve, reject, {
+            enableHighAccuracy: false,
+            timeout: 5000,
+            maximumAge: LOCATION_CACHE_MS
+          })
+        })
+        console.log(`[Location] 浏览器定位成功: lat=${pos.coords.latitude}, lng=${pos.coords.longitude}`)
+        locationCache = {
+          latitude: pos.coords.latitude,
+          longitude: pos.coords.longitude,
+          accuracy: pos.coords.accuracy,
+          timestamp: Date.now()
+        }
+        return { latitude: pos.coords.latitude, longitude: pos.coords.longitude, accuracy: pos.coords.accuracy }
+      } catch (err: any) {
+        console.warn('[Location] 浏览器定位失败:', err?.message || err)
+      }
     }
-    return { latitude: pos.coords.latitude, longitude: pos.coords.longitude, accuracy: pos.coords.accuracy }
-  } catch {
-    // 浏览器 API 失败时，尝试 HarmonyOS 原生桥接
+
+    // 浏览器 API 不可用或失败，尝试 HarmonyOS 原生桥接
     const bridge = (window as any).harmonyBridge
     if (bridge && typeof bridge.requestLocation === 'function') {
       try {
+        console.log('[Location] 尝试原生桥接 requestLocation...')
         const nativeLoc = await bridge.requestLocation()
         if (nativeLoc) {
+          console.log(`[Location] 原生定位成功: lat=${nativeLoc.latitude}, lng=${nativeLoc.longitude}`)
           locationCache = { ...nativeLoc, timestamp: Date.now() }
           return nativeLoc
         }
-      } catch { /* fall through */ }
+      } catch (err: any) {
+        console.warn('[Location] 原生定位失败:', err?.message || err)
+      }
     }
-    console.warn('[Location] 无法获取位置')
+
     return null
   }
+
+  // 总超时兜底，绝不阻塞消息发送
+  const timeout = new Promise<null>((resolve) => {
+    setTimeout(() => {
+      console.warn('[Location] 定位总超时，放弃获取')
+      resolve(null)
+    }, LOCATION_TOTAL_TIMEOUT_MS)
+  })
+
+  return Promise.race([acquire(), timeout])
 }
 
 function formatTime(timestamp: number) {
