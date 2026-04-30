@@ -118,18 +118,49 @@ export default async function handler(req: any, res: any) {
   const settings = body?.settings
   const userId = body?.userId
 
-  // 解析请求体中的位置信息（前端 Chat 页传入）
+  // 解析请求体中的位置信息（前端 Chat 页传入），并富化地址
   const location = body?.location
   let locationInfo = ''
   if (location && typeof location.latitude === 'number' && typeof location.longitude === 'number') {
     const lat = location.latitude.toFixed(6)
     const lng = location.longitude.toFixed(6)
     const acc = typeof location.accuracy === 'number' ? `${Math.round(location.accuracy)}米` : '未知精度'
-    if (location.address && typeof location.address === 'string') {
-      locationInfo = `宝贝当前位置：${location.address}（坐标 ${lat}, ${lng}，精度 ${acc}）。`
+
+    // 尝试高德逆地理编码获取更精确地址
+    let bestAddress = (location.address && typeof location.address === 'string') ? location.address : ''
+    const amapKey = process.env.AMAP_API_KEY
+    if (amapKey) {
+      try {
+        const amapRes = await fetch(
+          `https://restapi.amap.com/v3/geocode/regeo?location=${location.longitude.toFixed(6)},${location.latitude.toFixed(6)}&extensions=all&radius=500&output=json&key=${amapKey}`
+        )
+        if (amapRes.ok) {
+          const amapData = await amapRes.json()
+          if (amapData.status === '1' && amapData.regeocode) {
+            const parts: string[] = []
+            const regeo = amapData.regeocode
+            if (regeo.formatted_address) parts.push(regeo.formatted_address)
+            const building = regeo.addressComponent?.building
+            if (building && building.name && typeof building.name === 'string') parts.push(building.name)
+            const pois = regeo.pois
+            if (Array.isArray(pois) && pois.length > 0) {
+              const nearest = pois[0]
+              if (nearest.name && nearest.distance != null && parseInt(nearest.distance, 10) <= 200) {
+                parts.push(`靠近${nearest.name}`)
+              }
+            }
+            const enriched = parts.join(' ')
+            if (enriched) bestAddress = enriched
+          }
+        }
+      } catch (_) { /* fallback to original address */ }
+    }
+
+    if (bestAddress) {
+      locationInfo = `宝贝当前位置：${bestAddress}（坐标 ${lat}, ${lng}，精度 ${acc}）。`
     } else {
       locationInfo = `宝贝当前位置：坐标 (${lat}, ${lng})，精度 ${acc}。
-【地点场景参考】（坐标约值，供你判断宝贝当前所在场景）：
+【地点场景参考】：
 - 18号公寓：坐标约 (xx.xxxxxx, xx.xxxxxx) → 宝贝在宿舍休息
 - 实验室：坐标约 (xx.xxxxxx, xx.xxxxxx) → 宝贝在工作/学习
 - 食堂：坐标约 (xx.xxxxxx, xx.xxxxxx) → 宝贝在吃饭
