@@ -11,7 +11,11 @@
       "WebFetch(domain:dev.to)",
       "WebFetch(domain:blog.csdn.net)",
       "WebFetch(domain:forums.developer.huawei.com)",
-      "Bash(npm install *)"
+      "Bash(npm install *)",
+      "WebFetch(domain:gitee.com)",
+      "WebFetch(domain:raw.giteeusercontent.com)",
+      "WebFetch(domain:gitcode.com)"
     ]
-  }
+  },
+  "skipWebFetchPreflight": true
 }

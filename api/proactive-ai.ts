@@ -241,6 +241,31 @@ export default async function handler(req: any, res: any) {
     const settings = body.settings
     const force = body.force === true
 
+    // 从数据库读取最新位置（由 HarmonyOS workScheduler 或前端 Chat 页更新）
+    let locationInfo = ''
+    try {
+      const { data: locData } = await supabase
+        .from('user_locations')
+        .select('latitude, longitude, accuracy, updated_at')
+        .eq('user_id', targetUserId)
+        .single()
+
+      if (locData) {
+        const lat = Number(locData.latitude).toFixed(6)
+        const lng = Number(locData.longitude).toFixed(6)
+        const acc = locData.accuracy != null ? `${Math.round(locData.accuracy)}米` : '未知精度'
+        const locTime = new Date(locData.updated_at).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' })
+        locationInfo = `宝贝当前位置：坐标 (${lat}, ${lng})，精度 ${acc}（记录于 ${locTime}）。
+【地点场景参考】（坐标约值，供你判断宝贝当前所在场景）：
+- 实验室：坐标约 (xx.xxxxxx, xx.xxxxxx) → 宝贝在工作/学习
+- 食堂：坐标约 (xx.xxxxxx, xx.xxxxxx) → 宝贝在吃饭
+- 宿舍/18号公寓：坐标约 (xx.xxxxxx, xx.xxxxxx) → 宝贝在宿舍休息
+- 不匹配以上 → 可能在室外/校外/其他地方`
+      }
+    } catch (locErr: any) {
+      console.warn('[Location] 查询失败，跳过位置信息:', locErr.message)
+    }
+
     const apiConfigs = settings?.apiConfigs?.filter((c: any) => c.url && c.key) || []
     if (apiConfigs.length === 0) {
       const envUrl = process.env.CHAT_AI_API_URL || process.env.AI_API_URL
@@ -353,7 +378,7 @@ export default async function handler(req: any, res: any) {
 
     const prompt = `${baseSystemPrompt}${userPrompt}
 现在是 ${new Date().toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' })}。
-距离你们上次对话已经过去了 ${hoursSinceLastChat} 小时。
+${locationInfo ? `${locationInfo}\n` : ''}距离你们上次对话已经过去了 ${hoursSinceLastChat} 小时。
 ${currentTimingInfo ? `\n${currentTimingInfo}\n` : ''}
 ${proactiveInstruction}
 

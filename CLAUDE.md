@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 F-Sync 是一个个人生活记录 + AI 生活助手 Web 应用，部署在 https://www.fsync.top。个人开发、个人使用（单一用户，无其他用户）。通过 HarmonyOS WebAbility 封装为移动端应用（类 PWA）。
 
-**开发者背景**：工科生，软件开发新手，用词可能不够专业，先确认需求再编程。
+**开发者背景**：工科生，软件开发新手，用词可能不够专业，先确认需求再编程，开发过程中务必避免幻觉。
 
 **两个代码仓库**：
 - Web 端：`D:/F-Sync/`（本仓库）
@@ -194,6 +194,29 @@ Chat 页挂载 → loadFromCloud()
 ### 开发工具
 
 使用 **DevEco Studio** 开发，不在命令行构建。构建/运行/调试均在 DevEco Studio IDE 内完成。由于HarmonyOS开发的特殊性，在调用系统权限/api时主动向开发者要求获取官方说明文档/示例代码，获取足够信息后再开始编程。
+
+### 获取华为官方开发文档
+
+**重要**：华为开发者文档 (`developer.huawei.com`) 是 JavaScript SPA 动态渲染，WebFetch 无法获取实际内容（只能拿到"文档中心"骨架 HTML）。**禁止直接 WebFetch 华为开发者文档 URL。**
+
+华为 HarmonyOS 文档源自 OpenHarmony 开源项目，文档源文件以 Markdown 形式托管在 Gitee。获取官方文档内容的正确流程：
+
+1. 用户给出 `developer.huawei.com` URL 时，先用 **WebSearch** `site:developer.huawei.com <关键词>` 确认页面存在及版本
+2. 映射到对应的 OpenHarmony Gitee 仓库路径，用 **WebFetch** 直接拉取 raw Markdown 源文件（静态文件，无 JS 渲染问题）
+
+**URL 映射规则**：
+
+| 华为开发者 URL 模式 | Gitee OpenHarmony Raw 路径 |
+|---|---|
+| `developer.huawei.com/consumer/cn/doc/harmonyos-references/js-apis-xxx` | `gitee.com/openharmony/docs/raw/HEAD/zh-cn/application-dev/reference/apis/js-apis-xxx.md` |
+| `developer.huawei.com/consumer/en/doc/harmonyos-references-V*/js-apis-xxx` | `gitee.com/openharmony/docs/raw/HEAD/en/application-dev/reference/apis/js-apis-xxx.md` |
+| `developer.huawei.com/consumer/cn/doc/harmonyos-guides-V*/xxx` | `gitee.com/openharmony/docs/raw/HEAD/zh-cn/application-dev/xxx.md` |
+
+**注意事项**：
+- Gitee raw 文件会 302 重定向到 `raw.giteeusercontent.com`，WebFetch 跟随重定向后即可获取内容
+- 文件名大小写敏感，注意 `workScheduler` vs `workscheduler` 等驼峰差异
+- 较新的 API（API 10+ / Kit 化后）文件可能在 `apis-backgroundtasks-kit/` 等 Kit 子目录下，需结合 WebSearch 结果确认精确路径
+- 部分旧版 API 可能仅存在于特定版本分支（非 HEAD），此时需将路径中的 `HEAD` 替换为对应分支名（如 `OpenHarmony-4.1-Release`）
 
 ### 架构
 
