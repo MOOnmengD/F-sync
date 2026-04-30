@@ -126,53 +126,21 @@ export default async function handler(req: any, res: any) {
     const lng = location.longitude.toFixed(6)
     const acc = typeof location.accuracy === 'number' ? `${Math.round(location.accuracy)}米` : '未知精度'
 
-    // 高德逆地理编码 (regeo → 地址底子) + POI 搜索 v2 (周边建筑物)
+    // 高德逆地理编码：坐标 → 地址底子
     let bestAddress = (location.address && typeof location.address === 'string') ? location.address : ''
     const amapKey = process.env.AMAP_API_KEY
     if (amapKey) {
       try {
         const lngLat = `${location.longitude.toFixed(6)},${location.latitude.toFixed(6)}`
-
-        // 并行：regeo 拿地址 + POI 搜索拿最近建筑物
-        const [regeoRes, poiRes] = await Promise.all([
-          fetch(`https://restapi.amap.com/v3/geocode/regeo?location=${lngLat}&extensions=all&radius=500&output=json&key=${amapKey}`),
-          fetch(`https://restapi.amap.com/v5/place/around?location=${lngLat}&radius=200&sortrule=distance&page_size=3&show_fields=children,indoor&output=json&key=${amapKey}`)
-        ])
-
-        const parts: string[] = []
-
-        // regeo → 结构化地址
+        const regeoRes = await fetch(
+          `https://restapi.amap.com/v3/geocode/regeo?location=${lngLat}&extensions=all&radius=500&output=json&key=${amapKey}`
+        )
         if (regeoRes.ok) {
           const d = await regeoRes.json()
-          if (d.status === '1' && d.regeocode) {
-            if (d.regeocode.formatted_address) parts.push(d.regeocode.formatted_address)
-            const b = d.regeocode.addressComponent?.building
-            if (b && b.name && typeof b.name === 'string') parts.push(b.name)
+          if (d.status === '1' && d.regeocode && d.regeocode.formatted_address) {
+            bestAddress = d.regeocode.formatted_address
           }
         }
-
-        // POI 搜索 v2 → 最近建筑物名称
-        if (poiRes.ok) {
-          const pd = await poiRes.json()
-          if (pd.status === '1' && Array.isArray(pd.pois) && pd.pois.length > 0) {
-            const nearest = pd.pois[0]
-            const dist = parseInt(nearest.distance, 10) || 0
-            if (nearest.name && dist <= 200) {
-              const distStr = dist < 5 ? '' : `${dist}米`
-              parts.push(`靠近${nearest.name}${distStr}`)
-
-              // 子POI：如果是建筑物，列出子楼宇
-              const children = nearest.children
-              if (Array.isArray(children) && children.length > 0) {
-                const childNames = children.slice(0, 3).map((c: any) => c.name || '').filter(Boolean).join('、')
-                if (childNames) parts.push(`(${childNames})`)
-              }
-            }
-          }
-        }
-
-        const enriched = parts.join(' ')
-        if (enriched) bestAddress = enriched
       } catch (_) { /* fallback to original address */ }
     }
 
