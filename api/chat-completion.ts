@@ -118,6 +118,21 @@ export default async function handler(req: any, res: any) {
   const settings = body?.settings
   const userId = body?.userId
 
+  // 解析请求体中的位置信息（前端 Chat 页传入）
+  const location = body?.location
+  let locationInfo = ''
+  if (location && typeof location.latitude === 'number' && typeof location.longitude === 'number') {
+    const lat = location.latitude.toFixed(6)
+    const lng = location.longitude.toFixed(6)
+    const acc = typeof location.accuracy === 'number' ? `${Math.round(location.accuracy)}米` : '未知精度'
+    locationInfo = `宝贝当前位置：坐标 (${lat}, ${lng})，精度 ${acc}。
+【地点场景参考】（坐标约值，供你判断宝贝当前所在场景）：
+- 实验室：坐标约 (xx.xxxxxx, xx.xxxxxx) → 宝贝在工作/学习
+- 食堂：坐标约 (xx.xxxxxx, xx.xxxxxx) → 宝贝在吃饭
+- 宿舍/18号公寓：坐标约 (xx.xxxxxx, xx.xxxxxx) → 宝贝在宿舍休息
+- 不匹配以上 → 可能在室外/校外/其他地方`
+  }
+
   // 优先级：前端传来的配置 > 环境变量
   const apiConfigs = settings?.apiConfigs?.filter((c: any) => c.url && c.key) || []
   if (apiConfigs.length === 0) {
@@ -412,7 +427,21 @@ export default async function handler(req: any, res: any) {
   // 更新 systemPrompt 的 content
   systemPrompt.content = `${baseSystemPrompt}${userPrompt}
 当前时间：${new Date().toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' })}
-${currentTimingInfo ? `${currentTimingInfo}\n` : ''}${contextInfo ? `\n上下文：${contextInfo}\n可以结合以上历史记录与用户进行互动。` : ''}${userProfileInfo}`
+${locationInfo ? `${locationInfo}\n` : ''}${currentTimingInfo ? `${currentTimingInfo}\n` : ''}${contextInfo ? `\n上下文：${contextInfo}\n可以结合以上历史记录与用户进行互动。` : ''}${userProfileInfo}`
+
+  // 将位置旁路写入 DB，供 proactive-ai 后续使用（非阻塞）
+  if (location && userId) {
+    supabaseAdmin.from('user_locations').upsert({
+      user_id: userId,
+      latitude: location.latitude,
+      longitude: location.longitude,
+      accuracy: location.accuracy ?? null,
+      source: 'foreground',
+      updated_at: new Date().toISOString()
+    }, { onConflict: 'user_id' }).then(({ error }) => {
+      if (error) console.warn('[Location] 位置存储失败:', error.message)
+    })
+  }
 
   // 多组 API 轮询逻辑
   for (let i = 0; i < apiConfigs.length; i++) {

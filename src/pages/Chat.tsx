@@ -6,6 +6,49 @@ import { useChatStore, type ChatMessage } from '../store/chat'
 import { supabase } from '../supabaseClient'
 import { useSettingsStore } from '../store/settings'
 
+// 位置缓存，避免频繁调用原生定位（5 分钟窗口）
+let locationCache: { latitude: number; longitude: number; accuracy: number; timestamp: number } | null = null
+const LOCATION_CACHE_MS = 5 * 60 * 1000
+
+async function getCurrentLocation(): Promise<{ latitude: number; longitude: number; accuracy: number } | null> {
+  if (locationCache && Date.now() - locationCache.timestamp < LOCATION_CACHE_MS) {
+    return { latitude: locationCache.latitude, longitude: locationCache.longitude, accuracy: locationCache.accuracy }
+  }
+
+  // 优先尝试浏览器 Geolocation API（HarmonyOS WebView 支持）
+  try {
+    const pos = await new Promise<GeolocationPosition>((resolve, reject) => {
+      if (!navigator.geolocation) return reject(new Error('Geolocation not supported'))
+      navigator.geolocation.getCurrentPosition(resolve, reject, {
+        enableHighAccuracy: true,
+        timeout: 10000,
+        maximumAge: LOCATION_CACHE_MS
+      })
+    })
+    locationCache = {
+      latitude: pos.coords.latitude,
+      longitude: pos.coords.longitude,
+      accuracy: pos.coords.accuracy,
+      timestamp: Date.now()
+    }
+    return { latitude: pos.coords.latitude, longitude: pos.coords.longitude, accuracy: pos.coords.accuracy }
+  } catch {
+    // 浏览器 API 失败时，尝试 HarmonyOS 原生桥接
+    const bridge = (window as any).harmonyBridge
+    if (bridge && typeof bridge.requestLocation === 'function') {
+      try {
+        const nativeLoc = await bridge.requestLocation()
+        if (nativeLoc) {
+          locationCache = { ...nativeLoc, timestamp: Date.now() }
+          return nativeLoc
+        }
+      } catch { /* fall through */ }
+    }
+    console.warn('[Location] 无法获取位置')
+    return null
+  }
+}
+
 function formatTime(timestamp: number) {
   const d = new Date(timestamp)
   const hh = String(d.getHours()).padStart(2, '0')
@@ -712,17 +755,34 @@ export default function Chat() {
       const userMessage = { role: 'user' as const, content: text, createdAt: Date.now() }
       context.push(userMessage)
 
-      // 4. 调用 API
+      // 4. 获取用户ID和位置（并行）
+      const [{ data: { user } }, location] = await Promise.all([
+        supabase ? supabase.auth.getUser() : Promise.resolve({ data: { user: null } }),
+        getCurrentLocation()
+      ])
+
+      // 异步存储位置到数据库，供 proactive-ai 使用（非阻塞）
+      if (location && user) {
+        fetch('/api/update-location', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ userId: user.id, ...location })
+        }).catch(() => {})
+      }
+
+      // 5. 调用 API
       const response = await fetch('/api/chat-completion', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ 
+        body: JSON.stringify({
           messages: context,
           settings: {
             systemPrompt: settings.systemPrompt,
             userPrompt: settings.userPrompt,
             apiConfigs: settings.apiConfigs
-          }
+          },
+          userId: user?.id,
+          location: location || undefined
         })
       })
 
