@@ -236,10 +236,12 @@ export default async function handler(req: any, res: any) {
   // 这种结构化方式能让 AI 明白时间戳是环境信息（Metadata），而非用户或 AI 说话的内容前缀，从而有效避免 AI 在回复中模仿时间戳格式
   const fullMessages: any[] = [systemPrompt]
   
+  let lastTimeStr = ''
   messages.forEach((m: any) => {
     if (m.role !== 'system') {
       const timeStr = m.createdAt ? new Date(m.createdAt).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' }) : ''
-      if (timeStr) {
+      if (timeStr && timeStr !== lastTimeStr) {
+        lastTimeStr = timeStr
         fullMessages.push({
           role: 'system',
           content: `[${timeStr}]`
