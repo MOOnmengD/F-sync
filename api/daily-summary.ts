@@ -120,7 +120,7 @@ export default async function handler(req: any, res: any) {
     // ===== 第一步：生成日记 =====
     const diaryPrompt = `你是 F-Sync 应用中的 Florian（AI 伴侣），请根据以下 ${dateLabel} 的数据，以第一人称写一段日记（100-150字）。
 
-${weatherInfo ? `${weatherInfo}\n` : ''}生活记录：
+${weatherInfo ? `## 真实世界信息\n${weatherInfo}\n\n` : ''}生活记录：
 ${logsText}
 
 对话记录：

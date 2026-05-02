@@ -474,11 +474,18 @@ export default async function handler(req: any, res: any) {
 - 当前时间（如果是深夜提醒她睡觉，如果是饭点问她有没有好好吃饭）
 - 如果已经很久没聊天了（超过 4 小时），即使没有新记录，也可以简单表达思念或关心。`
 
+    const worldLines: string[] = []
+    worldLines.push(`现在是 ${new Date().toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' })}。`)
+    if (weatherInfo) worldLines.push(weatherInfo)
+    if (locationInfo) worldLines.push(locationInfo)
+    worldLines.push(`距离你们上次对话已经过去了 ${hoursSinceLastChat} 小时。`)
+    if (currentTimingInfo) worldLines.push(currentTimingInfo)
+
     const prompt = `${baseSystemPrompt}${userPrompt}
-现在是 ${new Date().toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' })}。
-${weatherInfo ? `${weatherInfo}\n` : ''}${locationInfo ? `${locationInfo}\n` : ''}距离你们上次对话已经过去了 ${hoursSinceLastChat} 小时。
-${currentTimingInfo ? `\n${currentTimingInfo}\n` : ''}
 ${proactiveInstruction}
+
+## 真实世界信息
+${worldLines.join('\n')}
 
 宝贝最近记录：
 ${logsSummary}
