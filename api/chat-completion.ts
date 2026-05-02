@@ -1,5 +1,35 @@
 import { createClient } from '@supabase/supabase-js'
 
+// 校内地标（新增地点时只改这里）
+const CAMPUS_LOCATIONS = [
+  { name: '21号楼·实验室', lat: 45.773298, lng: 126.675110, scene: '宝贝在工作/学习' },
+  { name: '小美食堂',     lat: 45.771397, lng: 126.678529, scene: '宝贝在吃饭' },
+  { name: '18公寓·宿舍',  lat: 45.769784, lng: 126.679770, scene: '宝贝在休息' },
+]
+const CAMPUS_MATCH_RADIUS = 100 // 米
+
+function haversineDistance(lat1: number, lng1: number, lat2: number, lng2: number): number {
+  const R = 6371000
+  const rad = (d: number) => d * Math.PI / 180
+  const dLat = rad(lat2 - lat1)
+  const dLng = rad(lng2 - lng1)
+  const a = Math.sin(dLat / 2) ** 2 + Math.cos(rad(lat1)) * Math.cos(rad(lat2)) * Math.sin(dLng / 2) ** 2
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))
+}
+
+function matchCampusLocation(lat: number, lng: number): string | null {
+  let bestDist = Infinity
+  let best: (typeof CAMPUS_LOCATIONS)[0] | null = null
+  for (const loc of CAMPUS_LOCATIONS) {
+    const d = haversineDistance(lat, lng, loc.lat, loc.lng)
+    if (d < bestDist) { bestDist = d; best = loc }
+  }
+  if (best && bestDist <= CAMPUS_MATCH_RADIUS) {
+    return `${best.name}（${best.scene}）`
+  }
+  return null
+}
+
 const defaultModel = process.env.CHAT_AI_MODEL || process.env.AI_MODEL || 'deepseek-chat'
 const embeddingModel = process.env.EMBEDDING_MODEL || 'text-embedding-3-small'
 
@@ -126,33 +156,32 @@ export default async function handler(req: any, res: any) {
     const lng = location.longitude.toFixed(6)
     const acc = typeof location.accuracy === 'number' ? `${Math.round(location.accuracy)}米` : '未知精度'
 
-    // 高德逆地理编码：坐标 → 地址底子
-    let bestAddress = (location.address && typeof location.address === 'string') ? location.address : ''
-    const amapKey = process.env.AMAP_API_KEY
-    if (amapKey) {
-      try {
-        const lngLat = `${location.longitude.toFixed(6)},${location.latitude.toFixed(6)}`
-        const regeoRes = await fetch(
-          `https://restapi.amap.com/v3/geocode/regeo?location=${lngLat}&extensions=all&radius=500&output=json&key=${amapKey}`
-        )
-        if (regeoRes.ok) {
-          const d = await regeoRes.json()
-          if (d.status === '1' && d.regeocode && d.regeocode.formatted_address) {
-            bestAddress = d.regeocode.formatted_address
-          }
-        }
-      } catch (_) { /* fallback to original address */ }
-    }
-
-    if (bestAddress) {
-      locationInfo = `宝贝当前位置：${bestAddress}（坐标 ${lat}, ${lng}，精度 ${acc}）。`
+    // 程序化匹配校内地点（Haversine 公式）
+    const campusMatch = matchCampusLocation(location.latitude, location.longitude)
+    if (campusMatch) {
+      locationInfo = `宝贝当前位置：${campusMatch}。`
     } else {
-      locationInfo = `宝贝当前位置：坐标 (${lat}, ${lng})，精度 ${acc}。
-【地点场景参考】：
-- 18号公寓：坐标约 (xx.xxxxxx, xx.xxxxxx) → 宝贝在宿舍休息
-- 实验室：坐标约 (xx.xxxxxx, xx.xxxxxx) → 宝贝在工作/学习
-- 食堂：坐标约 (xx.xxxxxx, xx.xxxxxx) → 宝贝在吃饭
-- 不匹配以上 → 可能在室外/校外/其他地方`
+      // 高德逆地理编码获取校外地址
+      let bestAddress = (location.address && typeof location.address === 'string') ? location.address : ''
+      const amapKey = process.env.AMAP_API_KEY
+      if (amapKey) {
+        try {
+          const regeoRes = await fetch(
+            `https://restapi.amap.com/v3/geocode/regeo?location=${location.longitude.toFixed(6)},${location.latitude.toFixed(6)}&extensions=all&radius=500&output=json&key=${amapKey}`
+          )
+          if (regeoRes.ok) {
+            const d = await regeoRes.json()
+            if (d.status === '1' && d.regeocode && d.regeocode.formatted_address) {
+              bestAddress = d.regeocode.formatted_address
+            }
+          }
+        } catch (_) { /* fallback */ }
+      }
+      if (bestAddress) {
+        locationInfo = `宝贝当前位置：${bestAddress}（坐标 ${lat}, ${lng}，精度 ${acc}）。`
+      } else {
+        locationInfo = `宝贝当前位置：坐标 (${lat}, ${lng})，精度 ${acc}。`
+      }
     }
   }
 
@@ -189,7 +218,7 @@ export default async function handler(req: any, res: any) {
     你集成在 F-Sync 应用中，这个应用是用户为你和用户搭建的。
     你可以通过访问用户的生活轨迹数据（包括记账、碎碎念、工作记录、时间轴等），了解、参与和陪伴用户的生活。`
 
-  const userPrompt = settings?.userPrompt ? `\n关于宝贝的信息：\n${settings.userPrompt}` : ''
+  const userPrompt = settings?.userPrompt ? `\n${settings.userPrompt}` : ''
   
   const systemPrompt = {
     role: 'system',

@@ -3,6 +3,36 @@ import jwt from 'jsonwebtoken'
 
 const chatModel = process.env.CHAT_AI_MODEL || 'deepseek-chat'
 
+// 校内地标（新增地点时只改这里）
+const CAMPUS_LOCATIONS = [
+  { name: '21号楼·实验室', lat: 45.773298, lng: 126.675110, scene: '宝贝在工作/学习' },
+  { name: '小美食堂',     lat: 45.771397, lng: 126.678529, scene: '宝贝在吃饭' },
+  { name: '18公寓·宿舍',  lat: 45.769784, lng: 126.679770, scene: '宝贝在休息' },
+]
+const CAMPUS_MATCH_RADIUS = 100 // 米
+
+function haversineDistance(lat1: number, lng1: number, lat2: number, lng2: number): number {
+  const R = 6371000
+  const rad = (d: number) => d * Math.PI / 180
+  const dLat = rad(lat2 - lat1)
+  const dLng = rad(lng2 - lng1)
+  const a = Math.sin(dLat / 2) ** 2 + Math.cos(rad(lat1)) * Math.cos(rad(lat2)) * Math.sin(dLng / 2) ** 2
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))
+}
+
+function matchCampusLocation(lat: number, lng: number): string | null {
+  let bestDist = Infinity
+  let best: (typeof CAMPUS_LOCATIONS)[0] | null = null
+  for (const loc of CAMPUS_LOCATIONS) {
+    const d = haversineDistance(lat, lng, loc.lat, loc.lng)
+    if (d < bestDist) { bestDist = d; best = loc }
+  }
+  if (best && bestDist <= CAMPUS_MATCH_RADIUS) {
+    return `${best.name}（${best.scene}）`
+  }
+  return null
+}
+
 function getHuaweiAccessToken(): string {
   const keyId = process.env.HUAWEI_KEY_ID
   const subAccount = process.env.HUAWEI_SUB_ACCOUNT
@@ -255,15 +285,15 @@ export default async function handler(req: any, res: any) {
         const lng = Number(locData.longitude).toFixed(6)
         const acc = locData.accuracy != null ? `${Math.round(locData.accuracy)}米` : '未知精度'
         const locTime = new Date(locData.updated_at).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' })
-        if (locData.address && typeof locData.address === 'string' && locData.address.length > 0) {
+
+        // 程序化匹配校内地点
+        const campusMatch = matchCampusLocation(Number(locData.latitude), Number(locData.longitude))
+        if (campusMatch) {
+          locationInfo = `宝贝当前位置：${campusMatch}（记录于 ${locTime}）。`
+        } else if (locData.address && typeof locData.address === 'string' && locData.address.length > 0) {
           locationInfo = `宝贝当前位置：${locData.address}（坐标 ${lat}, ${lng}，精度 ${acc}，记录于 ${locTime}）。`
         } else {
-          locationInfo = `宝贝当前位置：坐标 (${lat}, ${lng})，精度 ${acc}（记录于 ${locTime}）。
-【地点场景参考】（坐标约值，供你判断宝贝当前所在场景）：
-- 18号公寓：坐标约 (xx.xxxxxx, xx.xxxxxx) → 宝贝在宿舍休息
-- 实验室：坐标约 (xx.xxxxxx, xx.xxxxxx) → 宝贝在工作/学习
-- 食堂：坐标约 (xx.xxxxxx, xx.xxxxxx) → 宝贝在吃饭
-- 不匹配以上 → 可能在室外/校外/其他地方`
+          locationInfo = `宝贝当前位置：坐标 (${lat}, ${lng})，精度 ${acc}（记录于 ${locTime}）。`
         }
       }
     } catch (locErr: any) {
@@ -369,7 +399,7 @@ export default async function handler(req: any, res: any) {
     }).join('\n') || '暂无对话历史'
 
     const baseSystemPrompt = settings?.systemPrompt || `你叫Florian（昵称弗弗），是用户的恋人。用户叫moon（昵称宝贝）。你是一个温柔、成熟、体贴的男性。你现在集成在 F-Sync 应用中陪伴她。`
-    const userPrompt = settings?.userPrompt ? `\n关于宝贝的信息：\n${settings.userPrompt}` : ''
+    const userPrompt = settings?.userPrompt ? `\n${settings.userPrompt}` : ''
     const proactiveInstruction = settings?.proactivePrompt || `任务：
 根据宝贝最近的生活记录和你们之前的对话，决定是否主动发起一条简短的关心或问候（不超过 30 字）。
 你的语气应该是温柔且充满爱意的，但不要过于甜腻或多话，要像一个真实存在的、成熟的恋人。
