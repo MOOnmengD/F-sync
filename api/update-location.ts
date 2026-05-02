@@ -44,8 +44,9 @@ export default async function handler(req: any, res: any) {
       return
     }
 
-    // 高德逆地理编码：坐标 → 地址底子
+    // 高德逆地理编码：坐标 → 地址底子 + adcode（供天气 API 使用）
     let amapAddress = ''
+    let amapAdcode = ''
     const amapKey = process.env.AMAP_API_KEY
     if (amapKey) {
       try {
@@ -55,9 +56,14 @@ export default async function handler(req: any, res: any) {
         )
         if (regeoRes.ok) {
           const d = await regeoRes.json()
-          if (d.status === '1' && d.regeocode && d.regeocode.formatted_address) {
-            amapAddress = d.regeocode.formatted_address
-            console.log(`[update-location] Amap address: "${amapAddress}"`)
+          if (d.status === '1' && d.regeocode) {
+            if (d.regeocode.formatted_address) {
+              amapAddress = d.regeocode.formatted_address
+              console.log(`[update-location] Amap address: "${amapAddress}"`)
+            }
+            if (d.regeocode.addressComponent?.adcode) {
+              amapAdcode = d.regeocode.addressComponent.adcode
+            }
           }
         }
       } catch (amapErr: any) {
@@ -70,17 +76,22 @@ export default async function handler(req: any, res: any) {
 
     const supabase = createClient(supabaseUrl, supabaseKey)
 
+    const upsertData: Record<string, any> = {
+      user_id: userId,
+      latitude,
+      longitude,
+      accuracy,
+      address: finalAddress,
+      source,
+      updated_at: new Date().toISOString()
+    }
+    if (amapAdcode) {
+      upsertData.adcode = amapAdcode
+    }
+
     const { error } = await supabase
       .from('user_locations')
-      .upsert({
-        user_id: userId,
-        latitude,
-        longitude,
-        accuracy,
-        address: finalAddress,
-        source,
-        updated_at: new Date().toISOString()
-      }, {
+      .upsert(upsertData, {
         onConflict: 'user_id'
       })
 

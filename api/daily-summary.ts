@@ -1,4 +1,5 @@
 import { createClient } from '@supabase/supabase-js'
+import { getWeather } from './_weather'
 
 function resolveChatCompletionsUrl(base: string) {
   const trimmed = base.trim().replace(/\/+$/, '')
@@ -109,10 +110,17 @@ export default async function handler(req: any, res: any) {
       console.warn('[Daily Summary] 读取社交关系失败（表可能尚未创建）:', e.message)
     }
 
+    // 获取天气信息（每日首次调用 API，后续复用缓存）
+    let weatherInfo = ''
+    const amapKey = process.env.AMAP_API_KEY
+    if (amapKey) {
+      weatherInfo = await getWeather({ supabase, userId: targetUserId, amapKey }) || ''
+    }
+
     // ===== 第一步：生成日记 =====
     const diaryPrompt = `你是 F-Sync 应用中的 Florian（AI 伴侣），请根据以下 ${dateLabel} 的数据，以第一人称写一段日记（100-150字）。
 
-生活记录：
+${weatherInfo ? `${weatherInfo}\n` : ''}生活记录：
 ${logsText}
 
 对话记录：

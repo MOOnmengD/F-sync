@@ -1,7 +1,7 @@
 {
   "meta": {
-    "capturedAt": "2026-04-29",
-    "notes": "完整包含全部 8 张表。transactions/items/chat_messages 来自 Dashboard 导出，其余来自 migrations/ 目录。"
+    "capturedAt": "2026-05-02",
+    "notes": "完整包含全部 10 张表。transactions/items/chat_messages 来自 Dashboard 导出，user_profiles/user_settings/push_tokens/daily_logs/user_locations/social_relationships 来自 migrations/ 目录。"
   },
   "columns": [
   {
@@ -711,6 +711,198 @@
     "constraint_type": null,
     "foreign_table_name": null,
     "foreign_column_name": null
+  },
+  {
+    "table_name": "user_locations",
+    "column_name": "id",
+    "data_type": "uuid",
+    "udt_name": "uuid",
+    "is_nullable": "NO",
+    "column_default": "gen_random_uuid()",
+    "constraint_name": "user_locations_pkey",
+    "constraint_type": "PRIMARY KEY",
+    "foreign_table_name": "user_locations",
+    "foreign_column_name": "id"
+  },
+  {
+    "table_name": "user_locations",
+    "column_name": "user_id",
+    "data_type": "uuid",
+    "udt_name": "uuid",
+    "is_nullable": "NO",
+    "column_default": null,
+    "constraint_name": "fk_user_locations_user_id",
+    "constraint_type": "FOREIGN KEY",
+    "foreign_table_name": "auth.users",
+    "foreign_column_name": "id"
+  },
+  {
+    "table_name": "user_locations",
+    "column_name": "latitude",
+    "data_type": "double precision",
+    "udt_name": "float8",
+    "is_nullable": "NO",
+    "column_default": null,
+    "constraint_name": null,
+    "constraint_type": null,
+    "foreign_table_name": null,
+    "foreign_column_name": null
+  },
+  {
+    "table_name": "user_locations",
+    "column_name": "longitude",
+    "data_type": "double precision",
+    "udt_name": "float8",
+    "is_nullable": "NO",
+    "column_default": null,
+    "constraint_name": null,
+    "constraint_type": null,
+    "foreign_table_name": null,
+    "foreign_column_name": null
+  },
+  {
+    "table_name": "user_locations",
+    "column_name": "accuracy",
+    "data_type": "double precision",
+    "udt_name": "float8",
+    "is_nullable": "YES",
+    "column_default": null,
+    "constraint_name": null,
+    "constraint_type": null,
+    "foreign_table_name": null,
+    "foreign_column_name": null
+  },
+  {
+    "table_name": "user_locations",
+    "column_name": "source",
+    "data_type": "text",
+    "udt_name": "text",
+    "is_nullable": "NO",
+    "column_default": "'foreground'::text",
+    "constraint_name": null,
+    "constraint_type": null,
+    "foreign_table_name": null,
+    "foreign_column_name": null
+  },
+  {
+    "table_name": "user_locations",
+    "column_name": "address",
+    "data_type": "text",
+    "udt_name": "text",
+    "is_nullable": "YES",
+    "column_default": null,
+    "constraint_name": null,
+    "constraint_type": null,
+    "foreign_table_name": null,
+    "foreign_column_name": null
+  },
+  {
+    "table_name": "user_locations",
+    "column_name": "updated_at",
+    "data_type": "timestamp with time zone",
+    "udt_name": "timestamptz",
+    "is_nullable": "NO",
+    "column_default": "now()",
+    "constraint_name": null,
+    "constraint_type": null,
+    "foreign_table_name": null,
+    "foreign_column_name": null
+  },
+  {
+    "table_name": "social_relationships",
+    "column_name": "id",
+    "data_type": "uuid",
+    "udt_name": "uuid",
+    "is_nullable": "NO",
+    "column_default": "gen_random_uuid()",
+    "constraint_name": "social_relationships_pkey",
+    "constraint_type": "PRIMARY KEY",
+    "foreign_table_name": "social_relationships",
+    "foreign_column_name": "id"
+  },
+  {
+    "table_name": "social_relationships",
+    "column_name": "user_id",
+    "data_type": "uuid",
+    "udt_name": "uuid",
+    "is_nullable": "NO",
+    "column_default": null,
+    "constraint_name": "fk_social_relationships_user_id",
+    "constraint_type": "FOREIGN KEY",
+    "foreign_table_name": "auth.users",
+    "foreign_column_name": "id"
+  },
+  {
+    "table_name": "social_relationships",
+    "column_name": "name",
+    "data_type": "text",
+    "udt_name": "text",
+    "is_nullable": "NO",
+    "column_default": null,
+    "constraint_name": "social_relationships_user_id_name_key",
+    "constraint_type": "UNIQUE",
+    "foreign_table_name": "social_relationships",
+    "foreign_column_name": "user_id"
+  },
+  {
+    "table_name": "social_relationships",
+    "column_name": "relation",
+    "data_type": "text",
+    "udt_name": "text",
+    "is_nullable": "YES",
+    "column_default": null,
+    "constraint_name": null,
+    "constraint_type": null,
+    "foreign_table_name": null,
+    "foreign_column_name": null
+  },
+  {
+    "table_name": "social_relationships",
+    "column_name": "impression",
+    "data_type": "text",
+    "udt_name": "text",
+    "is_nullable": "YES",
+    "column_default": null,
+    "constraint_name": null,
+    "constraint_type": null,
+    "foreign_table_name": null,
+    "foreign_column_name": null
+  },
+  {
+    "table_name": "social_relationships",
+    "column_name": "history",
+    "data_type": "jsonb",
+    "udt_name": "jsonb",
+    "is_nullable": "NO",
+    "column_default": "'[]'::jsonb",
+    "constraint_name": null,
+    "constraint_type": null,
+    "foreign_table_name": null,
+    "foreign_column_name": null
+  },
+  {
+    "table_name": "social_relationships",
+    "column_name": "created_at",
+    "data_type": "timestamp with time zone",
+    "udt_name": "timestamptz",
+    "is_nullable": "NO",
+    "column_default": "now()",
+    "constraint_name": null,
+    "constraint_type": null,
+    "foreign_table_name": null,
+    "foreign_column_name": null
+  },
+  {
+    "table_name": "social_relationships",
+    "column_name": "updated_at",
+    "data_type": "timestamp with time zone",
+    "udt_name": "timestamptz",
+    "is_nullable": "NO",
+    "column_default": "now()",
+    "constraint_name": null,
+    "constraint_type": null,
+    "foreign_table_name": null,
+    "foreign_column_name": null
   }
   ],
   "indexes": [
@@ -857,6 +1049,54 @@
     "tablename": "daily_logs",
     "indexname": "idx_daily_logs_date",
     "indexdef": "CREATE INDEX idx_daily_logs_date ON public.daily_logs USING btree (date DESC)"
+  },
+  {
+    "schemaname": "public",
+    "tablename": "user_locations",
+    "indexname": "user_locations_pkey",
+    "indexdef": "CREATE UNIQUE INDEX user_locations_pkey ON public.user_locations USING btree (id)"
+  },
+  {
+    "schemaname": "public",
+    "tablename": "user_locations",
+    "indexname": "user_locations_user_id_key",
+    "indexdef": "CREATE UNIQUE INDEX user_locations_user_id_key ON public.user_locations USING btree (user_id)"
+  },
+  {
+    "schemaname": "public",
+    "tablename": "user_locations",
+    "indexname": "idx_user_locations_user_id",
+    "indexdef": "CREATE INDEX idx_user_locations_user_id ON public.user_locations USING btree (user_id)"
+  },
+  {
+    "schemaname": "public",
+    "tablename": "user_locations",
+    "indexname": "idx_user_locations_updated_at",
+    "indexdef": "CREATE INDEX idx_user_locations_updated_at ON public.user_locations USING btree (updated_at DESC)"
+  },
+  {
+    "schemaname": "public",
+    "tablename": "social_relationships",
+    "indexname": "social_relationships_pkey",
+    "indexdef": "CREATE UNIQUE INDEX social_relationships_pkey ON public.social_relationships USING btree (id)"
+  },
+  {
+    "schemaname": "public",
+    "tablename": "social_relationships",
+    "indexname": "social_relationships_user_id_name_key",
+    "indexdef": "CREATE UNIQUE INDEX social_relationships_user_id_name_key ON public.social_relationships USING btree (user_id, name)"
+  },
+  {
+    "schemaname": "public",
+    "tablename": "social_relationships",
+    "indexname": "idx_social_relationships_user_id",
+    "indexdef": "CREATE INDEX idx_social_relationships_user_id ON public.social_relationships USING btree (user_id)"
+  },
+  {
+    "schemaname": "public",
+    "tablename": "social_relationships",
+    "indexname": "idx_social_relationships_updated_at",
+    "indexdef": "CREATE INDEX idx_social_relationships_updated_at ON public.social_relationships USING btree (updated_at DESC)"
   }
   ],
   "rls": [
@@ -892,6 +1132,16 @@
     },
     {
       "table_name": "daily_logs",
+      "rls_enabled": true,
+      "rls_forced": false
+    },
+    {
+      "table_name": "user_locations",
+      "rls_enabled": true,
+      "rls_forced": false
+    },
+    {
+      "table_name": "social_relationships",
       "rls_enabled": true,
       "rls_forced": false
     }
@@ -1124,6 +1374,26 @@
     "permissive": "PERMISSIVE",
     "roles": "{authenticated}",
     "cmd": "UPDATE",
+    "qual": "(auth.uid() = user_id)",
+    "with_check": "(auth.uid() = user_id)"
+  },
+  {
+    "schemaname": "public",
+    "tablename": "user_locations",
+    "policyname": "Users can manage own location",
+    "permissive": "PERMISSIVE",
+    "roles": "{authenticated}",
+    "cmd": "ALL",
+    "qual": "(auth.uid() = user_id)",
+    "with_check": "(auth.uid() = user_id)"
+  },
+  {
+    "schemaname": "public",
+    "tablename": "social_relationships",
+    "policyname": "Users can manage own social relationships",
+    "permissive": "PERMISSIVE",
+    "roles": "{authenticated}",
+    "cmd": "ALL",
     "qual": "(auth.uid() = user_id)",
     "with_check": "(auth.uid() = user_id)"
   }

@@ -1,5 +1,6 @@
 import { createClient } from '@supabase/supabase-js'
 import jwt from 'jsonwebtoken'
+import { getWeather } from './_weather'
 
 const chatModel = process.env.CHAT_AI_MODEL || 'deepseek-chat'
 
@@ -332,7 +333,7 @@ export default async function handler(req: any, res: any) {
     try {
       const { data: locData } = await supabase
         .from('user_locations')
-        .select('latitude, longitude, accuracy, address, updated_at')
+        .select('latitude, longitude, accuracy, address, adcode, updated_at')
         .eq('user_id', targetUserId)
         .single()
 
@@ -354,6 +355,13 @@ export default async function handler(req: any, res: any) {
       }
     } catch (locErr: any) {
       console.warn('[Location] 查询失败，跳过位置信息:', locErr.message)
+    }
+
+    // 获取天气信息（每日首次调用 API，后续复用缓存）
+    let weatherInfo = ''
+    const amapKey = process.env.AMAP_API_KEY
+    if (amapKey) {
+      weatherInfo = await getWeather({ supabase, userId: targetUserId, amapKey }) || ''
     }
 
     const apiConfigs = settings?.apiConfigs?.filter((c: any) => c.url && c.key) || []
@@ -468,7 +476,7 @@ export default async function handler(req: any, res: any) {
 
     const prompt = `${baseSystemPrompt}${userPrompt}
 现在是 ${new Date().toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' })}。
-${locationInfo ? `${locationInfo}\n` : ''}距离你们上次对话已经过去了 ${hoursSinceLastChat} 小时。
+${weatherInfo ? `${weatherInfo}\n` : ''}${locationInfo ? `${locationInfo}\n` : ''}距离你们上次对话已经过去了 ${hoursSinceLastChat} 小时。
 ${currentTimingInfo ? `\n${currentTimingInfo}\n` : ''}
 ${proactiveInstruction}
 
