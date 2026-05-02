@@ -129,42 +129,65 @@ async function updateUserProfileSummary(params: {
   settings?: any
 }) {
   const { supabase, userId, recentLogs, recentChats, apiConfigs, settings } = params
-  
+
   try {
     // 如果没有足够的数据，跳过摘要更新
     if (recentLogs.length === 0 && recentChats.length === 0) {
       console.log('[Profile Summary] 无足够数据，跳过摘要更新')
       return
     }
-    
+
+    // 读取已有社交关系
+    let existingRelationshipsText = ''
+    try {
+      const { data: relRows } = await supabase
+        .from('social_relationships')
+        .select('name, relation, impression, history')
+        .eq('user_id', userId)
+      if (relRows && relRows.length > 0) {
+        existingRelationshipsText = relRows.map(r => {
+          const latestUpdate = r.history?.length > 0
+            ? ` [印象更新于 ${r.history[r.history.length - 1].date}]`
+            : ''
+          return `- ${r.name}（${r.relation || '未知关系'}）：${r.impression || '无'}${latestUpdate}`
+        }).join('\n')
+      }
+    } catch (e: any) {
+      console.warn('[Profile Summary] 读取社交关系失败:', e.message)
+    }
+
     // 构建摘要生成提示词
     const summaryPrompt = `你是一个专门分析用户生活记录的 AI 助手。请根据以下数据，生成结构化的用户画像摘要。
-    
+
 用户最近的生活记录（最近12小时）：
 ${recentLogs.map(log => `- [${log.type}] ${log.content} ${log.finance_category ? `(${log.finance_category})` : ''}`).join('\n') || '暂无记录'}
 
 用户最近的对话（最近30条）：
 ${recentChats.map(c => `- ${c.role}: ${c.content}`).join('\n') || '暂无对话'}
 
-请生成以下类型的结构化摘要（JSON格式）：
-1. "diet_preferences": 饮食偏好（从记账记录中提取，如常吃菜系、偏好口味）
-2. "person_mentions": 常提及的人物（从碎碎念和对话中提取，记录人物名称和关系）
-3. "recent_moods": 近期心情趋势（从碎碎念中提取情绪变化）
-4. "spending_patterns": 消费模式（从记账记录中提取消费类别和时间规律）
+${existingRelationshipsText ? `现有社交关系：
+${existingRelationshipsText}
+` : ''}---
+任务 A：社交关系增量更新
+从上述数据中识别新的人物/宠物，或已有关系的新信息（新互动、新事件、印象变化）。
+- 如果完全没有新信息，social_changes 输出空数组 []
+- 新增人物用 "insert" action；已有关系的更新用 "update" action，name 必须与现有社交关系中的名称一致
+- impression 是综合印象，需要合并新旧信息
+- history_note 只描述本次发现的新信息
 
 输出要求：仅输出一个纯 JSON 对象，不要有任何额外的解释或标记。
 示例格式：
 {
-  "diet_preferences": ["喜欢吃辣", "常点外卖"],
-  "person_mentions": {"张三": "同事", "李四": "朋友"},
-  "recent_moods": ["平静", "有点焦虑"],
-  "spending_patterns": {"餐饮": "高频", "购物": "低频"}
+  "social_changes": [
+    {"action": "insert", "name": "...", "relation": "同事/朋友/家人/宠物等", "impression": "综合印象", "history_note": "本次发现"},
+    {"action": "update", "name": "...", "relation": "可能更新", "impression": "合并后的新印象", "history_note": "本次发现"}
+  ]
 }`
 
     // 使用第一组 API 配置生成摘要
     const config = apiConfigs[0]
     const endpoint = resolveChatCompletionsUrl(config.url)
-    
+
     const aiRes = await fetch(endpoint, {
       method: 'POST',
       headers: {
@@ -174,30 +197,29 @@ ${recentChats.map(c => `- ${c.role}: ${c.content}`).join('\n') || '暂无对话'
       body: JSON.stringify({
         model: config.model,
         messages: [{ role: 'system', content: summaryPrompt }],
-        temperature: 0.3, // 较低温度以获得更稳定的 JSON 输出
-        response_format: { type: "json_object" } // 请求 JSON 格式输出（如果 API 支持）
+        temperature: 0.3,
+        response_format: { type: "json_object" }
       })
     })
-    
+
     if (!aiRes.ok) {
       const errorText = await aiRes.text()
       throw new Error(`摘要生成 API 失败: ${aiRes.status} ${errorText}`)
     }
-    
+
     const aiData = await aiRes.json()
     const summaryJsonStr = aiData.choices?.[0]?.message?.content
-    
+
     if (!summaryJsonStr) {
       throw new Error('AI 未返回有效摘要内容')
     }
-    
+
     // 解析 JSON
     let summaryData
     try {
       summaryData = JSON.parse(summaryJsonStr)
     } catch (parseError) {
       console.error('[Profile Summary] JSON 解析失败:', parseError, '原始内容:', summaryJsonStr)
-      // 尝试提取 JSON（如果 AI 添加了额外文本）
       const jsonMatch = summaryJsonStr.match(/\{[\s\S]*\}/)
       if (jsonMatch) {
         summaryData = JSON.parse(jsonMatch[0])
@@ -205,34 +227,68 @@ ${recentChats.map(c => `- ${c.role}: ${c.content}`).join('\n') || '暂无对话'
         throw new Error('无法解析 JSON 响应')
       }
     }
-    
-    // 更新数据库（每种类型单独存储，便于后续检索）
-    const profileTypes = ['diet_preferences', 'person_mentions', 'recent_moods', 'spending_patterns']
-    
-    for (const profileType of profileTypes) {
-      const content = summaryData[profileType] || {}
-      
-      // 使用 upsert 更新或插入记录
-      const { error: upsertError } = await supabase
-        .from('user_profiles')
-        .upsert({
-          user_id: userId,
-          profile_type: profileType,
-          content: content,
-          updated_at: new Date().toISOString()
-        }, {
-          onConflict: 'user_id,profile_type'
-        })
-      
-      if (upsertError) {
-        console.error(`[Profile Summary] 更新 ${profileType} 失败:`, upsertError)
-      } else {
-        console.log(`[Profile Summary] ${profileType} 更新成功`)
+
+    // 处理社交关系增量更新（独立 try/catch，不影响其他画像更新）
+    try {
+      const socialChanges = summaryData.social_changes
+      if (Array.isArray(socialChanges) && socialChanges.length > 0) {
+        const todayDate = new Date().toISOString().split('T')[0]
+        for (const change of socialChanges) {
+          if (!change.name) continue
+          if (change.action === 'insert') {
+            const { error: insertErr } = await supabase
+              .from('social_relationships')
+              .upsert({
+                user_id: userId,
+                name: change.name,
+                relation: change.relation || null,
+                impression: change.impression || null,
+                history: change.history_note
+                  ? [{ date: todayDate, note: change.history_note }]
+                  : [],
+                updated_at: new Date().toISOString()
+              }, { onConflict: 'user_id,name' })
+            if (insertErr) {
+              console.error(`[Profile Summary] social insert ${change.name} failed:`, insertErr)
+            } else {
+              console.log(`[Profile Summary] social insert ${change.name}`)
+            }
+          } else if (change.action === 'update') {
+            const { data: existingRow } = await supabase
+              .from('social_relationships')
+              .select('history')
+              .eq('user_id', userId)
+              .eq('name', change.name)
+              .single()
+
+            const newHistory = existingRow?.history || []
+            if (change.history_note) {
+              newHistory.push({ date: todayDate, note: change.history_note })
+            }
+
+            const updateData: any = { history: newHistory, updated_at: new Date().toISOString() }
+            if (change.relation) updateData.relation = change.relation
+            if (change.impression) updateData.impression = change.impression
+
+            const { error: updateErr } = await supabase
+              .from('social_relationships')
+              .update(updateData)
+              .eq('user_id', userId)
+              .eq('name', change.name)
+            if (updateErr) {
+              console.error(`[Profile Summary] social update ${change.name} failed:`, updateErr)
+            } else {
+              console.log(`[Profile Summary] social update ${change.name}`)
+            }
+          }
+        }
       }
+    } catch (socialErr: any) {
+      console.warn('[Profile Summary] 社交关系更新失败:', socialErr.message)
     }
-    
-    console.log('[Profile Summary] 用户画像摘要更新完成')
-    
+
+    console.log('[Profile Summary] 社交关系更新完成')
+
   } catch (error: any) {
     // 摘要生成失败不应影响主动消息功能
     console.error('[Profile Summary] 错误:', error.message)
@@ -317,7 +373,7 @@ export default async function handler(req: any, res: any) {
     // 2. 获取最新数据（近 12 小时的记录）
     const twelveHoursAgo = new Date(Date.now() - 12 * 60 * 60 * 1000).toISOString()
     const targetUserId = process.env.PROACTIVE_USER_ID || "17bc4400-b67a-45b0-9366-0e689eedfa09"
-    
+
     // 获取最新生活记录
     const { data: recentLogs } = await supabase
       .from('transactions')
@@ -380,10 +436,10 @@ export default async function handler(req: any, res: any) {
     const hoursSinceLastChat = Math.floor(msSinceLastChat / (1000 * 60 * 60))
 
     if (!force && msSinceLastChat < 60 * 60 * 1000) {
-      return res.status(200).json({ 
+      return res.status(200).json({
         message: 'Chatted recently, skip proactive pulse.',
         lastChatTime: recentChats?.[0]?.created_at,
-        msSinceLastChat 
+        msSinceLastChat
       })
     }
 
@@ -472,7 +528,7 @@ ${chatSummary}
             .catch(err => console.error('[Push] 华为推送失败:', err.message))
 
         return res.status(200).json({
-            message: 'Proactive message sent', 
+            message: 'Proactive message sent',
             content: aiContent,
             hoursSinceLastChat,
             apiUsed: i + 1
