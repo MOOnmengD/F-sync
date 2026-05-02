@@ -1,5 +1,5 @@
 import { createClient } from '@supabase/supabase-js'
-import { getWeather } from './_weather'
+import { getWeather } from './_weather.js'
 
 function resolveChatCompletionsUrl(base: string) {
   const trimmed = base.trim().replace(/\/+$/, '')

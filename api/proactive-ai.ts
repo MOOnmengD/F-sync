@@ -1,6 +1,6 @@
 import { createClient } from '@supabase/supabase-js'
 import jwt from 'jsonwebtoken'
-import { getWeather } from './_weather'
+import { getWeather } from './_weather.js'
 
 const chatModel = process.env.CHAT_AI_MODEL || 'deepseek-chat'
 
