@@ -1,4 +1,5 @@
 import { createClient } from '@supabase/supabase-js'
+import { getWeather } from './_weather'
 
 // 校内地标（新增地点时只改这里）
 const CAMPUS_LOCATIONS = [
@@ -151,6 +152,7 @@ export default async function handler(req: any, res: any) {
   // 解析请求体中的位置信息（前端 Chat 页传入），并富化地址
   const location = body?.location
   let locationInfo = ''
+  let amapAdcode = ''
   if (location && typeof location.latitude === 'number' && typeof location.longitude === 'number') {
     const lat = location.latitude.toFixed(6)
     const lng = location.longitude.toFixed(6)
@@ -161,7 +163,7 @@ export default async function handler(req: any, res: any) {
     if (campusMatch) {
       locationInfo = `宝贝当前位置：${campusMatch}。`
     } else {
-      // 高德逆地理编码获取校外地址
+      // 高德逆地理编码获取校外地址 + adcode（供天气 API 使用）
       let bestAddress = (location.address && typeof location.address === 'string') ? location.address : ''
       const amapKey = process.env.AMAP_API_KEY
       if (amapKey) {
@@ -171,8 +173,13 @@ export default async function handler(req: any, res: any) {
           )
           if (regeoRes.ok) {
             const d = await regeoRes.json()
-            if (d.status === '1' && d.regeocode && d.regeocode.formatted_address) {
-              bestAddress = d.regeocode.formatted_address
+            if (d.status === '1' && d.regeocode) {
+              if (d.regeocode.formatted_address) {
+                bestAddress = d.regeocode.formatted_address
+              }
+              if (d.regeocode.addressComponent?.adcode) {
+                amapAdcode = d.regeocode.addressComponent.adcode
+              }
             }
           }
         } catch (_) { /* fallback */ }
@@ -440,21 +447,32 @@ export default async function handler(req: any, res: any) {
     }
   }
 
+  // 获取天气信息（每日首次调用 API，后续复用缓存）
+  let weatherInfo = ''
+  const weatherAmapKey = process.env.AMAP_API_KEY
+  if (userId && supabaseUrl && supabaseServiceKey && weatherAmapKey) {
+    weatherInfo = await getWeather({ supabase: supabaseAdmin, userId, amapKey: weatherAmapKey }) || ''
+  }
+
   // 更新 systemPrompt 的 content
   systemPrompt.content = `${baseSystemPrompt}${userPrompt}
 当前时间：${new Date().toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' })}
-${locationInfo ? `${locationInfo}\n` : ''}${currentTimingInfo ? `${currentTimingInfo}\n` : ''}${contextInfo ? `\n上下文：${contextInfo}\n可以结合以上历史记录与用户进行互动。` : ''}${userProfileInfo}`
+${weatherInfo ? `${weatherInfo}\n` : ''}${locationInfo ? `${locationInfo}\n` : ''}${currentTimingInfo ? `${currentTimingInfo}\n` : ''}${contextInfo ? `\n上下文：${contextInfo}\n可以结合以上历史记录与用户进行互动。` : ''}${userProfileInfo}`
 
   // 将位置旁路写入 DB，供 proactive-ai 后续使用（非阻塞）
   if (location && userId) {
-    supabaseAdmin.from('user_locations').upsert({
+    const locUpsertData: Record<string, any> = {
       user_id: userId,
       latitude: location.latitude,
       longitude: location.longitude,
       accuracy: location.accuracy ?? null,
       source: 'foreground',
       updated_at: new Date().toISOString()
-    }, { onConflict: 'user_id' }).then(({ error }) => {
+    }
+    if (amapAdcode) {
+      locUpsertData.adcode = amapAdcode
+    }
+    supabaseAdmin.from('user_locations').upsert(locUpsertData, { onConflict: 'user_id' }).then(({ error }) => {
       if (error) console.warn('[Location] 位置存储失败:', error.message)
     })
   }
