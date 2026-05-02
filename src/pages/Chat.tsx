@@ -658,14 +658,20 @@ function ProfileDiaryModal({ isOpen, onClose, initialTab }: {
   )
 }
 
-function MessageBubble({ msg, isTyping, onDelete }: { msg: ChatMessage; isTyping?: boolean; onDelete?: (id: string) => void }) {
+function MessageBubble({ msg, isTyping, onDelete, onResend }: { msg: ChatMessage; isTyping?: boolean; onDelete?: (id: string) => void; onResend?: (id: string) => void }) {
   const isUser = msg.role === 'user'
-  const [confirming, setConfirming] = useState(false)
+  const [confirmingAction, setConfirmingAction] = useState<'delete' | 'resend' | null>(null)
   const segments = msg.content ? splitContent(msg.content) : []
 
-  const handleDeleteClick = () => setConfirming(true)
-  const handleConfirm = () => { setConfirming(false); onDelete?.(msg.id) }
-  const handleCancel = () => setConfirming(false)
+  const handleDeleteClick = () => setConfirmingAction('delete')
+  const handleResendClick = () => setConfirmingAction('resend')
+  const handleConfirm = () => {
+    const action = confirmingAction
+    setConfirmingAction(null)
+    if (action === 'delete') onDelete?.(msg.id)
+    else if (action === 'resend') onResend?.(msg.id)
+  }
+  const handleCancel = () => setConfirmingAction(null)
 
   const bubbleBg = isUser ? 'bg-[#E8F5E9]' : 'bg-[#F0F7FF]'
   const justify = isUser ? 'flex-end' : 'flex-start'
@@ -696,6 +702,14 @@ function MessageBubble({ msg, isTyping, onDelete }: { msg: ChatMessage; isTyping
                     )}
                     <div className={`flex items-center gap-2 ${isUser ? 'flex-row-reverse' : 'flex-row'}`}>
                       <p className="text-xs text-base-text/40">{formatTime(msg.createdAt)}</p>
+                      {onResend && !isTyping && (
+                        <button
+                          onClick={handleResendClick}
+                          className="p-1 rounded-full text-base-text/20 hover:text-blue-400 hover:bg-blue-50 active:scale-90 transition-all duration-150"
+                        >
+                          <RefreshCw size={12} />
+                        </button>
+                      )}
                       {onDelete && !isTyping && (
                         <button
                           onClick={handleDeleteClick}
@@ -705,9 +719,9 @@ function MessageBubble({ msg, isTyping, onDelete }: { msg: ChatMessage; isTyping
                         </button>
                       )}
                     </div>
-                    {confirming && (
+                    {confirmingAction && (
                       <div className={`flex items-center gap-2 px-3 py-1.5 rounded-xl border border-red-100 bg-red-50 text-xs ${isUser ? 'self-end' : 'self-start'}`}>
-                        <span className="text-base-text/60">真的要删除这条消息吗？</span>
+                        <span className="text-base-text/60">{confirmingAction === 'delete' ? '真的要删除这条消息吗？' : '重新生成这条回复？'}</span>
                         <button
                           onClick={handleConfirm}
                           className="font-semibold text-red-500 hover:text-red-600 transition-colors"
@@ -749,6 +763,14 @@ function MessageBubble({ msg, isTyping, onDelete }: { msg: ChatMessage; isTyping
           </div>
           <div className={`flex items-center gap-2 ${isUser ? 'flex-row-reverse' : 'flex-row'}`}>
             <p className="text-xs text-base-text/40">{formatTime(msg.createdAt)}</p>
+            {onResend && !isTyping && (
+              <button
+                onClick={handleResendClick}
+                className="p-1 rounded-full text-base-text/20 hover:text-blue-400 hover:bg-blue-50 active:scale-90 transition-all duration-150"
+              >
+                <RefreshCw size={12} />
+              </button>
+            )}
             {onDelete && !isTyping && (
               <button
                 onClick={handleDeleteClick}
@@ -758,9 +780,9 @@ function MessageBubble({ msg, isTyping, onDelete }: { msg: ChatMessage; isTyping
               </button>
             )}
           </div>
-          {confirming && (
+          {confirmingAction && (
             <div className={`flex items-center gap-2 px-3 py-1.5 rounded-xl border border-red-100 bg-red-50 text-xs ${isUser ? 'self-end' : 'self-start'}`}>
-              <span className="text-base-text/60">真的要删除这条消息吗？</span>
+              <span className="text-base-text/60">{confirmingAction === 'delete' ? '真的要删除这条消息吗？' : '重新生成这条回复？'}</span>
               <button
                 onClick={handleConfirm}
                 className="font-semibold text-red-500 hover:text-red-600 transition-colors"
@@ -955,41 +977,23 @@ export default function Chat() {
     }
   }, [syncMessages])
 
-  const handleSend = async () => {
-    const text = input.trim()
-    if (!text || isLoading) return
-
-    setInput('')
-    if (inputRef.current) {
-      inputRef.current.style.height = '44px'
-      inputRef.current.style.overflowY = 'hidden'
-    }
-    setTextareaHeight(44)
-    setLoading(true)
-
-    // 1. 添加用户消息
-    addMessage({ role: 'user', content: text, createdAt: Date.now() })
-
-    // 2. 准备 AI 占位消息
-    const aiMsgId = addMessage({ role: 'assistant', content: '', createdAt: Date.now() })
-
+  const sendToAi = async (aiMsgId: string) => {
     try {
-      // 3. 打包上下文
-      const context = messages.slice(-CONTEXT_WINDOW).map(m => ({
-        role: m.role,
-        content: m.content,
-        createdAt: m.createdAt
-      }))
-      const userMessage = { role: 'user' as const, content: text, createdAt: Date.now() }
-      context.push(userMessage)
+      const state = useChatStore.getState()
+      const context = state.messages
+        .filter(m => m.content)
+        .slice(-CONTEXT_WINDOW)
+        .map(m => ({
+          role: m.role,
+          content: m.content,
+          createdAt: m.createdAt
+        }))
 
-      // 4. 获取用户ID和位置（并行）
       const [{ data: { user } }, location] = await Promise.all([
         supabase ? supabase.auth.getUser() : Promise.resolve({ data: { user: null } }),
         getCurrentLocation()
       ])
 
-      // 异步存储位置到数据库，供 proactive-ai 使用（非阻塞）
       if (location && user) {
         fetch('/api/update-location', {
           method: 'POST',
@@ -998,7 +1002,6 @@ export default function Chat() {
         }).catch(() => {})
       }
 
-      // 5. 调用 API
       const response = await fetch('/api/chat-completion', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -1025,31 +1028,59 @@ export default function Chat() {
 
       if (!response.ok) throw new Error(data.error || '请求失败')
 
-      // 如果后端返回了 fullMessages，则更新最后一次上下文
       if (data.fullMessages) {
         setLastFullContext(data.fullMessages)
       } else {
-        // 降级：仅保存前端已知的
         setLastFullContext(context)
       }
 
       const aiContent = data.choices?.[0]?.message?.content || 'AI 暂时无法回答。'
-      
-      // 5. 更新 AI 消息
       updateMessage(aiMsgId, { content: aiContent })
 
-      // 6. 批次同步判断
-      const unsyncedCount = messages.filter(m => !m.isSynced).length
+      const unsyncedCount = state.messages.filter(m => !m.isSynced).length
       if (unsyncedCount >= 10) {
         void syncMessages()
       }
-
     } catch (error: any) {
       console.error('[Chat] Error:', error)
       updateMessage(aiMsgId, { content: `抱歉，出错了：${error.message}` })
-    } finally {
-      setLoading(false)
     }
+  }
+
+  const handleSend = async () => {
+    const text = input.trim()
+    if (!text || isLoading) return
+
+    setInput('')
+    if (inputRef.current) {
+      inputRef.current.style.height = '44px'
+      inputRef.current.style.overflowY = 'hidden'
+    }
+    setTextareaHeight(44)
+    setLoading(true)
+
+    addMessage({ role: 'user', content: text, createdAt: Date.now() })
+    const aiMsgId = addMessage({ role: 'assistant', content: '', createdAt: Date.now() })
+
+    await sendToAi(aiMsgId)
+    setLoading(false)
+  }
+
+  const handleResend = async (aiMsgId: string) => {
+    const state = useChatStore.getState()
+    const aiIndex = state.messages.findIndex(m => m.id === aiMsgId)
+    if (aiIndex <= 0) return
+
+    const userMsg = state.messages[aiIndex - 1]
+    if (userMsg.role !== 'user' || !userMsg.content) return
+
+    await deleteMessage(aiMsgId)
+
+    setLoading(true)
+    const newAiMsgId = addMessage({ role: 'assistant', content: '', createdAt: Date.now() })
+
+    await sendToAi(newAiMsgId)
+    setLoading(false)
   }
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -1108,6 +1139,7 @@ export default function Chat() {
             msg={msg}
             isTyping={isLoading && idx === messages.length - 1}
             onDelete={deleteMessage}
+            onResend={msg.role === 'assistant' ? handleResend : undefined}
           />
         ))}
         <div ref={bottomRef} />
