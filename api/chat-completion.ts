@@ -1,5 +1,5 @@
 import { createClient } from '@supabase/supabase-js'
-import { getWeather } from './_weather'
+import { getWeather } from './_weather.js'
 
 // 校内地标（新增地点时只改这里）
 const CAMPUS_LOCATIONS = [
