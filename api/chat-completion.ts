@@ -454,10 +454,23 @@ export default async function handler(req: any, res: any) {
     weatherInfo = await getWeather({ supabase: supabaseAdmin, userId, amapKey: weatherAmapKey }) || ''
   }
 
-  // 更新 systemPrompt 的 content
-  systemPrompt.content = `${baseSystemPrompt}${userPrompt}
-当前时间：${new Date().toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' })}
-${weatherInfo ? `${weatherInfo}\n` : ''}${locationInfo ? `${locationInfo}\n` : ''}${currentTimingInfo ? `${currentTimingInfo}\n` : ''}${contextInfo ? `\n上下文：${contextInfo}\n可以结合以上历史记录与用户进行互动。` : ''}${userProfileInfo}`
+  // 更新 systemPrompt.content — 仅包含角色设定 + 用户基本情况 + 社交关系
+  systemPrompt.content = `${baseSystemPrompt}${userPrompt}${userProfileInfo}`
+
+  // 构建 ## 真实世界信息 作为独立 system 消息（紧随角色设定之后）
+  const worldLines: string[] = []
+  worldLines.push(`当前时间：${new Date().toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' })}`)
+  if (weatherInfo) worldLines.push(weatherInfo)
+  if (locationInfo) worldLines.push(locationInfo)
+  if (currentTimingInfo) worldLines.push(currentTimingInfo)
+  const worldMsg = { role: 'system', content: `## 真实世界信息\n${worldLines.join('\n')}` }
+  fullMessages.splice(1, 0, worldMsg)
+
+  // RAG 检索到的生活记录数据作为独立 system 消息
+  if (contextInfo) {
+    const contextMsg = { role: 'system', content: `## 生活记录数据（可能与当前对话无关）\n通过向量/关键词检索，可能与当前对话无关：\n${contextInfo.replace(/^\n*以下是与你问题相关的历史记录（来自[^）]*）：\n?/, '')}` }
+    fullMessages.splice(2, 0, contextMsg)
+  }
 
   // 将位置旁路写入 DB，供 proactive-ai 后续使用（非阻塞）
   if (location && userId) {
