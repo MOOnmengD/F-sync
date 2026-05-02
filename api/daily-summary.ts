@@ -88,6 +88,27 @@ export default async function handler(req: any, res: any) {
     const endpoint = resolveChatCompletionsUrl(aiUrl)
     const results: string[] = []
 
+    // 读取已有社交关系，供画像增量更新使用
+    let existingRelationshipsText = ''
+    let existingRelationshipRows: any[] = []
+    try {
+      const { data: relRows } = await supabase
+        .from('social_relationships')
+        .select('name, relation, impression, history')
+        .eq('user_id', targetUserId)
+      if (relRows && relRows.length > 0) {
+        existingRelationshipRows = relRows
+        existingRelationshipsText = relRows.map(r => {
+          const latestUpdate = r.history?.length > 0
+            ? ` [印象更新于 ${r.history[r.history.length - 1].date}]`
+            : ''
+          return `- ${r.name}（${r.relation || '未知关系'}）：${r.impression || '无'}${latestUpdate}`
+        }).join('\n')
+      }
+    } catch (e: any) {
+      console.warn('[Daily Summary] 读取社交关系失败（表可能尚未创建）:', e.message)
+    }
+
     // ===== 第一步：生成日记 =====
     const diaryPrompt = `你是 F-Sync 应用中的 Florian（AI 伴侣），请根据以下 ${dateLabel} 的数据，以第一人称写一段日记（100-150字）。
 
@@ -144,7 +165,7 @@ ${chatsText}
     results.push(`diary for ${diaryDate} saved`)
 
     // ===== 第二步：判断是否需要更新用户画像 =====
-    const profilePrompt = `你是 F-Sync 应用的数据分析模块。请根据以下 ${dateLabel} 的数据，判断以下四种用户画像是否需要更新。
+    const profilePrompt = `你是 F-Sync 应用的数据分析模块。请根据以下 ${dateLabel} 的数据，判断用户画像是否需要更新。
 
 生活记录：
 ${logsText}
@@ -152,22 +173,22 @@ ${logsText}
 对话记录：
 ${chatsText}
 
-四种画像类型：
-1. diet_preferences: 饮食偏好（从记账记录中提取，如常吃菜系、偏好口味）
-2. person_mentions: 常提及的人物（从碎碎念和对话中提取）
-3. recent_moods: 近期心情趋势（从碎碎念中提取情绪变化）
-4. spending_patterns: 消费模式（从记账记录中提取消费类别和规律）
-
-对每种类型：
-- 如果今天的数据涉及该类型且有新信息，输出更新后的内容
-- 如果今天的数据与该类型无关或无新信息，该字段设为 null
+${existingRelationshipsText ? `现有社交关系：
+${existingRelationshipsText}
+` : ''}---
+任务 A：社交关系增量更新
+从上述数据中识别新的人物/宠物，或已有关系的新信息（新互动、新事件、印象变化）。
+- 如果完全没有新信息，social_changes 输出空数组 []
+- 新增人物用 "insert" action；已有关系的更新用 "update" action，name 必须与现有社交关系中的名称一致
+- impression 是综合印象，需要合并新旧信息（例如"之前同事关系，最近合作了某个项目，发现他很靠谱"）
+- history_note 只描述当天发现的新信息
 
 输出纯 JSON，无额外文字：
 {
-  "diet_preferences": [...],  // 或 null
-  "person_mentions": {...},   // 或 null
-  "recent_moods": [...],      // 或 null
-  "spending_patterns": {...}  // 或 null
+  "social_changes": [
+    {"action": "insert", "name": "...", "relation": "同事/朋友/家人/宠物等", "impression": "综合印象", "history_note": "当日发现"},
+    {"action": "update", "name": "...", "relation": "可能更新", "impression": "合并后的新印象", "history_note": "当日发现"}
+  ]
 }`
 
     const profileRes = await fetch(endpoint, {
@@ -206,23 +227,65 @@ ${chatsText}
       }
     }
 
-    // 只更新非 null 的画像类型
-    const profileTypes = ['diet_preferences', 'person_mentions', 'recent_moods', 'spending_patterns'] as const
-    for (const profileType of profileTypes) {
-      const content = parsedProfile[profileType]
-      if (content == null) continue
-      const { error } = await supabase
-        .from('user_profiles')
-        .upsert(
-          { user_id: targetUserId, profile_type: profileType, content, updated_at: new Date().toISOString() },
-          { onConflict: 'user_id,profile_type' }
-        )
-      if (error) {
-        console.error(`[Daily Summary] profile ${profileType} failed:`, error)
-      } else {
-        results.push(`profile ${profileType} updated`)
+    // 处理社交关系增量更新（独立 try/catch，不影响其他画像更新）
+    try {
+      const socialChanges = parsedProfile.social_changes
+      if (Array.isArray(socialChanges) && socialChanges.length > 0) {
+        for (const change of socialChanges) {
+          if (!change.name) continue
+          if (change.action === 'insert') {
+            const { error: insertErr } = await supabase
+              .from('social_relationships')
+              .upsert({
+                user_id: targetUserId,
+                name: change.name,
+                relation: change.relation || null,
+                impression: change.impression || null,
+                history: change.history_note
+                  ? [{ date: diaryDate, note: change.history_note }]
+                  : [],
+                updated_at: new Date().toISOString()
+              }, { onConflict: 'user_id,name' })
+            if (insertErr) {
+              console.error(`[Social] insert ${change.name} failed:`, insertErr)
+            } else {
+              results.push(`social insert ${change.name}`)
+            }
+          } else if (change.action === 'update') {
+            // 读取已有记录，追加 history
+            const { data: existingRow } = await supabase
+              .from('social_relationships')
+              .select('history')
+              .eq('user_id', targetUserId)
+              .eq('name', change.name)
+              .single()
+
+            const newHistory = existingRow?.history || []
+            if (change.history_note) {
+              newHistory.push({ date: diaryDate, note: change.history_note })
+            }
+
+            const updateData: any = { history: newHistory, updated_at: new Date().toISOString() }
+            if (change.relation) updateData.relation = change.relation
+            if (change.impression) updateData.impression = change.impression
+
+            const { error: updateErr } = await supabase
+              .from('social_relationships')
+              .update(updateData)
+              .eq('user_id', targetUserId)
+              .eq('name', change.name)
+            if (updateErr) {
+              console.error(`[Social] update ${change.name} failed:`, updateErr)
+            } else {
+              results.push(`social update ${change.name}`)
+            }
+          }
+        }
       }
+    } catch (socialErr: any) {
+      console.warn('[Daily Summary] 社交关系更新失败:', socialErr.message)
     }
+
 
     return res.status(200).json({ message: 'Daily summary completed', date: diaryDate, results })
 

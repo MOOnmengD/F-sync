@@ -418,61 +418,25 @@ export default async function handler(req: any, res: any) {
     console.warn('[Timing] 查询时间轴状态失败:', timingErr.message)
   }
 
-  // 查询用户画像摘要（如果用户ID存在且已启用该功能）
+  // 查询社交关系，作为用户画像注入对话上下文
   let userProfileInfo = ''
   if (userId && supabaseUrl && supabaseServiceKey) {
     try {
-      const { data: userProfiles, error: profileError } = await supabaseAdmin
-        .from('user_profiles')
-        .select('*')
+      const { data: relationships } = await supabaseAdmin
+        .from('social_relationships')
+        .select('name, relation, impression')
         .eq('user_id', userId)
         .order('updated_at', { ascending: false })
-      
-      if (!profileError && userProfiles && userProfiles.length > 0) {
-        // 按类型组织摘要信息
-        const profileByType: Record<string, any> = {}
-        userProfiles.forEach(profile => {
-          profileByType[profile.profile_type] = profile.content
-        })
-        
-        // 构建可读的摘要文本
-        const profileTexts: string[] = []
-        
-        if (profileByType.diet_preferences && Object.keys(profileByType.diet_preferences).length > 0) {
-          const prefs = profileByType.diet_preferences
-          if (Array.isArray(prefs) && prefs.length > 0) {
-            profileTexts.push(`饮食偏好：${prefs.join('、')}`)
-          } else if (typeof prefs === 'object') {
-            profileTexts.push(`饮食偏好：${JSON.stringify(prefs)}`)
-          }
-        }
-        
-        if (profileByType.person_mentions && Object.keys(profileByType.person_mentions).length > 0) {
-          const persons = profileByType.person_mentions
-          if (typeof persons === 'object') {
-            const personList = Object.entries(persons).map(([name, relation]) => `${name}（${relation}）`).join('、')
-            profileTexts.push(`常提及的人物：${personList}`)
-          }
-        }
-        
-        if (profileByType.recent_moods && Array.isArray(profileByType.recent_moods) && profileByType.recent_moods.length > 0) {
-          profileTexts.push(`近期心情：${profileByType.recent_moods.join('、')}`)
-        }
-        
-        if (profileByType.spending_patterns && Object.keys(profileByType.spending_patterns).length > 0) {
-          const spending = profileByType.spending_patterns
-          if (typeof spending === 'object') {
-            const spendingList = Object.entries(spending).map(([category, pattern]) => `${category}（${pattern}）`).join('、')
-            profileTexts.push(`消费模式：${spendingList}`)
-          }
-        }
-        
-        if (profileTexts.length > 0) {
-          userProfileInfo = '\n用户画像摘要：' + profileTexts.join('；') + '。\n（你可以利用这些长期记忆更好地理解用户）'
-        }
+
+      if (relationships && relationships.length > 0) {
+        const relText = relationships.map(r => {
+          const relation = r.relation ? `（${r.relation}）` : ''
+          return `${r.name}${relation}`
+        }).join('；')
+        userProfileInfo = '\n社交关系：' + relText + '。\n（你可以利用这些长期记忆更好地理解用户）'
       }
-    } catch (profileErr) {
-      console.warn('[User Profile] 查询失败，可能表不存在:', profileErr.message)
+    } catch (relErr: any) {
+      console.warn('[Social Relationships] 查询失败（表可能尚未创建）:', relErr.message)
     }
   }
 

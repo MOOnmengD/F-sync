@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { ArrowLeft, BookOpen, Check, Loader2, RefreshCw, Send, Settings, Sparkles, User, X, Save, Eye, EyeOff, ClipboardPaste, Copy, FileText, Trash2 } from 'lucide-react'
+import { ArrowLeft, BookOpen, Check, Loader2, Pencil, Plus, RefreshCw, Send, Settings, Sparkles, User, X, Save, Eye, EyeOff, ClipboardPaste, Copy, FileText, Trash2 } from 'lucide-react'
 import { IconButton } from '../shared/ui/IconButton'
 import { useChatStore, type ChatMessage } from '../store/chat'
 import { supabase } from '../supabaseClient'
@@ -340,15 +340,164 @@ function SettingsModal({ isOpen, onClose, vectorSyncStatus, onVectorSync, onClea
   )
 }
 
-function ProfileContent({ data }: { data: Record<string, any> }) {
-  const sections = [
-    { key: 'diet_preferences', label: '饮食偏好' },
-    { key: 'person_mentions', label: '常提及的人' },
-    { key: 'recent_moods', label: '近期心情' },
-    { key: 'spending_patterns', label: '消费模式' },
-  ]
+type SocialRelationship = {
+  id: string
+  user_id: string
+  name: string
+  relation: string | null
+  impression: string | null
+  history: { date: string; note: string }[]
+  created_at: string
+  updated_at: string
+}
 
-  if (Object.keys(data).length === 0) {
+function RelationshipTag({ rel, onUpdate, onDelete }: {
+  rel: SocialRelationship
+  onUpdate: (id: string, updates: Partial<Pick<SocialRelationship, 'relation' | 'impression'>>) => void
+  onDelete: (id: string) => void
+}) {
+  const [editing, setEditing] = useState(false)
+  const [localRelation, setLocalRelation] = useState(rel.relation || '')
+  const [localImpression, setLocalImpression] = useState(rel.impression || '')
+
+  if (editing) {
+    return (
+      <div className="flex flex-col gap-2 p-3 bg-[#F7F5F2] border border-base-line rounded-xl">
+        <span className="text-sm font-medium text-base-text">{rel.name}</span>
+        <input
+          className="w-full p-1.5 text-sm bg-white border border-base-line rounded-lg text-base-text"
+          value={localRelation}
+          onChange={e => setLocalRelation(e.target.value)}
+          placeholder="关系（同事/朋友/家人/宠物...）"
+        />
+        <input
+          className="w-full p-1.5 text-sm bg-white border border-base-line rounded-lg text-base-text"
+          value={localImpression}
+          onChange={e => setLocalImpression(e.target.value)}
+          placeholder="综合印象"
+        />
+        <div className="flex items-center gap-2 justify-end">
+          <button
+            onClick={() => {
+              onUpdate(rel.id, { relation: localRelation || null, impression: localImpression || null })
+              setEditing(false)
+            }}
+            className="p-1.5 rounded-lg text-green-600 hover:bg-green-50 transition-colors"
+          >
+            <Check size={16} />
+          </button>
+          <button
+            onClick={() => { setLocalRelation(rel.relation || ''); setLocalImpression(rel.impression || ''); setEditing(false) }}
+            className="p-1.5 rounded-lg text-base-text/40 hover:bg-base-line transition-colors"
+          >
+            <X size={16} />
+          </button>
+        </div>
+      </div>
+    )
+  }
+
+  return (
+    <span className="inline-flex items-center gap-1 px-3 py-1.5 text-sm bg-[#F7F5F2] border border-base-line rounded-full text-base-text/80 group cursor-default">
+      <span className="font-medium">{rel.name}</span>
+      {rel.relation && <span className="text-base-text/40">({rel.relation})</span>}
+      {rel.impression && <span className="text-base-text/30 hidden sm:inline truncate max-w-[120px]" title={rel.impression}>— {rel.impression}</span>}
+      <button
+        onClick={() => { setLocalRelation(rel.relation || ''); setLocalImpression(rel.impression || ''); setEditing(true) }}
+        className="ml-0.5 p-0.5 rounded-full opacity-0 group-hover:opacity-100 transition-opacity text-base-text/30 hover:text-base-text/60"
+      >
+        <Pencil size={12} />
+      </button>
+      <button
+        onClick={() => onDelete(rel.id)}
+        className="p-0.5 rounded-full opacity-0 group-hover:opacity-100 transition-opacity text-base-text/30 hover:text-red-400"
+      >
+        <X size={12} />
+      </button>
+    </span>
+  )
+}
+
+function SocialRelationshipsSection({ relationships, onUpdate, onDelete, onAdd }: {
+  relationships: SocialRelationship[]
+  onUpdate: (id: string, updates: Partial<Pick<SocialRelationship, 'relation' | 'impression'>>) => void
+  onDelete: (id: string) => void
+  onAdd: (name: string, relation: string, impression: string) => void
+}) {
+  const [adding, setAdding] = useState(false)
+  const [newName, setNewName] = useState('')
+  const [newRelation, setNewRelation] = useState('')
+  const [newImpression, setNewImpression] = useState('')
+
+  const handleAdd = () => {
+    if (!newName.trim()) return
+    onAdd(newName.trim(), newRelation.trim() || '', newImpression.trim() || '')
+    setNewName(''); setNewRelation(''); setNewImpression(''); setAdding(false)
+  }
+
+  return (
+    <div className="space-y-2">
+      <div className="flex items-center justify-between">
+        <h3 className="text-xs font-bold text-base-text/40 uppercase tracking-wider">社交关系</h3>
+        <button
+          onClick={() => setAdding(!adding)}
+          className="p-0.5 rounded-full text-base-text/30 hover:text-base-text/60 transition-colors"
+        >
+          <Plus size={16} />
+        </button>
+      </div>
+
+      {adding && (
+        <div className="flex flex-col gap-2 p-3 bg-[#F7F5F2] border border-base-line rounded-xl">
+          <input
+            className="w-full p-1.5 text-sm bg-white border border-base-line rounded-lg text-base-text"
+            value={newName}
+            onChange={e => setNewName(e.target.value)}
+            placeholder="名称（张三 / 咪咪）"
+            autoFocus
+          />
+          <input
+            className="w-full p-1.5 text-sm bg-white border border-base-line rounded-lg text-base-text"
+            value={newRelation}
+            onChange={e => setNewRelation(e.target.value)}
+            placeholder="关系（同事/朋友/家人/宠物...）"
+          />
+          <input
+            className="w-full p-1.5 text-sm bg-white border border-base-line rounded-lg text-base-text"
+            value={newImpression}
+            onChange={e => setNewImpression(e.target.value)}
+            placeholder="综合印象"
+          />
+          <div className="flex items-center gap-2 justify-end">
+            <button onClick={handleAdd} className="p-1.5 rounded-lg text-green-600 hover:bg-green-50 transition-colors">
+              <Check size={16} />
+            </button>
+            <button onClick={() => setAdding(false)} className="p-1.5 rounded-lg text-base-text/40 hover:bg-base-line transition-colors">
+              <X size={16} />
+            </button>
+          </div>
+        </div>
+      )}
+
+      <div className="flex flex-wrap gap-2">
+        {relationships.length === 0 && !adding && (
+          <p className="text-xs text-base-text/30">暂无社交关系数据</p>
+        )}
+        {relationships.map(rel => (
+          <RelationshipTag key={rel.id} rel={rel} onUpdate={onUpdate} onDelete={onDelete} />
+        ))}
+      </div>
+    </div>
+  )
+}
+
+function ProfileContent({ socialRelationships, onSocialUpdate, onSocialDelete, onSocialAdd }: {
+  socialRelationships: SocialRelationship[]
+  onSocialUpdate: (id: string, updates: Partial<Pick<SocialRelationship, 'relation' | 'impression'>>) => void
+  onSocialDelete: (id: string) => void
+  onSocialAdd: (name: string, relation: string, impression: string) => void
+}) {
+  if (socialRelationships.length === 0) {
     return (
       <div className="text-center py-20 space-y-2">
         <p className="text-sm text-base-text/30">暂无画像数据</p>
@@ -359,32 +508,12 @@ function ProfileContent({ data }: { data: Record<string, any> }) {
 
   return (
     <div className="space-y-6">
-      {sections.map(section => {
-        const content = data[section.key]
-        if (!content) return null
-        return (
-          <div key={section.key} className="space-y-2">
-            <h3 className="text-xs font-bold text-base-text/40 uppercase tracking-wider">{section.label}</h3>
-            <div className="flex flex-wrap gap-2">
-              {Array.isArray(content) ? (
-                content.map((item: string, i: number) => (
-                  <span key={i} className="px-3 py-1 text-sm bg-[#F7F5F2] border border-base-line rounded-full text-base-text/70">
-                    {item}
-                  </span>
-                ))
-              ) : typeof content === 'object' ? (
-                Object.entries(content).map(([k, v]: [string, any]) => (
-                  <span key={k} className="px-3 py-1 text-sm bg-[#F7F5F2] border border-base-line rounded-full text-base-text/70">
-                    {k}<span className="text-base-text/40 ml-1">({v})</span>
-                  </span>
-                ))
-              ) : (
-                <span className="text-sm text-base-text/70">{String(content)}</span>
-              )}
-            </div>
-          </div>
-        )
-      })}
+      <SocialRelationshipsSection
+        relationships={socialRelationships}
+        onUpdate={onSocialUpdate}
+        onDelete={onSocialDelete}
+        onAdd={onSocialAdd}
+      />
     </div>
   )
 }
@@ -424,32 +553,60 @@ function ProfileDiaryModal({ isOpen, onClose, initialTab }: {
   initialTab: 'profile' | 'diary'
 }) {
   const [tab, setTab] = useState<'profile' | 'diary'>(initialTab)
-  const [profileData, setProfileData] = useState<Record<string, any>>({})
   const [diaryEntries, setDiaryEntries] = useState<any[]>([])
+  const [socialRelationships, setSocialRelationships] = useState<SocialRelationship[]>([])
   const [loading, setLoading] = useState(false)
+
+  const loadData = async () => {
+    const client = supabase
+    if (!client) { setLoading(false); return }
+
+    const [diaryRes, socialRes] = await Promise.all([
+      client.from('daily_logs').select('*').order('date', { ascending: false }).limit(60),
+      (async () => {
+        try { return await client.from('social_relationships').select('*').order('updated_at', { ascending: false }) }
+        catch { return { data: [], error: null } }
+      })()
+    ])
+
+    if (diaryRes.data) setDiaryEntries(diaryRes.data)
+    if (socialRes.data) setSocialRelationships(socialRes.data)
+    setLoading(false)
+  }
 
   useEffect(() => {
     if (!isOpen) return
     setTab(initialTab)
     setLoading(true)
-    void (async () => {
-      const client = supabase
-      if (!client) { setLoading(false); return }
-
-      const [profileRes, diaryRes] = await Promise.all([
-        client.from('user_profiles').select('*'),
-        client.from('daily_logs').select('*').order('date', { ascending: false }).limit(60)
-      ])
-
-      if (profileRes.data) {
-        const byType: Record<string, any> = {}
-        profileRes.data.forEach((p: any) => { byType[p.profile_type] = p.content })
-        setProfileData(byType)
-      }
-      if (diaryRes.data) setDiaryEntries(diaryRes.data)
-      setLoading(false)
-    })()
+    loadData()
   }, [isOpen, initialTab])
+
+  const handleSocialUpdate = async (id: string, updates: Partial<Pick<SocialRelationship, 'relation' | 'impression'>>) => {
+    const client = supabase
+    if (!client) return
+    const { error } = await client.from('social_relationships').update(updates).eq('id', id)
+    if (!error) {
+      setSocialRelationships(prev => prev.map(r => r.id === id ? { ...r, ...updates } : r))
+    }
+  }
+
+  const handleSocialDelete = async (id: string) => {
+    const client = supabase
+    if (!client) return
+    const { error } = await client.from('social_relationships').delete().eq('id', id)
+    if (!error) {
+      setSocialRelationships(prev => prev.filter(r => r.id !== id))
+    }
+  }
+
+  const handleSocialAdd = async (name: string, relation: string, impression: string) => {
+    const client = supabase
+    if (!client) return
+    const { data, error } = await client.from('social_relationships').insert({ name, relation, impression }).select('*').single()
+    if (!error && data) {
+      setSocialRelationships(prev => [...prev, data])
+    }
+  }
 
   if (!isOpen) return null
 
@@ -486,7 +643,12 @@ function ProfileDiaryModal({ isOpen, onClose, initialTab }: {
               <Loader2 size={24} className="animate-spin text-base-text/30" />
             </div>
           ) : tab === 'profile' ? (
-            <ProfileContent data={profileData} />
+            <ProfileContent
+              socialRelationships={socialRelationships}
+              onSocialUpdate={handleSocialUpdate}
+              onSocialDelete={handleSocialDelete}
+              onSocialAdd={handleSocialAdd}
+            />
           ) : (
             <DiaryContent entries={diaryEntries} />
           )}
