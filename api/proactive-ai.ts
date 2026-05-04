@@ -328,6 +328,8 @@ export default async function handler(req: any, res: any) {
     const settings = body.settings
     const force = body.force === true
 
+    const targetUserId = process.env.PROACTIVE_USER_ID || "17bc4400-b67a-45b0-9366-0e689eedfa09"
+
     // 从数据库读取最新位置（由 HarmonyOS workScheduler 或前端 Chat 页更新）
     let locationInfo = ''
     try {
@@ -380,7 +382,6 @@ export default async function handler(req: any, res: any) {
 
     // 2. 获取最新数据（近 12 小时的记录）
     const twelveHoursAgo = new Date(Date.now() - 12 * 60 * 60 * 1000).toISOString()
-    const targetUserId = process.env.PROACTIVE_USER_ID || "17bc4400-b67a-45b0-9366-0e689eedfa09"
 
     // 获取最新生活记录
     const { data: recentLogs } = await supabase
