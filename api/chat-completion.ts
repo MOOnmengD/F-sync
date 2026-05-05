@@ -427,7 +427,7 @@ export default async function handler(req: any, res: any) {
     console.warn('[Timing] 查询时间轴状态失败:', timingErr.message)
   }
 
-  // 查询社交关系，作为用户画像注入对话上下文
+  // 查询用户画像（社交关系 + 个人信息），注入对话上下文
   let userProfileInfo = ''
   if (userId && supabaseUrl && supabaseServiceKey) {
     try {
@@ -442,10 +442,31 @@ export default async function handler(req: any, res: any) {
           const relation = r.relation ? `（${r.relation}）` : ''
           return `${r.name}${relation}`
         }).join('；')
-        userProfileInfo = '\n社交关系：' + relText + '。\n（你可以利用这些长期记忆更好地理解用户）'
+        userProfileInfo = '\n社交关系：' + relText + '。'
       }
     } catch (relErr: any) {
       console.warn('[Social Relationships] 查询失败（表可能尚未创建）:', relErr.message)
+    }
+
+    // 读取持久性个人信息
+    try {
+      const { data: factsProfile } = await supabaseAdmin
+        .from('user_profiles')
+        .select('content')
+        .eq('user_id', userId)
+        .eq('profile_type', 'personal_facts')
+        .maybeSingle()
+
+      if (factsProfile?.content?.facts && Array.isArray(factsProfile.content.facts) && factsProfile.content.facts.length > 0) {
+        const factsText = factsProfile.content.facts.join('；')
+        userProfileInfo += '\n关于用户的事实：' + factsText + '。'
+      }
+    } catch (factsErr: any) {
+      console.warn('[Personal Facts] 查询失败:', factsErr.message)
+    }
+
+    if (userProfileInfo) {
+      userProfileInfo += '\n（你可以利用这些长期记忆更好地理解用户）'
     }
   }
 

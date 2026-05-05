@@ -682,6 +682,7 @@ interface EventItem {
   type: 'event' | 'todo'
   status: 'pending' | 'done' | null
   content: string
+  event_time: string | null
   sort_order: number
 }
 
@@ -723,7 +724,7 @@ function DailyEventsModal({ isOpen, onClose }: {
 
     const { data, error } = await client
       .from('daily_event_items')
-      .select('id, type, status, content, sort_order')
+      .select('id, type, status, content, event_time, sort_order')
       .eq('date', date)
       .order('sort_order', { ascending: true })
 
@@ -799,18 +800,32 @@ function DailyEventsModal({ isOpen, onClose }: {
     setSavingId(null)
   }
 
+  const sortItems = (list: EventItem[]) => {
+    return [...list].sort((a, b) => {
+      const typeOrder: Record<string, number> = { event: 0, todo: 1 }
+      if (typeOrder[a.type] !== typeOrder[b.type]) return typeOrder[a.type] - typeOrder[b.type]
+      const timeA = a.event_time || '23:59'
+      const timeB = b.event_time || '23:59'
+      return timeA.localeCompare(timeB)
+    })
+  }
+
   const addItem = async () => {
     if (!newText.trim()) return
-    const maxOrder = items.reduce((max, it) => Math.max(max, it.sort_order), 0)
+    const now = new Date(new Date().getTime() + 8 * 60 * 60 * 1000)
+    const currentTime = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`
     const client = supabase
     if (client) {
       const { data, error } = await client
         .from('daily_event_items')
-        .insert({ date: eventsDate, type: newType, status: newType === 'todo' ? 'pending' : null, content: newText.trim(), sort_order: maxOrder + 1 })
+        .insert({ date: eventsDate, type: newType, status: newType === 'todo' ? 'pending' : null, content: newText.trim(), event_time: currentTime, sort_order: 0 })
         .select('id')
         .single()
       if (!error && data) {
-        setItems(prev => [...prev, { id: data.id, type: newType, status: newType === 'todo' ? 'pending' : null, content: newText.trim(), sort_order: maxOrder + 1 }])
+        setItems(prev => {
+          const newItem: EventItem = { id: data.id, type: newType, status: newType === 'todo' ? 'pending' : null, content: newText.trim(), event_time: currentTime, sort_order: 0 }
+          return sortItems([...prev, newItem])
+        })
       }
     }
     setNewText('')
@@ -896,6 +911,9 @@ function DailyEventsModal({ isOpen, onClose }: {
                         ? 'text-base-muted line-through'
                         : 'text-base-text'
                     }`}>
+                      {item.event_time && (
+                        <span className="text-xs text-base-muted/60 mr-1">{item.event_time}</span>
+                      )}
                       {item.content}
                     </span>
                   )}
