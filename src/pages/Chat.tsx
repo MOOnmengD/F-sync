@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { ArrowLeft, BookOpen, Check, ImagePlus, Loader2, Pencil, Plus, RefreshCw, Send, Settings, Sparkles, User, X, Save, Eye, EyeOff, ClipboardPaste, Copy, FileText, Trash2 } from 'lucide-react'
+import { ArrowLeft, BookOpen, Check, ImagePlus, ListTodo, Loader2, Pencil, Plus, RefreshCw, Send, Settings, Sparkles, X, Save, Eye, EyeOff, ClipboardPaste, Copy, FileText, Trash2 } from 'lucide-react'
 import { compressImage, type CompressedImage } from '../utils/image'
 import { IconButton } from '../shared/ui/IconButton'
 import { useChatStore, type ChatMessage } from '../store/chat'
@@ -677,6 +677,173 @@ function ProfileDiaryModal({ isOpen, onClose, initialTab }: {
   )
 }
 
+function DailyEventsModal({ isOpen, onClose }: {
+  isOpen: boolean
+  onClose: () => void
+}) {
+  const [content, setContent] = useState('')
+  const [original, setOriginal] = useState('')
+  const [editing, setEditing] = useState(false)
+  const [loading, setLoading] = useState(false)
+  const [saving, setSaving] = useState(false)
+
+  // CST 今日日期
+  const today = new Date(new Date().getTime() + 8 * 60 * 60 * 1000).toISOString().split('T')[0]
+
+  const loadEvents = async () => {
+    const client = supabase
+    if (!client) { setLoading(false); return }
+
+    const { data, error } = await client
+      .from('daily_events')
+      .select('content')
+      .eq('date', today)
+      .maybeSingle()
+
+    if (!error && data) {
+      setContent(data.content)
+      setOriginal(data.content)
+    } else {
+      setContent('')
+      setOriginal('')
+    }
+    setLoading(false)
+  }
+
+  useEffect(() => {
+    if (!isOpen) return
+    setEditing(false)
+    setLoading(true)
+    loadEvents()
+  }, [isOpen, today])
+
+  const handleSave = async () => {
+    const client = supabase
+    if (!client || content === original) { setEditing(false); return }
+
+    setSaving(true)
+    const { error } = await client
+      .from('daily_events')
+      .upsert({ date: today, content }, { onConflict: 'user_id,date' })
+
+    setSaving(false)
+    if (!error) {
+      setOriginal(content)
+      setEditing(false)
+    }
+  }
+
+  const handleCancel = () => {
+    setContent(original)
+    setEditing(false)
+  }
+
+  // 简单渲染 Markdown 要点
+  const renderContent = (text: string) => {
+    if (!text) return <div className="text-base-muted text-sm text-center py-8">暂无事件，等待 AI 在每日凌晨自动生成</div>
+
+    return text.split('\n').map((line, i) => {
+      let display = line
+      let className = 'text-sm leading-relaxed py-0.5 flex items-start gap-2'
+
+      // - [x] 已完成约定
+      if (/^\s*- \[x\]/i.test(line)) {
+        display = line.replace(/^\s*- \[x\]\s*/i, '')
+        return (
+          <div key={i} className={className}>
+            <Check size={14} className="mt-0.5 text-green-500 shrink-0" />
+            <span className="text-base-muted line-through">{display}</span>
+          </div>
+        )
+      }
+      // - [ ] 未完成约定
+      if (/^\s*- \[\]/.test(line)) {
+        display = line.replace(/^\s*- \[\]\s*/i, '')
+        return (
+          <div key={i} className={className}>
+            <div className="w-3.5 h-3.5 mt-0.5 rounded-full border-2 border-[#B4AEE8] shrink-0" />
+            <span>{display}</span>
+          </div>
+        )
+      }
+      // - 普通事件
+      if (/^\s*- /.test(line)) {
+        display = line.replace(/^\s*- /, '')
+        return (
+          <div key={i} className={className}>
+            <div className="w-1.5 h-1.5 mt-1.5 rounded-full bg-base-text/30 shrink-0" />
+            <span>{display}</span>
+          </div>
+        )
+      }
+      // 其他行
+      return <div key={i} className="text-sm py-0.5">{line || ' '}</div>
+    })
+  }
+
+  if (!isOpen) return null
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm">
+      <div className="bg-[#FDFCFB] w-full max-w-lg rounded-3xl flex flex-col max-h-[90vh] overflow-hidden border border-base-line">
+        {/* Header */}
+        <div className="px-6 py-4 border-b border-base-line flex items-center justify-between bg-[#F7F5F2]">
+          <div className="flex items-center gap-2">
+            <ListTodo size={18} className="text-[#B4AEE8]" />
+            <span className="text-sm font-medium text-base-text">每日事件</span>
+            <span className="text-xs text-base-muted">{today}</span>
+          </div>
+          <div className="flex items-center gap-2">
+            {editing ? (
+              <>
+                <button onClick={handleSave} disabled={saving}
+                  className="px-3 py-1.5 text-xs rounded-full bg-[#B4AEE8] text-white disabled:opacity-50 flex items-center gap-1"
+                >
+                  {saving ? <Loader2 size={12} className="animate-spin" /> : <Save size={12} />}
+                  保存
+                </button>
+                <button onClick={handleCancel}
+                  className="px-3 py-1.5 text-xs rounded-full border border-base-line text-base-muted"
+                >
+                  取消
+                </button>
+              </>
+            ) : (
+              <button onClick={() => setEditing(true)}
+                className="px-3 py-1.5 text-xs rounded-full border border-base-line text-base-muted flex items-center gap-1 hover:bg-base-line/50"
+              >
+                <Pencil size={12} />
+                编辑
+              </button>
+            )}
+            <button onClick={onClose} className="p-2 hover:bg-base-line rounded-full transition-colors">
+              <X size={20} className="text-base-text/50" />
+            </button>
+          </div>
+        </div>
+
+        {/* Content */}
+        <div className="flex-1 overflow-y-auto p-6">
+          {loading ? (
+            <div className="flex items-center justify-center py-20">
+              <Loader2 size={24} className="animate-spin text-base-text/30" />
+            </div>
+          ) : editing ? (
+            <textarea
+              value={content}
+              onChange={e => setContent(e.target.value)}
+              placeholder={`- 事件描述\n- [ ] 待完成约定\n- [x] 已完成约定`}
+              className="w-full h-64 rounded-2xl border border-base-line bg-base-surface p-4 text-sm resize-none outline-none focus:border-lavender"
+            />
+          ) : (
+            renderContent(content)
+          )}
+        </div>
+      </div>
+    </div>
+  )
+}
+
 function formatContextContent(content: any): string {
   if (typeof content === 'string') return content
   if (Array.isArray(content)) {
@@ -875,6 +1042,7 @@ export default function Chat() {
   const [lastFullContext, setLastFullContext] = useState<any[]>([])
   const [isProfileDiaryOpen, setIsProfileDiaryOpen] = useState(false)
   const [profileDiaryInitialTab, setProfileDiaryInitialTab] = useState<'profile' | 'diary'>('profile')
+  const [isDailyEventsOpen, setIsDailyEventsOpen] = useState(false)
   const [textareaHeight, setTextareaHeight] = useState(44)
   const [selectedImages, setSelectedImages] = useState<CompressedImage[]>([])
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -1191,17 +1359,17 @@ export default function Chat() {
           </button>
           <button
             type="button"
-            onClick={() => { setProfileDiaryInitialTab('profile'); setIsProfileDiaryOpen(true) }}
+            onClick={() => setIsDailyEventsOpen(true)}
             className="h-10 w-10 text-base-text/50 border border-base-line rounded-full bg-base-surface active:opacity-70 flex items-center justify-center"
-            title="用户画像"
+            title="每日事件"
           >
-            <User size={16} />
+            <ListTodo size={16} />
           </button>
           <button
             type="button"
-            onClick={() => { setProfileDiaryInitialTab('diary'); setIsProfileDiaryOpen(true) }}
+            onClick={() => { setProfileDiaryInitialTab('profile'); setIsProfileDiaryOpen(true) }}
             className="h-10 w-10 text-base-text/50 border border-base-line rounded-full bg-base-surface active:opacity-70 flex items-center justify-center"
-            title="每日日记"
+            title="记忆（用户画像 + 每日日记）"
           >
             <BookOpen size={16} />
           </button>
@@ -1299,6 +1467,10 @@ export default function Chat() {
         isOpen={isProfileDiaryOpen}
         onClose={() => setIsProfileDiaryOpen(false)}
         initialTab={profileDiaryInitialTab}
+      />
+      <DailyEventsModal
+        isOpen={isDailyEventsOpen}
+        onClose={() => setIsDailyEventsOpen(false)}
       />
 
       <input
