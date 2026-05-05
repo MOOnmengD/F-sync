@@ -686,26 +686,30 @@ function DailyEventsModal({ isOpen, onClose }: {
   const [editing, setEditing] = useState(false)
   const [loading, setLoading] = useState(false)
   const [saving, setSaving] = useState(false)
-
-  // CST 今日日期
-  const today = new Date(new Date().getTime() + 8 * 60 * 60 * 1000).toISOString().split('T')[0]
+  const [eventsDate, setEventsDate] = useState('')
 
   const loadEvents = async () => {
     const client = supabase
     if (!client) { setLoading(false); return }
 
+    // 取最近一天的事件（cron 生成的是昨天，用户编辑的可能是今天）
     const { data, error } = await client
       .from('daily_events')
-      .select('content')
-      .eq('date', today)
+      .select('date, content')
+      .order('date', { ascending: false })
+      .limit(1)
       .maybeSingle()
 
     if (!error && data) {
       setContent(data.content)
       setOriginal(data.content)
+      setEventsDate(data.date)
     } else {
       setContent('')
       setOriginal('')
+      // fallback 到 CST 今天
+      const today = new Date(new Date().getTime() + 8 * 60 * 60 * 1000).toISOString().split('T')[0]
+      setEventsDate(today)
     }
     setLoading(false)
   }
@@ -715,7 +719,7 @@ function DailyEventsModal({ isOpen, onClose }: {
     setEditing(false)
     setLoading(true)
     loadEvents()
-  }, [isOpen, today])
+  }, [isOpen])
 
   const handleSave = async () => {
     const client = supabase
@@ -724,7 +728,7 @@ function DailyEventsModal({ isOpen, onClose }: {
     setSaving(true)
     const { error } = await client
       .from('daily_events')
-      .upsert({ date: today, content }, { onConflict: 'user_id,date' })
+      .upsert({ date: eventsDate, content }, { onConflict: 'user_id,date' })
 
     setSaving(false)
     if (!error) {
@@ -791,7 +795,7 @@ function DailyEventsModal({ isOpen, onClose }: {
           <div className="flex items-center gap-2">
             <ListTodo size={18} className="text-[#B4AEE8]" />
             <span className="text-sm font-medium text-base-text">每日事件</span>
-            <span className="text-xs text-base-muted">{today}</span>
+            <span className="text-xs text-base-muted">{eventsDate}</span>
           </div>
           <div className="flex items-center gap-2">
             {editing ? (
