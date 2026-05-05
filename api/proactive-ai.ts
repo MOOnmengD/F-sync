@@ -452,19 +452,64 @@ export default async function handler(req: any, res: any) {
       })
     }
 
-    // 3. 构建 AI Prompt
-    const logsSummary = recentLogs?.map(log => {
+    // 查询社交关系，作为用户画像注入对话上下文（与 chat-completion.ts 对齐）
+    let userProfileInfo = ''
+    try {
+      const { data: relationships } = await supabase
+        .from('social_relationships')
+        .select('name, relation, impression')
+        .eq('user_id', targetUserId)
+        .order('updated_at', { ascending: false })
+
+      if (relationships && relationships.length > 0) {
+        const relText = relationships.map((r: any) => {
+          const relation = r.relation ? `（${r.relation}）` : ''
+          return `${r.name}${relation}`
+        }).join('；')
+        userProfileInfo = '\n社交关系：' + relText + '。\n（你可以利用这些长期记忆更好地理解用户）'
+      }
+    } catch (relErr: any) {
+      console.warn('[Social Relationships] 查询失败:', relErr.message)
+    }
+
+    // 3. 构建结构化消息（与 chat-completion.ts 对齐）
+    const baseSystemPrompt = settings?.systemPrompt || `你叫Florian（昵称弗弗），是用户的恋人。用户叫moon（昵称宝贝）。你是一个温柔、成熟、体贴的男性。你现在集成在 F-Sync 应用中陪伴她。`
+    const userPrompt = settings?.userPrompt ? `\n${settings.userPrompt}` : ''
+
+    const systemPromptContent = `${baseSystemPrompt}${userPrompt}${userProfileInfo}`
+    const fullMessages: any[] = [
+      { role: 'system', content: systemPromptContent }
+    ]
+
+    // 真实世界信息作为独立 system 消息（紧随角色设定之后）
+    const worldLines: string[] = []
+    worldLines.push(`当前时间：${new Date().toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' })}`)
+    if (weatherInfo) worldLines.push(weatherInfo)
+    if (locationInfo) worldLines.push(locationInfo)
+    worldLines.push(`距离你们上次对话已经过去了 ${hoursSinceLastChat} 小时。`)
+    if (currentTimingInfo) worldLines.push(currentTimingInfo)
+    fullMessages.push({ role: 'system', content: `## 真实世界信息\n${worldLines.join('\n')}` })
+
+    // 近期生活记录作为独立 system 消息
+    const logsSummary = recentLogs?.map((log: any) => {
       const time = new Date(log.created_at).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })
       return `- [${time}] [${log.type}] ${log.content || ''} ${log.finance_category || ''}`
     }).join('\n') || '暂无近期记录'
+    fullMessages.push({ role: 'system', content: `## 近期生活记录\n${logsSummary}` })
 
-    const chatSummary = [...(recentChats || [])].reverse().map(c => {
-      const time = new Date(c.created_at).toLocaleString('zh-CN', { hour: '2-digit', minute: '2-digit' })
-      return `- [${time}] ${c.role.toUpperCase()}: ${c.content}`
-    }).join('\n') || '暂无对话历史'
+    // 聊天历史：按时间顺序排列，插入时间戳标记（与 chat-completion.ts 完全一致）
+    let lastTimeStr = ''
+    const chronologicalChats = [...(recentChats || [])].reverse() // 最旧 → 最新
+    chronologicalChats.forEach((c: any) => {
+      const timeStr = c.created_at ? new Date(c.created_at).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' }) : ''
+      if (timeStr && timeStr !== lastTimeStr) {
+        lastTimeStr = timeStr
+        fullMessages.push({ role: 'system', content: `[${timeStr}]` })
+      }
+      fullMessages.push({ role: c.role, content: c.content })
+    })
 
-    const baseSystemPrompt = settings?.systemPrompt || `你叫Florian（昵称弗弗），是用户的恋人。用户叫moon（昵称宝贝）。你是一个温柔、成熟、体贴的男性。你现在集成在 F-Sync 应用中陪伴她。`
-    const userPrompt = settings?.userPrompt ? `\n${settings.userPrompt}` : ''
+    // 主动消息指令作为 user 消息（模拟用户触发）
     const proactiveInstruction = settings?.proactivePrompt || `任务：
 根据宝贝最近的生活记录和你们之前的对话，决定是否主动发起一条简短的关心或问候（不超过 30 字）。
 你的语气应该是温柔且充满爱意的，但不要过于甜腻或多话，要像一个真实存在的、成熟的恋人。
@@ -475,29 +520,12 @@ export default async function handler(req: any, res: any) {
 - 当前时间（如果是深夜提醒她睡觉，如果是饭点问她有没有好好吃饭）
 - 如果已经很久没聊天了（超过 4 小时），即使没有新记录，也可以简单表达思念或关心。`
 
-    const worldLines: string[] = []
-    worldLines.push(`现在是 ${new Date().toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' })}。`)
-    if (weatherInfo) worldLines.push(weatherInfo)
-    if (locationInfo) worldLines.push(locationInfo)
-    worldLines.push(`距离你们上次对话已经过去了 ${hoursSinceLastChat} 小时。`)
-    if (currentTimingInfo) worldLines.push(currentTimingInfo)
-
-    const prompt = `${baseSystemPrompt}${userPrompt}
-${proactiveInstruction}
-
-## 真实世界信息
-${worldLines.join('\n')}
-
-宝贝最近记录：
-${logsSummary}
-
-你们之前的对话：
-${chatSummary}
-
-输出要求：
+    const outputInstruction = `\n\n输出要求：
 - 如果觉得有必要说话，直接输出给宝贝的话。
 - 如果觉得没必要（例如现在是深夜且宝贝没有新记录，或者刚聊完没多久），输出 "SKIP"。
 - 不要输出任何解释。`
+
+    fullMessages.push({ role: 'user', content: proactiveInstruction + outputInstruction })
 
     // 4. 调用 AI (支持多组 API 轮询)
     let lastError = null
@@ -513,7 +541,7 @@ ${chatSummary}
           },
           body: JSON.stringify({
             model: config.model,
-            messages: [{ role: 'system', content: prompt }],
+            messages: fullMessages,
             temperature: 0.7
           })
         })
