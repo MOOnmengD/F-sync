@@ -690,9 +690,8 @@ function DailyEventsModal({ isOpen, onClose }: {
   onClose: () => void
 }) {
   const [items, setItems] = useState<EventItem[]>([])
-  const [originalItems, setOriginalItems] = useState<EventItem[]>([])
   const [loading, setLoading] = useState(false)
-  const [saving, setSaving] = useState(false)
+  const [savingId, setSavingId] = useState<string | null>(null)
   const [eventsDate, setEventsDate] = useState('')
   const [editingId, setEditingId] = useState<string | null>(null)
   const [editText, setEditText] = useState('')
@@ -715,7 +714,6 @@ function DailyEventsModal({ isOpen, onClose }: {
       const today = new Date(new Date().getTime() + 8 * 60 * 60 * 1000).toISOString().split('T')[0]
       setEventsDate(today)
       setItems([])
-      setOriginalItems([])
       setLoading(false)
       return
     }
@@ -732,10 +730,8 @@ function DailyEventsModal({ isOpen, onClose }: {
     if (!error && data) {
       const loaded = data as EventItem[]
       setItems(loaded)
-      setOriginalItems(JSON.parse(JSON.stringify(loaded)))
     } else {
       setItems([])
-      setOriginalItems([])
     }
     setLoading(false)
   }
@@ -753,63 +749,72 @@ function DailyEventsModal({ isOpen, onClose }: {
     setEditText(item.content)
   }
   const cancelEdit = () => setEditingId(null)
-  const confirmEdit = (id: string) => {
-    setItems(prev => prev.map(it => it.id === id ? { ...it, content: editText } : it))
+
+  const saveEdit = async (id: string) => {
+    if (!editText.trim()) return
+    const item = items.find(it => it.id === id)
+    if (!item) return
+    setSavingId(id)
+    const client = supabase
+    if (client) {
+      if (id.startsWith('new-')) {
+        const { data, error } = await client
+          .from('daily_event_items')
+          .insert({ date: eventsDate, type: item.type, status: item.status, content: editText.trim(), sort_order: item.sort_order })
+          .select('id')
+          .single()
+        if (!error && data) {
+          setItems(prev => prev.map(it => it.id === id ? { ...it, id: data.id, content: editText.trim() } : it))
+        }
+      } else {
+        await client
+          .from('daily_event_items')
+          .update({ content: editText.trim() })
+          .eq('id', id)
+        setItems(prev => prev.map(it => it.id === id ? { ...it, content: editText.trim() } : it))
+      }
+    }
+    setSavingId(null)
     setEditingId(null)
   }
 
-  const toggleStatus = (id: string) => {
-    setItems(prev => prev.map(it => {
-      if (it.id !== id || it.type !== 'todo') return it
-      return { ...it, status: it.status === 'done' ? 'pending' : 'done' }
-    }))
+  const toggleStatus = async (id: string) => {
+    const item = items.find(it => it.id === id)
+    if (!item || item.type !== 'todo') return
+    const newStatus = item.status === 'done' ? 'pending' : 'done'
+    setItems(prev => prev.map(it => it.id === id ? { ...it, status: newStatus } : it))
+    const client = supabase
+    if (client && !id.startsWith('new-')) {
+      await client.from('daily_event_items').update({ status: newStatus }).eq('id', id)
+    }
   }
 
-  const deleteItem = (id: string) => {
+  const deleteItem = async (id: string) => {
+    setSavingId(id)
+    const client = supabase
+    if (client && !id.startsWith('new-')) {
+      await client.from('daily_event_items').delete().eq('id', id)
+    }
     setItems(prev => prev.filter(it => it.id !== id))
+    setSavingId(null)
   }
 
-  const addItem = () => {
+  const addItem = async () => {
     if (!newText.trim()) return
     const maxOrder = items.reduce((max, it) => Math.max(max, it.sort_order), 0)
-    const newItem: EventItem = {
-      id: `new-${Date.now()}`,
-      type: newType,
-      status: newType === 'todo' ? 'pending' : null,
-      content: newText.trim(),
-      sort_order: maxOrder + 1
+    const client = supabase
+    if (client) {
+      const { data, error } = await client
+        .from('daily_event_items')
+        .insert({ date: eventsDate, type: newType, status: newType === 'todo' ? 'pending' : null, content: newText.trim(), sort_order: maxOrder + 1 })
+        .select('id')
+        .single()
+      if (!error && data) {
+        setItems(prev => [...prev, { id: data.id, type: newType, status: newType === 'todo' ? 'pending' : null, content: newText.trim(), sort_order: maxOrder + 1 }])
+      }
     }
-    setItems(prev => [...prev, newItem])
     setNewText('')
   }
-
-  const handleSave = async () => {
-    const client = supabase
-    if (!client) return
-    setSaving(true)
-
-    // 删掉该日期所有旧数据，再全量插入
-    await client
-      .from('daily_event_items')
-      .delete()
-      .eq('date', eventsDate)
-
-    if (items.length > 0) {
-      const rows = items.map((it, idx) => ({
-        date: eventsDate,
-        type: it.type,
-        status: it.status,
-        content: it.content,
-        sort_order: idx
-      }))
-      await client.from('daily_event_items').insert(rows)
-    }
-
-    setOriginalItems(JSON.parse(JSON.stringify(items)))
-    setSaving(false)
-  }
-
-  const hasChanges = JSON.stringify(items) !== JSON.stringify(originalItems)
 
   if (!isOpen) return null
 
@@ -824,14 +829,6 @@ function DailyEventsModal({ isOpen, onClose }: {
             <span className="text-xs text-base-muted">{eventsDate}</span>
           </div>
           <div className="flex items-center gap-2">
-            {hasChanges && (
-              <button onClick={handleSave} disabled={saving}
-                className="px-3 py-1.5 text-xs rounded-full bg-[#B4AEE8] text-white disabled:opacity-50 flex items-center gap-1"
-              >
-                {saving ? <Loader2 size={12} className="animate-spin" /> : <Save size={12} />}
-                保存
-              </button>
-            )}
             <button onClick={onClose} className="p-2 hover:bg-base-line rounded-full transition-colors">
               <X size={20} className="text-base-text/50" />
             </button>
@@ -887,10 +884,9 @@ function DailyEventsModal({ isOpen, onClose }: {
                       value={editText}
                       onChange={e => setEditText(e.target.value)}
                       onKeyDown={e => {
-                        if (e.key === 'Enter') confirmEdit(item.id)
+                        if (e.key === 'Enter') saveEdit(item.id)
                         if (e.key === 'Escape') cancelEdit()
                       }}
-                      onBlur={() => confirmEdit(item.id)}
                       autoFocus
                       className="w-full text-sm rounded-lg border border-[#B4AEE8] bg-white px-2 py-1 outline-none"
                     />
@@ -907,15 +903,23 @@ function DailyEventsModal({ isOpen, onClose }: {
 
                 {/* 操作按钮 */}
                 <div className="shrink-0 flex items-center gap-0.5">
-                  <button onClick={() => startEdit(item)}
-                    className="p-1 rounded hover:bg-base-line/50 text-base-muted"
-                  >
-                    <Pencil size={12} />
-                  </button>
+                  {editingId === item.id ? (
+                    <button onClick={() => saveEdit(item.id)} disabled={savingId === item.id}
+                      className="p-1 rounded hover:bg-green-50 text-base-muted hover:text-green-500"
+                    >
+                      {savingId === item.id ? <Loader2 size={12} className="animate-spin" /> : <Save size={12} />}
+                    </button>
+                  ) : (
+                    <button onClick={() => startEdit(item)}
+                      className="p-1 rounded hover:bg-base-line/50 text-base-muted"
+                    >
+                      <Pencil size={12} />
+                    </button>
+                  )}
                   <button onClick={() => deleteItem(item.id)}
                     className="p-1 rounded hover:bg-red-50 text-base-muted hover:text-red-400"
                   >
-                    <X size={12} />
+                    {savingId === item.id ? <Loader2 size={12} className="animate-spin" /> : <X size={12} />}
                   </button>
                 </div>
               </div>
