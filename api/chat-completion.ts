@@ -3,9 +3,12 @@ import { getWeather } from './_weather.js'
 
 // 校内地标（新增地点时只改这里）
 const CAMPUS_LOCATIONS = [
-  { name: '21号楼·实验室', lat: 45.773298, lng: 126.675110, scene: '宝贝在工作/学习' },
-  { name: '小美食堂',     lat: 45.771397, lng: 126.678529, scene: '宝贝在吃饭' },
-  { name: '18公寓·宿舍',  lat: 45.769784, lng: 126.679770, scene: '宝贝在休息' },
+  { name: '21号楼·实验室',  lat: 45.773298, lng: 126.675110, scene: '宝贝在工作/学习' },
+  { name: '快递站/北门',     lat: 45.776154, lng: 126.674014, scene: '宝贝在取快递/取外卖/要出学校' },
+  { name: '天美食堂',        lat: 45.775328, lng: 126.678634, scene: '宝贝在吃饭' },
+  { name: '至美食堂/大美食堂', lat: 45.774380, lng: 126.678120, scene: '宝贝在吃饭' },
+  { name: '小美食堂',        lat: 45.771397, lng: 126.678529, scene: '宝贝在吃饭' },
+  { name: '18公寓·宿舍',     lat: 45.769784, lng: 126.679770, scene: '宝贝在休息' },
 ]
 const CAMPUS_MATCH_RADIUS = 100 // 米
 

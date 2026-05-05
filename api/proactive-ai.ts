@@ -6,9 +6,12 @@ const chatModel = process.env.CHAT_AI_MODEL || 'deepseek-chat'
 
 // 校内地标（新增地点时只改这里）
 const CAMPUS_LOCATIONS = [
-  { name: '21号楼·实验室', lat: 45.773298, lng: 126.675110, scene: '宝贝在工作/学习' },
-  { name: '小美食堂',     lat: 45.771397, lng: 126.678529, scene: '宝贝在吃饭' },
-  { name: '18公寓·宿舍',  lat: 45.769784, lng: 126.679770, scene: '宝贝在休息' },
+  { name: '21号楼·实验室',  lat: 45.773298, lng: 126.675110, scene: '宝贝在工作/学习' },
+  { name: '快递站/北门',     lat: 45.776154, lng: 126.674014, scene: '宝贝在取快递/取外卖/要出学校' },
+  { name: '天美食堂',        lat: 45.775328, lng: 126.678634, scene: '宝贝在吃饭' },
+  { name: '至美食堂/大美食堂', lat: 45.774380, lng: 126.678120, scene: '宝贝在吃饭' },
+  { name: '小美食堂',        lat: 45.771397, lng: 126.678529, scene: '宝贝在吃饭' },
+  { name: '18公寓·宿舍',     lat: 45.769784, lng: 126.679770, scene: '宝贝在休息' },
 ]
 const CAMPUS_MATCH_RADIUS = 100 // 米
 
@@ -163,7 +166,7 @@ async function updateUserProfileSummary(params: {
 用户最近的生活记录（最近12小时）：
 ${recentLogs.map(log => `- [${log.type}] ${log.content} ${log.finance_category ? `(${log.finance_category})` : ''}`).join('\n') || '暂无记录'}
 
-用户最近的对话（最近30条）：
+用户最近的对话（最近50条）：
 ${recentChats.map(c => `- ${c.role}: ${c.content}`).join('\n') || '暂无对话'}
 
 ${existingRelationshipsText ? `现有社交关系：
@@ -401,7 +404,7 @@ export default async function handler(req: any, res: any) {
       .eq('user_id', targetUserId)
       .neq('role', 'system')
       .order('created_at', { ascending: false })
-      .limit(30)
+      .limit(50)
 
     // 查询时间轴状态（宝贝当前/最近在做什么）
     let currentTimingInfo = ''
