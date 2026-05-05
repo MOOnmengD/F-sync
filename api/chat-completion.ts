@@ -470,6 +470,33 @@ export default async function handler(req: any, res: any) {
     }
   }
 
+  // 查询每日事件（最近一天），作为对话索引注入上下文
+  let dailyEventsText = ''
+  if (userId && supabaseUrl && supabaseServiceKey) {
+    try {
+      const { data: eventItems } = await supabaseAdmin
+        .from('daily_event_items')
+        .select('type, status, content, event_time')
+        .order('date', { ascending: false })
+        .order('sort_order', { ascending: true })
+        .limit(30)
+
+      if (eventItems && eventItems.length > 0) {
+        const lines = eventItems.map((it: any) => {
+          const time = it.event_time ? `${it.event_time} ` : ''
+          if (it.type === 'todo') {
+            const mark = it.status === 'done' ? '✓' : '○'
+            return `[${mark}] ${time}${it.content}`
+          }
+          return `- ${time}${it.content}`
+        })
+        dailyEventsText = `## 每日事件（近期）\n${lines.join('\n')}`
+      }
+    } catch (e: any) {
+      console.warn('[Daily Events] 查询失败:', e.message)
+    }
+  }
+
   // 获取天气信息（每日首次调用 API，后续复用缓存）
   let weatherInfo = ''
   const weatherAmapKey = process.env.AMAP_API_KEY
@@ -488,6 +515,12 @@ export default async function handler(req: any, res: any) {
   if (currentTimingInfo) worldLines.push(currentTimingInfo)
   const worldMsg = { role: 'system', content: `## 真实世界信息\n${worldLines.join('\n')}` }
   fullMessages.splice(1, 0, worldMsg)
+
+  // 每日事件作为独立 system 消息（Layer 2 索引层）
+  if (dailyEventsText) {
+    const eventsMsg = { role: 'system', content: dailyEventsText }
+    fullMessages.splice(2, 0, eventsMsg)
+  }
 
   // RAG 检索到的生活记录数据作为独立 system 消息
   if (contextInfo) {

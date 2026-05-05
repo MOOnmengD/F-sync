@@ -452,7 +452,7 @@ export default async function handler(req: any, res: any) {
       })
     }
 
-    // 查询社交关系，作为用户画像注入对话上下文（与 chat-completion.ts 对齐）
+    // 查询用户画像（社交关系 + 个人信息），注入对话上下文
     let userProfileInfo = ''
     try {
       const { data: relationships } = await supabase
@@ -466,10 +466,56 @@ export default async function handler(req: any, res: any) {
           const relation = r.relation ? `（${r.relation}）` : ''
           return `${r.name}${relation}`
         }).join('；')
-        userProfileInfo = '\n社交关系：' + relText + '。\n（你可以利用这些长期记忆更好地理解用户）'
+        userProfileInfo = '\n社交关系：' + relText + '。'
       }
     } catch (relErr: any) {
       console.warn('[Social Relationships] 查询失败:', relErr.message)
+    }
+
+    // 读取持久性个人信息
+    try {
+      const { data: factsProfile } = await supabase
+        .from('user_profiles')
+        .select('content')
+        .eq('user_id', targetUserId)
+        .eq('profile_type', 'personal_facts')
+        .maybeSingle()
+
+      if (factsProfile?.content?.facts && Array.isArray(factsProfile.content.facts) && factsProfile.content.facts.length > 0) {
+        const factsText = factsProfile.content.facts.join('；')
+        userProfileInfo += '\n关于用户的事实：' + factsText + '。'
+      }
+    } catch (factsErr: any) {
+      console.warn('[Personal Facts] 查询失败:', factsErr.message)
+    }
+
+    if (userProfileInfo) {
+      userProfileInfo += '\n（你可以利用这些长期记忆更好地理解用户）'
+    }
+
+    // 查询每日事件（最近一天），作为对话索引
+    let dailyEventsText = ''
+    try {
+      const { data: eventItems } = await supabase
+        .from('daily_event_items')
+        .select('type, status, content, event_time')
+        .order('date', { ascending: false })
+        .order('sort_order', { ascending: true })
+        .limit(30)
+
+      if (eventItems && eventItems.length > 0) {
+        const lines = eventItems.map((it: any) => {
+          const time = it.event_time ? `${it.event_time} ` : ''
+          if (it.type === 'todo') {
+            const mark = it.status === 'done' ? '✓' : '○'
+            return `[${mark}] ${time}${it.content}`
+          }
+          return `- ${time}${it.content}`
+        })
+        dailyEventsText = `## 每日事件（近期）\n${lines.join('\n')}`
+      }
+    } catch (e: any) {
+      console.warn('[Daily Events] 查询失败:', e.message)
     }
 
     // 3. 构建结构化消息（与 chat-completion.ts 对齐）
@@ -489,6 +535,11 @@ export default async function handler(req: any, res: any) {
     worldLines.push(`距离你们上次对话已经过去了 ${hoursSinceLastChat} 小时。`)
     if (currentTimingInfo) worldLines.push(currentTimingInfo)
     fullMessages.push({ role: 'system', content: `## 真实世界信息\n${worldLines.join('\n')}` })
+
+    // 每日事件作为独立 system 消息（Layer 2 索引层）
+    if (dailyEventsText) {
+      fullMessages.push({ role: 'system', content: dailyEventsText })
+    }
 
     // 近期生活记录作为独立 system 消息
     const logsSummary = recentLogs?.map((log: any) => {
