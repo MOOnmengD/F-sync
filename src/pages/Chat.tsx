@@ -677,113 +677,139 @@ function ProfileDiaryModal({ isOpen, onClose, initialTab }: {
   )
 }
 
+interface EventItem {
+  id: string
+  type: 'event' | 'todo'
+  status: 'pending' | 'done' | null
+  content: string
+  sort_order: number
+}
+
 function DailyEventsModal({ isOpen, onClose }: {
   isOpen: boolean
   onClose: () => void
 }) {
-  const [content, setContent] = useState('')
-  const [original, setOriginal] = useState('')
-  const [editing, setEditing] = useState(false)
+  const [items, setItems] = useState<EventItem[]>([])
+  const [originalItems, setOriginalItems] = useState<EventItem[]>([])
   const [loading, setLoading] = useState(false)
   const [saving, setSaving] = useState(false)
   const [eventsDate, setEventsDate] = useState('')
+  const [editingId, setEditingId] = useState<string | null>(null)
+  const [editText, setEditText] = useState('')
+  const [newText, setNewText] = useState('')
+  const [newType, setNewType] = useState<'event' | 'todo'>('event')
 
   const loadEvents = async () => {
     const client = supabase
     if (!client) { setLoading(false); return }
 
-    // 取最近一天的事件（cron 生成的是昨天，用户编辑的可能是今天）
-    const { data, error } = await client
-      .from('daily_events')
-      .select('date, content')
+    // 取最近一天的事件
+    const { data: dateRow, error: dateErr } = await client
+      .from('daily_event_items')
+      .select('date')
       .order('date', { ascending: false })
       .limit(1)
       .maybeSingle()
 
-    if (!error && data) {
-      setContent(data.content)
-      setOriginal(data.content)
-      setEventsDate(data.date)
-    } else {
-      setContent('')
-      setOriginal('')
-      // fallback 到 CST 今天
+    if (dateErr || !dateRow) {
       const today = new Date(new Date().getTime() + 8 * 60 * 60 * 1000).toISOString().split('T')[0]
       setEventsDate(today)
+      setItems([])
+      setOriginalItems([])
+      setLoading(false)
+      return
+    }
+
+    const date = dateRow.date
+    setEventsDate(date)
+
+    const { data, error } = await client
+      .from('daily_event_items')
+      .select('id, type, status, content, sort_order')
+      .eq('date', date)
+      .order('sort_order', { ascending: true })
+
+    if (!error && data) {
+      const loaded = data as EventItem[]
+      setItems(loaded)
+      setOriginalItems(JSON.parse(JSON.stringify(loaded)))
+    } else {
+      setItems([])
+      setOriginalItems([])
     }
     setLoading(false)
   }
 
   useEffect(() => {
     if (!isOpen) return
-    setEditing(false)
+    setEditingId(null)
+    setNewText('')
     setLoading(true)
     loadEvents()
   }, [isOpen])
 
+  const startEdit = (item: EventItem) => {
+    setEditingId(item.id)
+    setEditText(item.content)
+  }
+  const cancelEdit = () => setEditingId(null)
+  const confirmEdit = (id: string) => {
+    setItems(prev => prev.map(it => it.id === id ? { ...it, content: editText } : it))
+    setEditingId(null)
+  }
+
+  const toggleStatus = (id: string) => {
+    setItems(prev => prev.map(it => {
+      if (it.id !== id || it.type !== 'todo') return it
+      return { ...it, status: it.status === 'done' ? 'pending' : 'done' }
+    }))
+  }
+
+  const deleteItem = (id: string) => {
+    setItems(prev => prev.filter(it => it.id !== id))
+  }
+
+  const addItem = () => {
+    if (!newText.trim()) return
+    const maxOrder = items.reduce((max, it) => Math.max(max, it.sort_order), 0)
+    const newItem: EventItem = {
+      id: `new-${Date.now()}`,
+      type: newType,
+      status: newType === 'todo' ? 'pending' : null,
+      content: newText.trim(),
+      sort_order: maxOrder + 1
+    }
+    setItems(prev => [...prev, newItem])
+    setNewText('')
+  }
+
   const handleSave = async () => {
     const client = supabase
-    if (!client || content === original) { setEditing(false); return }
-
+    if (!client) return
     setSaving(true)
-    const { error } = await client
-      .from('daily_events')
-      .upsert({ date: eventsDate, content }, { onConflict: 'user_id,date' })
 
-    setSaving(false)
-    if (!error) {
-      setOriginal(content)
-      setEditing(false)
+    // 删掉该日期所有旧数据，再全量插入
+    await client
+      .from('daily_event_items')
+      .delete()
+      .eq('date', eventsDate)
+
+    if (items.length > 0) {
+      const rows = items.map((it, idx) => ({
+        date: eventsDate,
+        type: it.type,
+        status: it.status,
+        content: it.content,
+        sort_order: idx
+      }))
+      await client.from('daily_event_items').insert(rows)
     }
+
+    setOriginalItems(JSON.parse(JSON.stringify(items)))
+    setSaving(false)
   }
 
-  const handleCancel = () => {
-    setContent(original)
-    setEditing(false)
-  }
-
-  // 简单渲染 Markdown 要点
-  const renderContent = (text: string) => {
-    if (!text) return <div className="text-base-muted text-sm text-center py-8">暂无事件，等待 AI 在每日凌晨自动生成</div>
-
-    return text.split('\n').map((line, i) => {
-      let display = line
-      let className = 'text-sm leading-relaxed py-0.5 flex items-start gap-2'
-
-      // - [x] 已完成约定
-      if (/^\s*- \[x\]/i.test(line)) {
-        display = line.replace(/^\s*- \[x\]\s*/i, '')
-        return (
-          <div key={i} className={className}>
-            <Check size={14} className="mt-0.5 text-green-500 shrink-0" />
-            <span className="text-base-muted line-through">{display}</span>
-          </div>
-        )
-      }
-      // - [ ] 未完成约定
-      if (/^\s*- \[\]/.test(line)) {
-        display = line.replace(/^\s*- \[\]\s*/i, '')
-        return (
-          <div key={i} className={className}>
-            <div className="w-3.5 h-3.5 mt-0.5 rounded-full border-2 border-[#B4AEE8] shrink-0" />
-            <span>{display}</span>
-          </div>
-        )
-      }
-      // - 普通事件
-      if (/^\s*- /.test(line)) {
-        display = line.replace(/^\s*- /, '')
-        return (
-          <div key={i} className={className}>
-            <div className="w-1.5 h-1.5 mt-1.5 rounded-full bg-base-text/30 shrink-0" />
-            <span>{display}</span>
-          </div>
-        )
-      }
-      // 其他行
-      return <div key={i} className="text-sm py-0.5">{line || ' '}</div>
-    })
-  }
+  const hasChanges = JSON.stringify(items) !== JSON.stringify(originalItems)
 
   if (!isOpen) return null
 
@@ -791,33 +817,19 @@ function DailyEventsModal({ isOpen, onClose }: {
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm">
       <div className="bg-[#FDFCFB] w-full max-w-lg rounded-3xl flex flex-col max-h-[90vh] overflow-hidden border border-base-line">
         {/* Header */}
-        <div className="px-6 py-4 border-b border-base-line flex items-center justify-between bg-[#F7F5F2]">
+        <div className="px-6 py-4 border-b border-base-line flex items-center justify-between bg-[#F7F5F2] shrink-0">
           <div className="flex items-center gap-2">
             <ListTodo size={18} className="text-[#B4AEE8]" />
             <span className="text-sm font-medium text-base-text">每日事件</span>
             <span className="text-xs text-base-muted">{eventsDate}</span>
           </div>
           <div className="flex items-center gap-2">
-            {editing ? (
-              <>
-                <button onClick={handleSave} disabled={saving}
-                  className="px-3 py-1.5 text-xs rounded-full bg-[#B4AEE8] text-white disabled:opacity-50 flex items-center gap-1"
-                >
-                  {saving ? <Loader2 size={12} className="animate-spin" /> : <Save size={12} />}
-                  保存
-                </button>
-                <button onClick={handleCancel}
-                  className="px-3 py-1.5 text-xs rounded-full border border-base-line text-base-muted"
-                >
-                  取消
-                </button>
-              </>
-            ) : (
-              <button onClick={() => setEditing(true)}
-                className="px-3 py-1.5 text-xs rounded-full border border-base-line text-base-muted flex items-center gap-1 hover:bg-base-line/50"
+            {hasChanges && (
+              <button onClick={handleSave} disabled={saving}
+                className="px-3 py-1.5 text-xs rounded-full bg-[#B4AEE8] text-white disabled:opacity-50 flex items-center gap-1"
               >
-                <Pencil size={12} />
-                编辑
+                {saving ? <Loader2 size={12} className="animate-spin" /> : <Save size={12} />}
+                保存
               </button>
             )}
             <button onClick={onClose} className="p-2 hover:bg-base-line rounded-full transition-colors">
@@ -827,20 +839,114 @@ function DailyEventsModal({ isOpen, onClose }: {
         </div>
 
         {/* Content */}
-        <div className="flex-1 overflow-y-auto p-6">
+        <div className="flex-1 overflow-y-auto p-5 space-y-2">
           {loading ? (
             <div className="flex items-center justify-center py-20">
               <Loader2 size={24} className="animate-spin text-base-text/30" />
             </div>
-          ) : editing ? (
-            <textarea
-              value={content}
-              onChange={e => setContent(e.target.value)}
-              placeholder={`- 事件描述\n- [ ] 待完成约定\n- [x] 已完成约定`}
-              className="w-full h-64 rounded-2xl border border-base-line bg-base-surface p-4 text-sm resize-none outline-none focus:border-lavender"
-            />
+          ) : items.length === 0 ? (
+            <div className="text-base-muted text-sm text-center py-12">
+              暂无事件，等待 AI 在每日凌晨自动生成
+            </div>
           ) : (
-            renderContent(content)
+            items.map(item => (
+              <div key={item.id}
+                className={`group flex items-start gap-3 p-3 rounded-xl border transition-colors ${
+                  item.type === 'todo' && item.status === 'done'
+                    ? 'border-base-line bg-base-surface/50'
+                    : 'border-base-line bg-base-surface'
+                }`}
+              >
+                {/* 类型指示器 */}
+                <button
+                  onClick={() => item.type === 'todo' ? toggleStatus(item.id) : null}
+                  className={`shrink-0 mt-0.5 ${
+                    item.type === 'todo' && item.status === 'done'
+                      ? 'text-green-500'
+                      : item.type === 'todo'
+                        ? 'text-[#B4AEE8]'
+                        : 'text-base-text/25'
+                  }`}
+                >
+                  {item.type === 'todo' && item.status === 'done' ? (
+                    <div className="w-5 h-5 rounded-full bg-green-100 flex items-center justify-center">
+                      <Check size={12} className="text-green-500" />
+                    </div>
+                  ) : item.type === 'todo' ? (
+                    <div className="w-5 h-5 rounded-full border-2 border-[#B4AEE8]" />
+                  ) : (
+                    <div className="w-1.5 h-1.5 mt-1.5 rounded-full bg-base-text/30" />
+                  )}
+                </button>
+
+                {/* 文本 */}
+                <div className="flex-1 min-w-0">
+                  {editingId === item.id ? (
+                    <input
+                      type="text"
+                      value={editText}
+                      onChange={e => setEditText(e.target.value)}
+                      onKeyDown={e => {
+                        if (e.key === 'Enter') confirmEdit(item.id)
+                        if (e.key === 'Escape') cancelEdit()
+                      }}
+                      onBlur={() => confirmEdit(item.id)}
+                      autoFocus
+                      className="w-full text-sm rounded-lg border border-[#B4AEE8] bg-white px-2 py-1 outline-none"
+                    />
+                  ) : (
+                    <span className={`text-sm ${
+                      item.type === 'todo' && item.status === 'done'
+                        ? 'text-base-muted line-through'
+                        : 'text-base-text'
+                    }`}>
+                      {item.content}
+                    </span>
+                  )}
+                </div>
+
+                {/* 操作按钮 */}
+                <div className="shrink-0 flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+                  <button onClick={() => startEdit(item)}
+                    className="p-1 rounded hover:bg-base-line/50 text-base-muted"
+                  >
+                    <Pencil size={12} />
+                  </button>
+                  <button onClick={() => deleteItem(item.id)}
+                    className="p-1 rounded hover:bg-red-50 text-base-muted hover:text-red-400"
+                  >
+                    <X size={12} />
+                  </button>
+                </div>
+              </div>
+            ))
+          )}
+
+          {/* 新增输入 */}
+          {!loading && (
+            <div className="flex items-center gap-2 pt-2 border-t border-base-line">
+              <select
+                value={newType}
+                onChange={e => setNewType(e.target.value as 'event' | 'todo')}
+                className="text-xs rounded-lg border border-base-line bg-base-surface px-2 py-1.5 outline-none text-base-muted"
+              >
+                <option value="event">事件</option>
+                <option value="todo">约定</option>
+              </select>
+              <input
+                type="text"
+                value={newText}
+                onChange={e => setNewText(e.target.value)}
+                onKeyDown={e => { if (e.key === 'Enter') addItem() }}
+                placeholder="新增事件…"
+                className="flex-1 text-sm rounded-lg border border-base-line bg-base-surface px-3 py-1.5 outline-none focus:border-[#B4AEE8]"
+              />
+              <button onClick={addItem} disabled={!newText.trim()}
+                className="px-3 py-1.5 text-xs rounded-full bg-[#B4AEE8] text-white disabled:opacity-50"
+              >
+                <Plus size={12} />
+              </button>
+            </div>
           )}
         </div>
       </div>
