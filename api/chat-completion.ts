@@ -3,9 +3,12 @@ import { getWeather } from './_weather.js'
 
 // 校内地标（新增地点时只改这里）
 const CAMPUS_LOCATIONS = [
-  { name: '私有地点A', lat: 0.000001, lng: 0.000001, scene: '宝贝在工作/学习' },
-  { name: '私有地点E',     lat: 0.000005, lng: 0.000005, scene: '宝贝在吃饭' },
-  { name: '私有地点F',  lat: 0.000006, lng: 0.000006, scene: '宝贝在休息' },
+  { name: '私有地点A',  lat: 0.000001, lng: 0.000001, scene: '宝贝在工作/学习' },
+  { name: '私有地点B',     lat: 0.000002, lng: 0.000002, scene: '宝贝在取快递/取外卖/要出学校' },
+  { name: '私有地点C',        lat: 0.000003, lng: 0.000003, scene: '宝贝在吃饭' },
+  { name: '私有地点D', lat: 0.000004, lng: 0.000004, scene: '宝贝在吃饭' },
+  { name: '私有地点E',        lat: 0.000005, lng: 0.000005, scene: '宝贝在吃饭' },
+  { name: '私有地点F',     lat: 0.000006, lng: 0.000006, scene: '宝贝在休息' },
 ]
 const CAMPUS_MATCH_RADIUS = 100 // 米
 
