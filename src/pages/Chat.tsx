@@ -906,7 +906,7 @@ function DailyEventsModal({ isOpen, onClose }: {
                 </div>
 
                 {/* 操作按钮 */}
-                <div className="shrink-0 flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+                <div className="shrink-0 flex items-center gap-0.5">
                   <button onClick={() => startEdit(item)}
                     className="p-1 rounded hover:bg-base-line/50 text-base-muted"
                   >
@@ -924,11 +924,11 @@ function DailyEventsModal({ isOpen, onClose }: {
 
           {/* 新增输入 */}
           {!loading && (
-            <div className="flex items-center gap-2 pt-2 border-t border-base-line">
+            <div className="flex items-center gap-1.5 pt-2 border-t border-base-line">
               <select
                 value={newType}
                 onChange={e => setNewType(e.target.value as 'event' | 'todo')}
-                className="text-xs rounded-lg border border-base-line bg-base-surface px-2 py-1.5 outline-none text-base-muted"
+                className="text-xs rounded-lg border border-base-line bg-base-surface px-1.5 py-1.5 outline-none text-base-muted shrink-0"
               >
                 <option value="event">事件</option>
                 <option value="todo">约定</option>
@@ -938,11 +938,11 @@ function DailyEventsModal({ isOpen, onClose }: {
                 value={newText}
                 onChange={e => setNewText(e.target.value)}
                 onKeyDown={e => { if (e.key === 'Enter') addItem() }}
-                placeholder="新增事件…"
-                className="flex-1 text-sm rounded-lg border border-base-line bg-base-surface px-3 py-1.5 outline-none focus:border-[#B4AEE8]"
+                placeholder="新增…"
+                className="w-0 flex-1 min-w-0 text-sm rounded-lg border border-base-line bg-base-surface px-2 py-1.5 outline-none focus:border-[#B4AEE8]"
               />
               <button onClick={addItem} disabled={!newText.trim()}
-                className="px-3 py-1.5 text-xs rounded-full bg-[#B4AEE8] text-white disabled:opacity-50"
+                className="shrink-0 px-2.5 py-1.5 text-xs rounded-full bg-[#B4AEE8] text-white disabled:opacity-50"
               >
                 <Plus size={12} />
               </button>
