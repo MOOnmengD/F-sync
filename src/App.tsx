@@ -10,6 +10,7 @@ import Vault from './pages/Vault'
 import Timeline from './pages/Timeline'
 import Login from './pages/Login'
 import Chat from './pages/Chat'
+import Debug from './pages/Debug'
 import { supabase } from './supabaseClient'
 
 export default function App() {
@@ -103,6 +104,7 @@ export default function App() {
         <Route path="/timeline" element={<Timeline />} />
         <Route path="/chat" element={<Chat />} />
         <Route path="/login" element={<Login />} />
+        <Route path="/debug" element={<Debug />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </>

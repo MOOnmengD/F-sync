@@ -315,7 +315,7 @@ export default async function handler(req: any, res: any) {
     let fullTextQuery = supabaseAdmin
       .from('transactions')
       .select('*')
-      .filter('search_vector', 'fts', searchInput)
+      .ilike('content', `%${searchInput}%`)
       .order('created_at', { ascending: false })
       .limit(5)
 
@@ -492,10 +492,43 @@ export default async function handler(req: any, res: any) {
     })
   }
 
+  // 将含图片的消息转换为多模态格式
+  const apiMessages = fullMessages.map((m: any) => {
+    if (m.images && Array.isArray(m.images) && m.images.length > 0) {
+      const parts: any[] = m.images.map((url: string) => ({
+        type: 'image_url',
+        image_url: { url }
+      }))
+      if (m.content) {
+        parts.push({ type: 'text', text: m.content })
+      }
+      return { role: m.role, content: parts }
+    }
+    return { role: m.role, content: m.content }
+  })
+
   // 多组 API 轮询逻辑
   for (let i = 0; i < apiConfigs.length; i++) {
     const config = apiConfigs[i]
     try {
+      // DEBUG: 打印含图片的消息结构
+      const imgMsgs = apiMessages.filter((m: any) => Array.isArray(m.content))
+      if (imgMsgs.length > 0) {
+        console.log('[DEBUG] Image messages count:', imgMsgs.length)
+        imgMsgs.forEach((m: any, idx: number) => {
+          const parts = m.content.map((p: any) => {
+            if (p.type === 'image_url') {
+              const url = p.image_url?.url || ''
+              return { type: 'image_url', url_preview: url.slice(0, 80) + '...[truncated]', url_length: url.length }
+            }
+            return p
+          })
+          console.log(`[DEBUG] Message ${idx} (role=${m.role}):`, JSON.stringify(parts, null, 2))
+        })
+      } else {
+        console.log('[DEBUG] No image messages found in apiMessages')
+      }
+
       const endpoint = resolveChatCompletionsUrl(config.url)
       const response = await fetch(endpoint, {
         method: 'POST',
@@ -505,7 +538,7 @@ export default async function handler(req: any, res: any) {
         },
         body: JSON.stringify({
           model: config.model,
-          messages: fullMessages,
+          messages: apiMessages,
           stream: false
         })
       })
@@ -513,7 +546,7 @@ export default async function handler(req: any, res: any) {
       if (response.ok) {
         const data = await response.json()
         // 将完整的上下文返回给前端，便于调试显示
-        data.fullMessages = fullMessages
+        data.fullMessages = apiMessages
         res.statusCode = 200
         res.end(JSON.stringify(data))
         return

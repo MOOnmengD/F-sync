@@ -59,9 +59,15 @@ export const useSettingsStore = create<SettingsState>()(
       },
 
       loadFromCloud: async () => {
-        if (!supabase) return
+        if (!supabase) {
+          console.warn('[Settings] loadFromCloud: supabase 客户端未初始化，跳过')
+          return
+        }
         const { data: { user } } = await supabase.auth.getUser()
-        if (!user) return
+        if (!user) {
+          console.warn('[Settings] loadFromCloud: 无认证用户，跳过')
+          return
+        }
 
         const { data, error } = await supabase
           .from('user_settings')
@@ -69,37 +75,68 @@ export const useSettingsStore = create<SettingsState>()(
           .eq('user_id', user.id)
           .maybeSingle()
 
-        if (error || !data?.settings) return
+        if (error) {
+          console.warn('[Settings] loadFromCloud: 查询失败', error)
+          return
+        }
+        if (!data?.settings) {
+          console.log('[Settings] loadFromCloud: 云端无设置数据（user_settings 表无记录或 settings 列为空）')
+          return
+        }
 
         const cloud = data.settings as AISettings
         const current = get().settings
 
-        // 合并云端设置（云端优先，但保留本地新增的字段）
+        // 合并云端设置（云端优先；用 ?? 允许远程清空字段）
         const merged: AISettings = {
-          systemPrompt: cloud.systemPrompt || current.systemPrompt,
-          userPrompt: cloud.userPrompt || current.userPrompt,
-          proactivePrompt: cloud.proactivePrompt || current.proactivePrompt,
+          systemPrompt: cloud.systemPrompt ?? current.systemPrompt,
+          userPrompt: cloud.userPrompt ?? current.userPrompt,
+          proactivePrompt: cloud.proactivePrompt ?? current.proactivePrompt,
           apiConfigs: Array.isArray(cloud.apiConfigs) && cloud.apiConfigs.length === 2
             ? cloud.apiConfigs
             : current.apiConfigs,
         }
 
+        console.log('[Settings] loadFromCloud: 云端设置已合并，updated_at:', data.updated_at)
         set({ settings: merged, isCloudLoaded: true })
       },
 
       saveToCloud: async () => {
-        if (!supabase) return
+        if (!supabase) {
+          console.warn('[Settings] saveToCloud: supabase 客户端未初始化，跳过')
+          return
+        }
         const { data: { user } } = await supabase.auth.getUser()
-        if (!user) return
+        if (!user) {
+          console.warn('[Settings] saveToCloud: 无认证用户，跳过')
+          return
+        }
 
         const { settings } = get()
-        await supabase
+
+        // 读取当前云端设置，备份到 previous_settings（保留最近 2 个版本）
+        const { data: currentRow } = await supabase
+          .from('user_settings')
+          .select('settings')
+          .eq('user_id', user.id)
+          .maybeSingle()
+
+        const previousSettings = currentRow?.settings ?? null
+
+        const { error } = await supabase
           .from('user_settings')
           .upsert({
             user_id: user.id,
             settings,
+            previous_settings: previousSettings,
             updated_at: new Date().toISOString(),
           }, { onConflict: 'user_id' })
+
+        if (error) {
+          console.error('[Settings] saveToCloud: 保存失败', error)
+        } else {
+          console.log('[Settings] saveToCloud: 已保存到云端')
+        }
       },
     }),
     {

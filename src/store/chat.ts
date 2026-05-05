@@ -8,6 +8,7 @@ export interface ChatMessage {
   content: string
   createdAt: number
   isSynced?: boolean
+  images?: string[] // base64 data URLs, only on user messages, not synced to cloud
 }
 
 type ChatState = {
