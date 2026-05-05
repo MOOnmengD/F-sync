@@ -1,6 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { ArrowLeft, BookOpen, Check, Loader2, Pencil, Plus, RefreshCw, Send, Settings, Sparkles, User, X, Save, Eye, EyeOff, ClipboardPaste, Copy, FileText, Trash2 } from 'lucide-react'
+import { ArrowLeft, BookOpen, Check, ImagePlus, Loader2, Pencil, Plus, RefreshCw, Send, Settings, Sparkles, User, X, Save, Eye, EyeOff, ClipboardPaste, Copy, FileText, Trash2 } from 'lucide-react'
+import { compressImage, type CompressedImage } from '../utils/image'
 import { IconButton } from '../shared/ui/IconButton'
 import { useChatStore, type ChatMessage } from '../store/chat'
 import { supabase } from '../supabaseClient'
@@ -106,7 +107,7 @@ function ContextViewerModal({ isOpen, onClose, context }: { isOpen: boolean; onC
                   )}
                 </div>
                 <div className="whitespace-pre-wrap break-words text-base-text/80">
-                  {msg.content}
+                  {formatContextContent(msg.content)}
                 </div>
               </div>
             ))
@@ -129,10 +130,19 @@ function SettingsModal({ isOpen, onClose, vectorSyncStatus, onVectorSync, onClea
   onClearMessages: () => void
   onOpenContext: () => void
 }) {
-  const { settings, updateSettings, saveToCloud } = useSettingsStore()
+  const { settings, updateSettings, saveToCloud, isCloudLoaded } = useSettingsStore()
   const [localSettings, setLocalSettings] = useState(settings)
   const [showApiKeys, setShowApiKeys] = useState<Record<number, boolean>>({})
   const [savedSections, setSavedSections] = useState<Record<string, boolean>>({})
+
+  // 打开设置面板时，用当前 Zustand 中的 settings 重置本地编辑副本
+  useEffect(() => {
+    if (isOpen) {
+      setLocalSettings(settings)
+    }
+    // isOpen 变化时同步；不依赖 settings 以免覆盖用户正在编辑的内容
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isOpen])
 
   if (!isOpen) return null
 
@@ -185,12 +195,19 @@ function SettingsModal({ isOpen, onClose, vectorSyncStatus, onVectorSync, onClea
         </div>
         
         <div className="flex-1 overflow-y-auto p-6 space-y-8 pb-12">
+          {/* 云端未加载提示 */}
+          {!isCloudLoaded && (
+            <div className="p-3 bg-[#FFF8E1] border border-[#FFE082] rounded-xl text-xs text-[#8D6E00] flex items-center gap-2">
+              <Loader2 size={14} className="animate-spin shrink-0" />
+              正在从云端加载设置，请稍候再保存…
+            </div>
+          )}
           {/* System Prompt Section */}
           <section className="space-y-4">
             <div className="flex items-center justify-between">
               <h3 className="text-sm font-bold text-base-text/70 uppercase tracking-wider">Prompt 设定</h3>
             </div>
-            
+
             <div className="space-y-6">
               {[
                 { label: 'AI 角色设定', key: 'systemPrompt' as const, desc: '定义 AI 的性格和背景' },
@@ -202,8 +219,9 @@ function SettingsModal({ isOpen, onClose, vectorSyncStatus, onVectorSync, onClea
                     <label className="text-sm font-medium text-base-text/80">{item.label}</label>
                     <button
                       onClick={() => handleSave(item.key, localSettings[item.key])}
-                      className="flex items-center gap-1 text-xs font-bold transition-all"
-                      style={{ color: savedSections[item.key] ? '#86C8A8' : '#B4AEE8' }}
+                      disabled={!isCloudLoaded}
+                      className="flex items-center gap-1 text-xs font-bold transition-all disabled:opacity-30 disabled:cursor-not-allowed"
+                      style={{ color: !isCloudLoaded ? undefined : savedSections[item.key] ? '#86C8A8' : '#B4AEE8' }}
                     >
                       {savedSections[item.key] ? <Check size={14} /> : <Save size={14} />}
                       {savedSections[item.key] ? '已保存' : '保存'}
@@ -230,8 +248,9 @@ function SettingsModal({ isOpen, onClose, vectorSyncStatus, onVectorSync, onClea
                     <span className="text-xs font-bold text-[#B4AEE8]">配置 {idx + 1}</span>
                     <button
                       onClick={() => handleSave('apiConfigs', localSettings.apiConfigs)}
-                      className="flex items-center gap-1 text-xs font-bold transition-all"
-                      style={{ color: savedSections['apiConfigs'] ? '#86C8A8' : '#B4AEE8' }}
+                      disabled={!isCloudLoaded}
+                      className="flex items-center gap-1 text-xs font-bold transition-all disabled:opacity-30 disabled:cursor-not-allowed"
+                      style={{ color: !isCloudLoaded ? undefined : savedSections['apiConfigs'] ? '#86C8A8' : '#B4AEE8' }}
                     >
                       {savedSections['apiConfigs'] ? <Check size={14} /> : <Save size={14} />}
                       {savedSections['apiConfigs'] ? '已保存' : '保存'}
@@ -658,6 +677,18 @@ function ProfileDiaryModal({ isOpen, onClose, initialTab }: {
   )
 }
 
+function formatContextContent(content: any): string {
+  if (typeof content === 'string') return content
+  if (Array.isArray(content)) {
+    return content.map(part => {
+      if (part.type === 'text') return part.text
+      if (part.type === 'image_url') return '[图片]'
+      return ''
+    }).filter(Boolean).join('\n')
+  }
+  return String(content)
+}
+
 function MessageBubble({ msg, isTyping, onDelete, onResend }: { msg: ChatMessage; isTyping?: boolean; onDelete?: (id: string) => void; onResend?: (id: string) => void }) {
   const isUser = msg.role === 'user'
   const [confirmingAction, setConfirmingAction] = useState<'delete' | 'resend' | null>(null)
@@ -676,10 +707,24 @@ function MessageBubble({ msg, isTyping, onDelete, onResend }: { msg: ChatMessage
   const bubbleBg = isUser ? 'bg-[#E8F5E9]' : 'bg-[#F0F7FF]'
   const justify = isUser ? 'flex-end' : 'flex-start'
 
-  const renderBubble = (content: string, key: number) => (
+  const renderBubble = (content: string, key: number, images?: string[]) => (
     <div key={key} className="flex items-center gap-2 w-full" style={{ justifyContent: justify }}>
       <div className={`w-[70%] rounded-2xl border border-base-line px-4 py-3 ${bubbleBg}`}>
-        <p className="text-sm text-base-text whitespace-pre-wrap break-words">{content}</p>
+        {images && images.length > 0 && (
+          <div className="flex flex-wrap gap-1.5 mb-2">
+            {images.map((url, i) => (
+              <img
+                key={i}
+                src={url}
+                alt={`发送的图片 ${i + 1}`}
+                className="max-w-full max-h-48 rounded-xl border border-base-line/50 object-cover"
+              />
+            ))}
+          </div>
+        )}
+        {content && (
+          <p className="text-sm text-base-text whitespace-pre-wrap break-words">{content}</p>
+        )}
       </div>
     </div>
   )
@@ -692,7 +737,7 @@ function MessageBubble({ msg, isTyping, onDelete, onResend }: { msg: ChatMessage
             const isLast = i === segments.length - 1
             return (
               <div key={i} className="contents">
-                {renderBubble(segment, i)}
+                {renderBubble(segment, i, i === 0 ? msg.images : undefined)}
                 {isLast && (
                   <>
                     {!isUser && isTyping && (
@@ -745,22 +790,26 @@ function MessageBubble({ msg, isTyping, onDelete, onResend }: { msg: ChatMessage
         </>
       ) : (
         <>
-          <div className="flex items-center gap-2 w-full" style={{ justifyContent: justify }}>
-            <div className={`w-[70%] rounded-2xl border border-base-line px-4 py-3 ${bubbleBg}`}>
-              {!isUser && isTyping ? (
-                <div className="h-5 w-8 flex items-center justify-center">
-                  <div className="flex gap-1">
-                    <div className="w-1 h-1 bg-base-text/30 rounded-full animate-bounce" />
-                    <div className="w-1 h-1 bg-base-text/30 rounded-full animate-bounce [animation-delay:0.2s]" />
-                    <div className="w-1 h-1 bg-base-text/30 rounded-full animate-bounce [animation-delay:0.4s]" />
+          {msg.images && msg.images.length > 0 ? (
+            renderBubble('', 0, msg.images)
+          ) : (
+            <div className="flex items-center gap-2 w-full" style={{ justifyContent: justify }}>
+              <div className={`w-[70%] rounded-2xl border border-base-line px-4 py-3 ${bubbleBg}`}>
+                {!isUser && isTyping ? (
+                  <div className="h-5 w-8 flex items-center justify-center">
+                    <div className="flex gap-1">
+                      <div className="w-1 h-1 bg-base-text/30 rounded-full animate-bounce" />
+                      <div className="w-1 h-1 bg-base-text/30 rounded-full animate-bounce [animation-delay:0.2s]" />
+                      <div className="w-1 h-1 bg-base-text/30 rounded-full animate-bounce [animation-delay:0.4s]" />
+                    </div>
                   </div>
-                </div>
-              ) : null}
+                ) : null}
+              </div>
+              {!isUser && isTyping && (
+                <Loader2 size={16} className="animate-spin text-base-text/30 shrink-0" />
+              )}
             </div>
-            {!isUser && isTyping && (
-              <Loader2 size={16} className="animate-spin text-base-text/30 shrink-0" />
-            )}
-          </div>
+          )}
           <div className={`flex items-center gap-2 ${isUser ? 'flex-row-reverse' : 'flex-row'}`}>
             <p className="text-xs text-base-text/40">{formatTime(msg.createdAt)}</p>
             {onResend && !isTyping && (
@@ -827,6 +876,8 @@ export default function Chat() {
   const [isProfileDiaryOpen, setIsProfileDiaryOpen] = useState(false)
   const [profileDiaryInitialTab, setProfileDiaryInitialTab] = useState<'profile' | 'diary'>('profile')
   const [textareaHeight, setTextareaHeight] = useState(44)
+  const [selectedImages, setSelectedImages] = useState<CompressedImage[]>([])
+  const fileInputRef = useRef<HTMLInputElement>(null)
   const bottomRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLTextAreaElement>(null)
   const { settings, loadFromCloud } = useSettingsStore()
@@ -981,13 +1032,18 @@ export default function Chat() {
     try {
       const state = useChatStore.getState()
       const context = state.messages
-        .filter(m => m.content)
+        .filter(m => m.content || m.images?.length)
         .slice(-CONTEXT_WINDOW)
-        .map(m => ({
-          role: m.role,
-          content: m.content,
-          createdAt: m.createdAt
-        }))
+        .map((m, i, arr) => {
+          const lastImageIdx = arr.reduce((best, msg, idx) =>
+            msg.role === 'user' && msg.images?.length ? idx : best, -1)
+          return {
+            role: m.role,
+            content: m.content,
+            createdAt: m.createdAt,
+            images: i === lastImageIdx ? m.images : undefined
+          }
+        })
 
       const [{ data: { user } }, location] = await Promise.all([
         supabase ? supabase.auth.getUser() : Promise.resolve({ data: { user: null } }),
@@ -1049,7 +1105,8 @@ export default function Chat() {
 
   const handleSend = async () => {
     const text = input.trim()
-    if (!text || isLoading) return
+    const hasImages = selectedImages.length > 0
+    if ((!text && !hasImages) || isLoading) return
 
     setInput('')
     if (inputRef.current) {
@@ -1057,9 +1114,16 @@ export default function Chat() {
       inputRef.current.style.overflowY = 'hidden'
     }
     setTextareaHeight(44)
+    const images = selectedImages
+    setSelectedImages([])
     setLoading(true)
 
-    addMessage({ role: 'user', content: text, createdAt: Date.now() })
+    addMessage({
+      role: 'user',
+      content: text,
+      createdAt: Date.now(),
+      images: images.map(img => img.dataUrl)
+    })
     const aiMsgId = addMessage({ role: 'assistant', content: '', createdAt: Date.now() })
 
     await sendToAi(aiMsgId)
@@ -1081,6 +1145,26 @@ export default function Chat() {
 
     await sendToAi(newAiMsgId)
     setLoading(false)
+  }
+
+  const handleImageSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files
+    if (!files || files.length === 0) return
+
+    for (let i = 0; i < files.length; i++) {
+      try {
+        const compressed = await compressImage(files[i])
+        setSelectedImages(prev => [...prev, compressed])
+      } catch (err: any) {
+        alert(err.message || '图片处理失败')
+      }
+    }
+    // Reset input so same file can be re-selected
+    if (fileInputRef.current) fileInputRef.current.value = ''
+  }
+
+  const removeImage = (index: number) => {
+    setSelectedImages(prev => prev.filter((_, i) => i !== index))
   }
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -1146,6 +1230,25 @@ export default function Chat() {
       </div>
 
       <footer className="p-4 bg-base-bg pb-[calc(env(safe-area-inset-bottom)+1rem)]">
+        {selectedImages.length > 0 && (
+          <div className="flex gap-2 mb-3 overflow-x-auto pb-1">
+            {selectedImages.map((img, i) => (
+              <div key={i} className="relative shrink-0">
+                <img
+                  src={img.dataUrl}
+                  alt={`预览 ${i + 1}`}
+                  className="w-16 h-16 rounded-xl border border-base-line object-cover"
+                />
+                <button
+                  onClick={() => removeImage(i)}
+                  className="absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full bg-base-text/60 text-white flex items-center justify-center active:opacity-70"
+                >
+                  <X size={12} />
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
         <div className="relative flex items-end gap-2">
           <textarea
             ref={inputRef}
@@ -1158,10 +1261,18 @@ export default function Chat() {
             style={{ height: '44px', minHeight: '44px', overflowY: 'hidden' }}
           />
           <button
+            type="button"
+            onClick={() => fileInputRef.current?.click()}
+            disabled={isLoading}
+            className="h-11 w-11 rounded-2xl flex items-center justify-center transition-colors border border-base-line text-base-text/40 hover:text-[#B4AEE8] hover:border-[#B4AEE8] active:opacity-70 disabled:opacity-30"
+          >
+            <ImagePlus size={20} />
+          </button>
+          <button
             onClick={handleSend}
-            disabled={!input.trim() || isLoading}
+            disabled={(!input.trim() && selectedImages.length === 0) || isLoading}
             className={`h-11 w-11 rounded-2xl flex items-center justify-center transition-colors ${
-              input.trim() && !isLoading
+              (input.trim() || selectedImages.length > 0) && !isLoading
                 ? 'bg-[#B4AEE8] text-white shadow-lg'
                 : 'bg-base-line text-base-text/20 cursor-not-allowed'
             }`}
@@ -1188,6 +1299,15 @@ export default function Chat() {
         isOpen={isProfileDiaryOpen}
         onClose={() => setIsProfileDiaryOpen(false)}
         initialTab={profileDiaryInitialTab}
+      />
+
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept="image/*"
+        multiple
+        onChange={handleImageSelect}
+        className="hidden"
       />
     </div>
   )

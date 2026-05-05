@@ -17,7 +17,8 @@
       "WebFetch(domain:gitcode.com)",
       "WebFetch(domain:lbs.amap.com)",
       "WebFetch(domain:github.com)",
-      "Bash(git commit *)"
+      "Bash(git commit *)",
+      "Bash(gh repo *)"
     ]
   },
   "skipWebFetchPreflight": true
