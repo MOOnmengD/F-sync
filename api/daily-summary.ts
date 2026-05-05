@@ -294,6 +294,66 @@ ${existingRelationshipsText}
       console.warn('[Daily Summary] 社交关系更新失败:', socialErr.message)
     }
 
+    // ===== 第三步：生成每日事件（对话索引）=====
+    try {
+      const eventsPrompt = `你是 F-Sync 应用的数据提取模块。请根据以下 ${dateLabel} 用户与 AI 的对话记录，提取客观的"每日事件"。
+
+对话记录：
+${chatsText}
+
+提取要求：
+- 仅从对话记录中提取，不要包含消费记录、碎碎念等可通过其他方式检索的数据
+- 极简客观，每条不超过 30 字，像目录或提纲一样
+- 使用 Markdown 格式：
+  - "- 事件描述" 表示已发生的事件/提及的事情
+  - "- [ ] 约定描述" 表示未完成的约定/待办/承诺
+  - "- [x] 约定描述" 表示已完成的约定
+- 约定包括：AI 承诺要做的事、用户计划要做的事、双方约定的事项
+- 不要写入琐碎的日常寒暄，只提取有信息量的事件
+- 如果对话中没有值得记录的事件或约定，输出"（无）"
+
+${existingRelationshipsText ? `已有的社交关系（参考，不要在每日事件中重复记录）：\n${existingRelationshipsText}\n` : ''}
+输出纯文本 Markdown，不要任何额外解释。`
+
+      const eventsRes = await fetch(endpoint, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${aiKey}`
+        },
+        body: JSON.stringify({
+          model: aiModel,
+          messages: [{ role: 'system', content: eventsPrompt }],
+          temperature: 0.3
+        })
+      })
+
+      if (eventsRes.ok) {
+        const eventsData = await eventsRes.json()
+        const eventsContent = eventsData.choices?.[0]?.message?.content?.trim()
+
+        if (eventsContent && eventsContent !== '（无）') {
+          const { error: eventsError } = await supabase
+            .from('daily_events')
+            .upsert(
+              { user_id: targetUserId, date: diaryDate, content: eventsContent },
+              { onConflict: 'user_id,date' }
+            )
+
+          if (eventsError) {
+            console.error('[Daily Summary] daily events upsert failed:', eventsError)
+          } else {
+            results.push(`daily events for ${diaryDate} saved`)
+          }
+        } else {
+          results.push(`daily events for ${diaryDate} skipped (no events)`)
+        }
+      } else {
+        console.error('[Daily Summary] Events AI failed:', eventsRes.status)
+      }
+    } catch (eventsErr: any) {
+      console.warn('[Daily Summary] 每日事件生成失败:', eventsErr.message)
+    }
 
     return res.status(200).json({ message: 'Daily summary completed', date: diaryDate, results })
 
