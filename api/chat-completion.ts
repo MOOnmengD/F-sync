@@ -473,27 +473,39 @@ export default async function handler(req: any, res: any) {
     }
   }
 
-  // 查询每日事件（最近一天），作为对话索引注入上下文
+  // 查询每日事件，作为对话索引注入上下文
   let dailyEventsText = ''
   if (userId && supabaseUrl && supabaseServiceKey) {
     try {
       const { data: eventItems } = await supabaseAdmin
         .from('daily_event_items')
-        .select('type, status, content, event_time')
+        .select('type, status, content, event_time, date')
         .order('date', { ascending: false })
         .order('sort_order', { ascending: true })
-        .limit(30)
+        .limit(50)
 
       if (eventItems && eventItems.length > 0) {
-        const lines = eventItems.map((it: any) => {
-          const time = it.event_time ? `${it.event_time} ` : ''
-          if (it.type === 'todo') {
-            const mark = it.status === 'done' ? '✓' : '○'
-            return `[${mark}] ${time}${it.content}`
-          }
-          return `- ${time}${it.content}`
+        // 按日期分组
+        const grouped: Record<string, any[]> = {}
+        eventItems.forEach((it: any) => {
+          if (!grouped[it.date]) grouped[it.date] = []
+          grouped[it.date].push(it)
         })
-        dailyEventsText = `## 每日事件（近期）\n${lines.join('\n')}`
+        const sections: string[] = []
+        for (const [date, items] of Object.entries(grouped)) {
+          const dayLines = [`### ${date}`]
+          items.forEach((it: any) => {
+            const time = it.event_time ? it.event_time.slice(0, 5) + ' ' : ''
+            if (it.type === 'todo') {
+              const mark = it.status === 'done' ? '✓' : '○'
+              dayLines.push(`[${mark}] ${time}${it.content}`)
+            } else {
+              dayLines.push(`- ${time}${it.content}`)
+            }
+          })
+          sections.push(dayLines.join('\n'))
+        }
+        dailyEventsText = `## 每日事件\n${sections.join('\n')}`
       }
     } catch (e: any) {
       console.warn('[Daily Events] 查询失败:', e.message)
