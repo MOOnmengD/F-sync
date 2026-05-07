@@ -501,7 +501,7 @@ export default async function handler(req: any, res: any) {
     try {
       const { data: eventItems } = await supabase
         .from('daily_event_items')
-        .select('type, status, content, event_time, date')
+        .select('type, status, content, chat_time_start, date')
         .order('date', { ascending: false })
         .order('sort_order', { ascending: true })
         .limit(50)
@@ -517,7 +517,7 @@ export default async function handler(req: any, res: any) {
         for (const [date, items] of Object.entries(grouped)) {
           const dayLines = [`### ${date}`]
           items.forEach((it: any) => {
-            const time = it.event_time ? it.event_time.slice(0, 5) + ' ' : ''
+            const time = it.chat_time_start ? it.chat_time_start.slice(0, 5) + ' ' : ''
             if (it.type === 'todo') {
               const mark = it.status === 'done' ? '✓' : '○'
               dayLines.push(`[${mark}] ${time}${it.content}`)

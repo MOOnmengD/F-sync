@@ -313,14 +313,14 @@ ${chatsText}
 - 客观、准确、简洁，每条不超过 30 字。
 - 不要写入琐碎的日常寒暄，只提取有信息量的事件。
 - 只记录"今天发生了什么"（时效性事件），不要记录用户的持久性个人信息（如生日日期、长期偏好等）。
-- 根据对话时间 [HH:MM] 为每条事件或约定估算一个大致时间（event_time 字段，格式 HH:MM），如果无法确定则不填。
+- 根据对话时间 [HH:MM] 为每条事件或约定估算对应对话的起止时间。chat_time_start 是该事件被讨论的第一条消息的时间，chat_time_end 是最后一条消息的时间（格式均为 HH:MM）。如果事件只有一句对话，start 和 end 填相同值。
 
 ### 输出格式
 输出一个纯 JSON 数组，每个元素格式：
-{"type":"event","content":"事件描述","event_time":"HH:MM"}
-或 {"type":"todo","status":"pending","content":"约定描述","event_time":"HH:MM"}
-或 {"type":"todo","status":"done","content":"已完成约定","event_time":"HH:MM"}
-event_time 字段可选。
+{"type":"event","content":"事件描述","chat_time_start":"HH:MM","chat_time_end":"HH:MM"}
+或 {"type":"todo","status":"pending","content":"约定描述","chat_time_start":"HH:MM","chat_time_end":"HH:MM"}
+或 {"type":"todo","status":"done","content":"已完成约定","chat_time_start":"HH:MM","chat_time_end":"HH:MM"}
+chat_time_start 和 chat_time_end 都必填，如果无法确定则填写距离最近的对话标记时间。
 如果无事可记，输出空数组 []。不要输出任何额外文字，只输出 JSON。`
 
       const eventsRes = await fetch(endpoint, {
@@ -356,12 +356,12 @@ event_time 字段可选。
           }
 
           if (items.length > 0) {
-            // 排序：events 在前 todos 在后，各自按 event_time 从早到晚
+            // 排序：events 在前 todos 在后，各自按 chat_time_start 从早到晚
             items.sort((a: any, b: any) => {
               const typeOrder: Record<string, number> = { event: 0, todo: 1 }
               if (typeOrder[a.type] !== typeOrder[b.type]) return typeOrder[a.type] - typeOrder[b.type]
-              const timeA = a.event_time || '23:59'
-              const timeB = b.event_time || '23:59'
+              const timeA = a.chat_time_start || '23:59'
+              const timeB = b.chat_time_start || '23:59'
               return timeA.localeCompare(timeB)
             })
 
@@ -378,7 +378,8 @@ event_time 字段可选。
               type: item.type || 'event',
               status: item.status || null,
               content: item.content || '',
-              event_time: item.event_time || null,
+              chat_time_start: item.chat_time_start || null,
+              chat_time_end: item.chat_time_end || null,
               sort_order: idx
             }))
 

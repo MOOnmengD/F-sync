@@ -896,7 +896,7 @@ interface EventItem {
   type: 'event' | 'todo'
   status: 'pending' | 'done' | null
   content: string
-  event_time: string | null
+  chat_time_start: string | null
   sort_order: number
 }
 
@@ -938,7 +938,7 @@ function DailyEventsModal({ isOpen, onClose }: {
 
     const { data, error } = await client
       .from('daily_event_items')
-      .select('id, type, status, content, event_time, sort_order')
+      .select('id, type, status, content, chat_time_start, sort_order')
       .eq('date', date)
       .order('sort_order', { ascending: true })
 
@@ -1018,8 +1018,8 @@ function DailyEventsModal({ isOpen, onClose }: {
     return [...list].sort((a, b) => {
       const typeOrder: Record<string, number> = { event: 0, todo: 1 }
       if (typeOrder[a.type] !== typeOrder[b.type]) return typeOrder[a.type] - typeOrder[b.type]
-      const timeA = a.event_time || '23:59'
-      const timeB = b.event_time || '23:59'
+      const timeA = a.chat_time_start || '23:59'
+      const timeB = b.chat_time_start || '23:59'
       return timeA.localeCompare(timeB)
     })
   }
@@ -1032,12 +1032,12 @@ function DailyEventsModal({ isOpen, onClose }: {
     if (client) {
       const { data, error } = await client
         .from('daily_event_items')
-        .insert({ date: eventsDate, type: newType, status: newType === 'todo' ? 'pending' : null, content: newText.trim(), event_time: currentTime, sort_order: 0 })
+        .insert({ date: eventsDate, type: newType, status: newType === 'todo' ? 'pending' : null, content: newText.trim(), chat_time_start: currentTime, sort_order: 0 })
         .select('id')
         .single()
       if (!error && data) {
         setItems(prev => {
-          const newItem: EventItem = { id: data.id, type: newType, status: newType === 'todo' ? 'pending' : null, content: newText.trim(), event_time: currentTime, sort_order: 0 }
+          const newItem: EventItem = { id: data.id, type: newType, status: newType === 'todo' ? 'pending' : null, content: newText.trim(), chat_time_start: currentTime, sort_order: 0 }
           return sortItems([...prev, newItem])
         })
       }
@@ -1125,8 +1125,8 @@ function DailyEventsModal({ isOpen, onClose }: {
                         ? 'text-base-muted line-through'
                         : 'text-base-text'
                     }`}>
-                      {item.event_time && (
-                        <span className="text-xs text-base-muted/60 mr-1">{item.event_time}</span>
+                      {item.chat_time_start && (
+                        <span className="text-xs text-base-muted/60 mr-1">{item.chat_time_start}</span>
                       )}
                       {item.content}
                     </span>
