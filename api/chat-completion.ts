@@ -195,14 +195,14 @@ export default async function handler(req: any, res: any) {
     }
   }
 
-  // 优先级：前端传来的配置 > 环境变量
-  const apiConfigs = settings?.apiConfigs?.filter((c: any) => c.url && c.key) || []
+  // 优先级：前端传来的配置 > 环境变量（仅使用启用中的配置）
+  const apiConfigs = settings?.apiConfigs?.filter((c: any) => c.enabled !== false && c.url && c.key) || []
   if (apiConfigs.length === 0) {
     const envUrl = process.env.CHAT_AI_API_URL || process.env.AI_API_URL
     const envKey = process.env.CHAT_AI_API_KEY || process.env.AI_API_KEY
     const envModel = process.env.CHAT_AI_MODEL || process.env.AI_MODEL || 'deepseek-chat'
     if (envUrl && envKey) {
-      apiConfigs.push({ url: envUrl, key: envKey, model: envModel })
+      apiConfigs.push({ url: envUrl, key: envKey, model: envModel, enabled: true })
     }
   }
 
@@ -274,7 +274,7 @@ export default async function handler(req: any, res: any) {
 
   // 策略 1: 向量检索 (独立 try/catch，失败不影响后续策略)
   try {
-    const firstConfig = apiConfigs[0]
+    const firstConfig = apiConfigs[0] // 已过滤为启用的配置
     const embEndpoint = resolveEmbeddingUrl(firstConfig.url)
     const embeddingKey = process.env.EMBEDDING_API_KEY || firstConfig.key
 
@@ -628,7 +628,7 @@ export default async function handler(req: any, res: any) {
   }
 
     res.statusCode = 500
-    res.end(JSON.stringify({ error: 'All configured AI APIs failed' }))
+    res.end(JSON.stringify({ error: `全部 ${apiConfigs.length} 个启用的 API 配置均调用失败，请检查网络或 API 配置` }))
 
   } catch (unexpectedError: any) {
     console.error('[Handler] Unhandled error:', unexpectedError)

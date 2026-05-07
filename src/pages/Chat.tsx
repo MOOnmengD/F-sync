@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { ArrowLeft, BookOpen, Check, ImagePlus, ListTodo, Loader2, Pencil, Plus, RefreshCw, Send, Settings, Sparkles, X, Save, Eye, EyeOff, ClipboardPaste, Copy, FileText, Trash2 } from 'lucide-react'
+import { ArrowLeft, BookOpen, Check, ChevronDown, ChevronUp, GripVertical, ImagePlus, ListTodo, Loader2, Pencil, Plus, RefreshCw, Send, Settings, Sparkles, X, Save, Eye, EyeOff, ClipboardPaste, Copy, FileText, Trash2 } from 'lucide-react'
 import { compressImage, type CompressedImage } from '../utils/image'
 import { IconButton } from '../shared/ui/IconButton'
 import { useChatStore, type ChatMessage } from '../store/chat'
@@ -134,6 +134,9 @@ function SettingsModal({ isOpen, onClose, vectorSyncStatus, onVectorSync, onClea
   const [localSettings, setLocalSettings] = useState(settings)
   const [showApiKeys, setShowApiKeys] = useState<Record<number, boolean>>({})
   const [savedSections, setSavedSections] = useState<Record<string, boolean>>({})
+  const [expandedApis, setExpandedApis] = useState<Record<number, boolean>>({})
+  const [dragOverIdx, setDragOverIdx] = useState<number | null>(null)
+  const [deleteConfirmIdx, setDeleteConfirmIdx] = useState<number | null>(null)
 
   // 打开设置面板时，用当前 Zustand 中的 settings 重置本地编辑副本
   useEffect(() => {
@@ -167,6 +170,78 @@ function SettingsModal({ isOpen, onClose, vectorSyncStatus, onVectorSync, onClea
 
   const toggleApiKeyVisibility = (index: number) => {
     setShowApiKeys(prev => ({ ...prev, [index]: !prev[index] }))
+  }
+
+  const toggleExpand = (idx: number) => {
+    setExpandedApis(prev => ({ ...prev, [idx]: !prev[idx] }))
+  }
+
+  const addApiConfig = () => {
+    const next = [...localSettings.apiConfigs]
+    next.push({
+      name: `配置 ${next.length + 1}`,
+      url: '',
+      key: '',
+      model: '',
+      enabled: true,
+    })
+    setLocalSettings({ ...localSettings, apiConfigs: next })
+  }
+
+  const toggleApiEnabled = (idx: number) => {
+    const next = [...localSettings.apiConfigs]
+    next[idx] = { ...next[idx], enabled: !next[idx].enabled }
+    setLocalSettings({ ...localSettings, apiConfigs: next })
+  }
+
+  const moveApi = (idx: number, direction: number) => {
+    const targetIdx = idx + direction
+    if (targetIdx < 0 || targetIdx >= localSettings.apiConfigs.length) return
+    const next = [...localSettings.apiConfigs]
+    const [moved] = next.splice(idx, 1)
+    next.splice(targetIdx, 0, moved)
+    setLocalSettings({ ...localSettings, apiConfigs: next })
+  }
+
+  const handleDragStart = (e: React.DragEvent, idx: number) => {
+    e.dataTransfer.setData('text/plain', String(idx))
+    e.dataTransfer.effectAllowed = 'move'
+  }
+
+  const handleDragOver = (e: React.DragEvent) => {
+    e.preventDefault()
+    e.dataTransfer.dropEffect = 'move'
+  }
+
+  const handleDragEnter = (e: React.DragEvent, idx: number) => {
+    e.preventDefault()
+    setDragOverIdx(idx)
+  }
+
+  const handleDragLeaveCard = () => {
+    setDragOverIdx(null)
+  }
+
+  const handleDrop = (e: React.DragEvent, targetIdx: number) => {
+    e.preventDefault()
+    setDragOverIdx(null)
+    const sourceIdx = parseInt(e.dataTransfer.getData('text/plain'))
+    if (isNaN(sourceIdx) || sourceIdx === targetIdx) return
+    const next = [...localSettings.apiConfigs]
+    const [moved] = next.splice(sourceIdx, 1)
+    next.splice(targetIdx, 0, moved)
+    setLocalSettings({ ...localSettings, apiConfigs: next })
+  }
+
+  const handleDragEnd = () => {
+    setDragOverIdx(null)
+  }
+
+  const handleDeleteApi = (idx: number) => {
+    const next = [...localSettings.apiConfigs]
+    next.splice(idx, 1)
+    setLocalSettings({ ...localSettings, apiConfigs: next })
+    setDeleteConfirmIdx(null)
   }
 
   const handlePaste = async (index: number) => {
@@ -240,79 +315,218 @@ function SettingsModal({ isOpen, onClose, vectorSyncStatus, onVectorSync, onClea
 
           {/* API Config Section */}
           <section className="space-y-4">
-            <h3 className="text-sm font-bold text-base-text/70 uppercase tracking-wider">API 配置 (自动重试)</h3>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              {[0, 1].map((idx) => (
-                <div key={idx} className="p-4 bg-[#F7F5F2] border border-base-line rounded-2xl space-y-4 relative group">
-                  <div className="flex justify-between items-center">
-                    <span className="text-xs font-bold text-[#B4AEE8]">配置 {idx + 1}</span>
-                    <button
-                      onClick={() => handleSave('apiConfigs', localSettings.apiConfigs)}
-                      disabled={!isCloudLoaded}
-                      className="flex items-center gap-1 text-xs font-bold transition-all disabled:opacity-30 disabled:cursor-not-allowed"
-                      style={{ color: !isCloudLoaded ? undefined : savedSections['apiConfigs'] ? '#86C8A8' : '#B4AEE8' }}
-                    >
-                      {savedSections['apiConfigs'] ? <Check size={14} /> : <Save size={14} />}
-                      {savedSections['apiConfigs'] ? '已保存' : '保存'}
-                    </button>
-                  </div>
-                  <div className="space-y-3">
-                    <input
-                      className="w-full p-2 text-xs bg-[#FDFCFB] border border-base-line rounded-lg outline-none focus:border-[#B4AEE8]"
-                      placeholder="API URL (e.g. https://api.openai.com/v1)"
-                      value={localSettings.apiConfigs[idx].url}
-                      onChange={(e) => updateLocalApi(idx, 'url', e.target.value)}
-                      inputMode="url"
-                      autoComplete="off"
-                    />
-                    <div className="relative group/key">
-                      <input
-                        className="w-full p-2 pr-20 text-xs bg-[#FDFCFB] border border-base-line rounded-lg outline-none focus:border-[#B4AEE8]"
-                        type="text"
-                        placeholder="API Key (可直接粘贴)"
-                        value={localSettings.apiConfigs[idx].key}
-                        onChange={(e) => updateLocalApi(idx, 'key', e.target.value)}
-                        inputMode="text"
-                        autoComplete="off"
-                      />
-                      <div className="absolute right-1 top-1/2 -translate-y-1/2 flex items-center gap-0.5">
+            <div className="flex items-center justify-between">
+              <h3 className="text-sm font-bold text-base-text/70 uppercase tracking-wider">API 配置 (按序重试)</h3>
+              <button
+                onClick={() => handleSave('apiConfigs', localSettings.apiConfigs)}
+                disabled={!isCloudLoaded}
+                className="flex items-center gap-1 text-xs font-bold transition-all disabled:opacity-30 disabled:cursor-not-allowed"
+                style={{ color: !isCloudLoaded ? undefined : savedSections['apiConfigs'] ? '#86C8A8' : '#B4AEE8' }}
+              >
+                {savedSections['apiConfigs'] ? <Check size={14} /> : <Save size={14} />}
+                {savedSections['apiConfigs'] ? '已保存' : '保存'}
+              </button>
+            </div>
+
+            <div className="space-y-2">
+              {localSettings.apiConfigs.map((cfg, idx) => {
+                const isExpanded = expandedApis[idx] || false
+                const isFirst = idx === 0
+                const isLast = idx === localSettings.apiConfigs.length - 1
+
+                return (
+                  <div
+                    key={idx}
+                    className={`border rounded-2xl transition-colors ${
+                      dragOverIdx === idx
+                        ? 'border-[#B4AEE8] bg-[#F0EEFF]'
+                        : 'border-base-line bg-[#F7F5F2]'
+                    }`}
+                    draggable
+                    onDragStart={(e) => handleDragStart(e, idx)}
+                    onDragOver={handleDragOver}
+                    onDragEnter={(e) => handleDragEnter(e, idx)}
+                    onDragLeave={handleDragLeaveCard}
+                    onDrop={(e) => handleDrop(e, idx)}
+                    onDragEnd={handleDragEnd}
+                  >
+                    {/* Header row */}
+                    <div className="flex items-center gap-2 p-3">
+                      {/* Drag handle */}
+                      <div
+                        className="cursor-grab active:cursor-grabbing text-base-text/15 hover:text-base-text/40 transition-colors shrink-0 touch-none"
+                        title="拖拽排序"
+                      >
+                        <GripVertical size={16} />
+                      </div>
+
+                      {/* Name (clickable when collapsed, input when expanded) */}
+                      {isExpanded ? (
+                        <input
+                          className="flex-1 min-w-0 p-1.5 text-sm bg-white border border-base-line rounded-lg outline-none focus:border-[#B4AEE8]"
+                          placeholder="配置名称"
+                          value={cfg.name}
+                          onChange={(e) => updateLocalApi(idx, 'name', e.target.value)}
+                          onClick={(e) => e.stopPropagation()}
+                        />
+                      ) : (
                         <button
-                          type="button"
-                          className="p-1.5 text-base-text/40 hover:text-[#B4AEE8] transition-colors"
-                          onClick={() => toggleApiKeyVisibility(idx)}
-                          title={showApiKeys[idx] ? "隐藏" : "显示"}
+                          onClick={() => toggleExpand(idx)}
+                          className="flex-1 min-w-0 text-left p-1.5 text-sm font-medium text-base-text hover:text-[#B4AEE8] transition-colors truncate"
+                          title="点击展开编辑"
                         >
-                          {showApiKeys[idx] ? <EyeOff size={14} /> : <Eye size={14} />}
+                          {cfg.name || `配置 ${idx + 1}`}
+                        </button>
+                      )}
+
+                      {/* Up/Down reorder buttons */}
+                      <div className="flex shrink-0">
+                        <button
+                          onClick={() => moveApi(idx, -1)}
+                          disabled={isFirst}
+                          className="p-0.5 text-base-text/20 hover:text-base-text/50 disabled:opacity-10 transition-colors"
+                          title="上移"
+                        >
+                          <ChevronUp size={14} />
                         </button>
                         <button
-                          type="button"
-                          className="p-1.5 text-base-text/40 hover:text-[#B4AEE8] transition-colors"
-                          onClick={() => handlePaste(idx)}
-                          title="粘贴"
+                          onClick={() => moveApi(idx, 1)}
+                          disabled={isLast}
+                          className="p-0.5 text-base-text/20 hover:text-base-text/50 disabled:opacity-10 transition-colors"
+                          title="下移"
                         >
-                          <ClipboardPaste size={14} />
-                        </button>
-                        <button
-                          type="button"
-                          className="p-1.5 text-base-text/40 hover:text-[#B4AEE8] transition-colors"
-                          onClick={() => handleCopy(localSettings.apiConfigs[idx].key)}
-                          title="复制"
-                        >
-                          <Copy size={14} />
+                          <ChevronDown size={14} />
                         </button>
                       </div>
+
+                      {/* Enabled toggle */}
+                      <button
+                        onClick={() => toggleApiEnabled(idx)}
+                        className={`shrink-0 w-9 h-5 rounded-full transition-colors relative ${
+                          cfg.enabled ? 'bg-[#B4AEE8]' : 'bg-base-line'
+                        }`}
+                        title={cfg.enabled ? '已启用，点击关停' : '已关停，点击启用'}
+                      >
+                        <div
+                          className={`absolute top-0.5 w-4 h-4 rounded-full bg-white shadow-sm transition-transform ${
+                            cfg.enabled ? 'left-4' : 'left-0.5'
+                          }`}
+                        />
+                      </button>
+
+                      {/* Delete */}
+                      <button
+                        onClick={() => setDeleteConfirmIdx(deleteConfirmIdx === idx ? null : idx)}
+                        className={`shrink-0 p-1 transition-colors ${
+                          deleteConfirmIdx === idx
+                            ? 'text-red-400'
+                            : 'text-base-text/15 hover:text-red-300'
+                        }`}
+                        title="删除此配置"
+                      >
+                        <Trash2 size={14} />
+                      </button>
+
+                      {/* Expand/collapse */}
+                      <button
+                        onClick={() => toggleExpand(idx)}
+                        className="shrink-0 p-1 text-base-text/25 hover:text-base-text/60 transition-colors"
+                        title={isExpanded ? '收起' : '展开编辑'}
+                      >
+                        {isExpanded ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
+                      </button>
                     </div>
-                    <input
-                      className="w-full p-2 text-xs bg-[#FDFCFB] border border-base-line rounded-lg outline-none focus:border-[#B4AEE8]"
-                      placeholder="Model Name (e.g. gpt-4o)"
-                      value={localSettings.apiConfigs[idx].model}
-                      onChange={(e) => updateLocalApi(idx, 'model', e.target.value)}
-                      autoComplete="off"
-                    />
+
+                    {/* Delete confirmation bar */}
+                    {deleteConfirmIdx === idx && (
+                      <div className="px-3 pb-3 flex items-center gap-2">
+                        <span className="text-xs text-red-400">确定删除「{cfg.name || `配置 ${idx + 1}`}」？</span>
+                        <button
+                          onClick={() => handleDeleteApi(idx)}
+                          className="text-xs font-semibold text-red-500 hover:text-red-600 transition-colors"
+                        >
+                          删除
+                        </button>
+                        <span className="text-base-text/15">·</span>
+                        <button
+                          onClick={() => setDeleteConfirmIdx(null)}
+                          className="text-xs text-base-text/40 hover:text-base-text/70 transition-colors"
+                        >
+                          取消
+                        </button>
+                      </div>
+                    )}
+
+                    {/* Expanded edit fields */}
+                    {isExpanded && (
+                      <div className="px-5 pb-4 space-y-3">
+                        <input
+                          className="w-full p-2 text-xs bg-white border border-base-line rounded-lg outline-none focus:border-[#B4AEE8]"
+                          placeholder="API URL (e.g. https://api.openai.com/v1)"
+                          value={cfg.url}
+                          onChange={(e) => updateLocalApi(idx, 'url', e.target.value)}
+                          inputMode="url"
+                          autoComplete="off"
+                        />
+                        <div className="relative group/key">
+                          <input
+                            className="w-full p-2 pr-20 text-xs bg-white border border-base-line rounded-lg outline-none focus:border-[#B4AEE8]"
+                            type="text"
+                            placeholder="API Key"
+                            value={cfg.key}
+                            onChange={(e) => updateLocalApi(idx, 'key', e.target.value)}
+                            inputMode="text"
+                            autoComplete="off"
+                          />
+                          <div className="absolute right-1 top-1/2 -translate-y-1/2 flex items-center gap-0.5">
+                            <button
+                              type="button"
+                              className="p-1.5 text-base-text/40 hover:text-[#B4AEE8] transition-colors"
+                              onClick={() => toggleApiKeyVisibility(idx)}
+                              title={showApiKeys[idx] ? '隐藏' : '显示'}
+                            >
+                              {showApiKeys[idx] ? <EyeOff size={14} /> : <Eye size={14} />}
+                            </button>
+                            <button
+                              type="button"
+                              className="p-1.5 text-base-text/40 hover:text-[#B4AEE8] transition-colors"
+                              onClick={() => handlePaste(idx)}
+                              title="粘贴"
+                            >
+                              <ClipboardPaste size={14} />
+                            </button>
+                            <button
+                              type="button"
+                              className="p-1.5 text-base-text/40 hover:text-[#B4AEE8] transition-colors"
+                              onClick={() => handleCopy(cfg.key)}
+                              title="复制"
+                            >
+                              <Copy size={14} />
+                            </button>
+                          </div>
+                        </div>
+                        <input
+                          className="w-full p-2 text-xs bg-white border border-base-line rounded-lg outline-none focus:border-[#B4AEE8]"
+                          placeholder="Model Name (e.g. gpt-4o)"
+                          value={cfg.model}
+                          onChange={(e) => updateLocalApi(idx, 'model', e.target.value)}
+                          autoComplete="off"
+                        />
+                      </div>
+                    )}
                   </div>
-                </div>
-              ))}
+                )
+              })}
             </div>
+
+            {/* Add new config */}
+            <button
+              onClick={addApiConfig}
+              className="w-full p-3 border border-dashed border-base-line rounded-2xl text-xs text-base-text/40 hover:text-[#B4AEE8] hover:border-[#B4AEE8] transition-colors flex items-center justify-center gap-1.5"
+            >
+              <Plus size={14} />
+              新增 API 配置
+            </button>
           </section>
 
           {/* 工具 */}

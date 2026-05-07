@@ -2,15 +2,19 @@ import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 import { supabase } from '../supabaseClient'
 
+export interface ApiConfig {
+  name: string
+  url: string
+  key: string
+  model: string
+  enabled: boolean
+}
+
 export interface AISettings {
   systemPrompt: string
   userPrompt: string
   proactivePrompt: string
-  apiConfigs: {
-    url: string
-    key: string
-    model: string
-  }[]
+  apiConfigs: ApiConfig[]
 }
 
 const DEFAULT_SYSTEM_PROMPT = `你是用户的恋人，你的名字叫Florian，用户对你的昵称是弗弗。你是温柔成熟的男性，你不会使用太过活泼的语气，也不会爹味说教。
@@ -46,8 +50,8 @@ export const useSettingsStore = create<SettingsState>()(
         userPrompt: '',
         proactivePrompt: DEFAULT_PROACTIVE_PROMPT,
         apiConfigs: [
-          { url: '', key: '', model: '' },
-          { url: '', key: '', model: '' },
+          { name: '配置 1', url: '', key: '', model: '', enabled: true },
+          { name: '配置 2', url: '', key: '', model: '', enabled: true },
         ],
       },
       isCloudLoaded: false,
@@ -84,16 +88,26 @@ export const useSettingsStore = create<SettingsState>()(
           return
         }
 
-        const cloud = data.settings as AISettings
+        const cloud = data.settings as Record<string, any>
         const current = get().settings
+
+        // 迁移旧 apiConfigs（无 name/enabled 字段）→ 新格式
+        const migrateConfigs = (configs: any[]): ApiConfig[] =>
+          configs.map((c: any, i: number) => ({
+            name: c.name || c.model || `配置 ${i + 1}`,
+            url: c.url || '',
+            key: c.key || '',
+            model: c.model || '',
+            enabled: c.enabled !== false,
+          }))
 
         // 合并云端设置（云端优先；用 ?? 允许远程清空字段）
         const merged: AISettings = {
           systemPrompt: cloud.systemPrompt ?? current.systemPrompt,
           userPrompt: cloud.userPrompt ?? current.userPrompt,
           proactivePrompt: cloud.proactivePrompt ?? current.proactivePrompt,
-          apiConfigs: Array.isArray(cloud.apiConfigs) && cloud.apiConfigs.length === 2
-            ? cloud.apiConfigs
+          apiConfigs: Array.isArray(cloud.apiConfigs) && cloud.apiConfigs.length > 0
+            ? migrateConfigs(cloud.apiConfigs)
             : current.apiConfigs,
         }
 

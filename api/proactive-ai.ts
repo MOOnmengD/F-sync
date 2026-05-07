@@ -369,7 +369,7 @@ export default async function handler(req: any, res: any) {
       weatherInfo = await getWeather({ supabase, userId: targetUserId, amapKey }) || ''
     }
 
-    const apiConfigs = settings?.apiConfigs?.filter((c: any) => c.url && c.key) || []
+    const apiConfigs = settings?.apiConfigs?.filter((c: any) => c.enabled !== false && c.url && c.key) || []
     if (apiConfigs.length === 0) {
       const envUrl = process.env.CHAT_AI_API_URL || process.env.AI_API_URL
       const envKey = process.env.CHAT_AI_API_KEY || process.env.AI_API_KEY
