@@ -278,7 +278,10 @@ export async function retrievalJudgeAndFetch(params: {
       }),
     })
 
-    if (!judgeRes.ok) return []
+    if (!judgeRes.ok) {
+      console.warn('[Memory Retrieval] judge API 返回非 200:', judgeRes.status)
+      return []
+    }
 
     const judgeData = await judgeRes.json()
     const judgeRaw = judgeData.choices?.[0]?.message?.content?.trim()
@@ -296,11 +299,25 @@ export async function retrievalJudgeAndFetch(params: {
       }
     }
 
-    if (!judgeResult?.needs_retrieval || !judgeResult?.keywords) return []
+    if (!judgeResult?.needs_retrieval || !judgeResult?.keywords) {
+      if (!judgeResult?.needs_retrieval) {
+        console.log('[Memory Retrieval] AI 判断无需检索')
+      } else {
+        console.warn('[Memory Retrieval] AI 判断需检索但未返回 keywords')
+      }
+      return []
+    }
 
-    // 向量检索 daily_event_items
-    const embEndpoint = resolveEmbeddingUrl(firstConfig.url)
-    const embeddingKey = process.env.EMBEDDING_API_KEY || firstConfig.key
+    // 向量检索 daily_event_items（优先使用专用 embedding 配置）
+    const embBaseUrl =
+      process.env.EMBEDDING_API_URL ||
+      process.env.CHAT_AI_API_URL ||
+      process.env.AI_API_URL ||
+      firstConfig.url
+    const embEndpoint = resolveEmbeddingUrl(embBaseUrl)
+    const embeddingKey =
+      process.env.EMBEDDING_API_KEY || process.env.CHAT_AI_API_KEY || process.env.AI_API_KEY || firstConfig.key
+    const embModel = process.env.EMBEDDING_MODEL || embeddingModel
 
     const embRes = await fetch(embEndpoint, {
       method: 'POST',
@@ -309,16 +326,26 @@ export async function retrievalJudgeAndFetch(params: {
         Authorization: `Bearer ${embeddingKey}`,
       },
       body: JSON.stringify({
-        model: embeddingModel,
+        model: embModel,
         input: judgeResult.keywords,
       }),
     })
 
-    if (!embRes.ok) return []
+    if (!embRes.ok) {
+      console.warn(
+        '[Memory Retrieval] embedding API 返回非 200:',
+        embRes.status,
+        `(${embEndpoint})`,
+      )
+      return []
+    }
 
     const embData = await embRes.json()
     const queryEmbedding = embData.data?.[0]?.embedding
-    if (!queryEmbedding) return []
+    if (!queryEmbedding) {
+      console.warn('[Memory Retrieval] embedding API 未返回有效 embedding')
+      return []
+    }
 
     const { data: matchedEvents } = await supabase.rpc(
       'match_daily_event_items',
@@ -406,11 +433,18 @@ export async function ragRetrieval(params: {
   let fullTextResults: any[] = []
   let timeBasedResults: any[] = []
 
-  // 策略 1: 向量检索
+  // 策略 1: 向量检索（优先使用专用 embedding 配置）
   try {
     const firstConfig = apiConfigs[0]
-    const embEndpoint = resolveEmbeddingUrl(firstConfig.url)
-    const embeddingKey = process.env.EMBEDDING_API_KEY || firstConfig.key
+    const embBaseUrl =
+      process.env.EMBEDDING_API_URL ||
+      process.env.CHAT_AI_API_URL ||
+      process.env.AI_API_URL ||
+      firstConfig.url
+    const embEndpoint = resolveEmbeddingUrl(embBaseUrl)
+    const embeddingKey =
+      process.env.EMBEDDING_API_KEY || process.env.CHAT_AI_API_KEY || process.env.AI_API_KEY || firstConfig.key
+    const embModel = process.env.EMBEDDING_MODEL || embeddingModel
 
     const embRes = await fetch(embEndpoint, {
       method: 'POST',
@@ -418,14 +452,22 @@ export async function ragRetrieval(params: {
         'Content-Type': 'application/json',
         Authorization: `Bearer ${embeddingKey}`,
       },
-      body: JSON.stringify({ model: embeddingModel, input: searchQuery }),
+      body: JSON.stringify({ model: embModel, input: searchQuery }),
     })
 
-    if (embRes.ok) {
+    if (!embRes.ok) {
+      console.warn(
+        '[RAG] embedding API 返回非 200:',
+        embRes.status,
+        `(${embEndpoint})`,
+      )
+    } else {
       const embData = await embRes.json()
       const queryEmbedding = embData.data?.[0]?.embedding
 
-      if (queryEmbedding) {
+      if (!queryEmbedding) {
+        console.warn('[RAG] embedding API 未返回有效 embedding')
+      } else {
         const { data: matchedLogs, error: matchError } = await supabase.rpc(
           'match_life_logs',
           {
