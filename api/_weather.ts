@@ -25,7 +25,7 @@ export async function getWeather(params: {
 
     if (cached && cached.date === today) {
       const w = cached.weather
-      return `今日天气：${w.weather}，气温 ${w.temperature}℃，${w.winddirection} ${w.windpower} 级`
+      return `[今日天气] ${w.weather}，气温 ${w.temperature}℃，${w.winddirection} ${w.windpower} 级`
     }
 
     // 获取位置 + adcode
@@ -90,7 +90,7 @@ export async function getWeather(params: {
         updated_at: new Date().toISOString()
       }, { onConflict: 'user_id' })
 
-    return `今日天气：${weatherObj.weather}，气温 ${weatherObj.temperature}℃，${weatherObj.winddirection} ${weatherObj.windpower} 级`
+    return `[今日天气] ${weatherObj.weather}，气温 ${weatherObj.temperature}℃，${weatherObj.winddirection} ${weatherObj.windpower} 级`
 
   } catch (err: any) {
     console.warn('[Weather] 获取天气失败:', err.message)

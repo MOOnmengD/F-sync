@@ -12,6 +12,13 @@ jobs:
     steps:
       - name: Trigger Proactive AI Endpoint
         run: |
+          # 静默时段（CST 01:00-10:00）不唤醒，避免打扰用户休息
+          CST_HOUR=$(TZ='Asia/Shanghai' date +%H | sed 's/^0//')
+          if [ "$CST_HOUR" -ge 1 ] && [ "$CST_HOUR" -lt 10 ]; then
+            echo "静默时段（CST ${CST_HOUR}:00），跳过唤醒"
+            exit 0
+          fi
+
           # 自动处理可能误输入的 https://
           DOMAIN=$(echo "${{ secrets.VERCEL_DOMAIN }}" | sed -e 's|^https://||' -e 's|/$||')
           echo "Triggering https://$DOMAIN/api/proactive-ai"

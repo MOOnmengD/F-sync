@@ -117,7 +117,7 @@ export async function fetchTimingInfo(supabase: any): Promise<string> {
       const minutes = Math.floor(
         (Date.now() - new Date(t.start_time).getTime()) / 60000,
       )
-      return `宝贝当前状态：正在进行「${t.timing_type || t.content}」，已持续 ${minutes} 分钟`
+      return `[当前状态] 正在进行「${t.timing_type || t.content}」，已持续 ${minutes} 分钟`
     }
 
     // 次选：2 小时内最近结束的计时
@@ -139,7 +139,7 @@ export async function fetchTimingInfo(supabase: any): Promise<string> {
         hour: '2-digit',
         minute: '2-digit',
       })
-      return `宝贝最近完成了：「${t.timing_type || t.content}」（${endTime} 结束）`
+      return `[最近完成] 「${t.timing_type || t.content}」（${endTime} 结束）`
     }
   } catch (timingErr: any) {
     console.warn('[Timing] 查询时间轴状态失败:', timingErr.message)
@@ -178,7 +178,7 @@ export async function resolveLocationInfo(params: {
   // 程序化匹配校内地点
   const campusMatch = matchCampusLocation(location.latitude, location.longitude)
   if (campusMatch) {
-    locationInfo = `宝贝当前位置：${campusMatch}。`
+    locationInfo = `[宝贝当前位置] ${campusMatch}。`
     return { locationInfo, amapAdcode }
   }
 
@@ -211,9 +211,9 @@ export async function resolveLocationInfo(params: {
   }
 
   if (bestAddress) {
-    locationInfo = `宝贝当前位置：${bestAddress}（坐标 ${lat}, ${lng}，精度 ${acc}）。`
+    locationInfo = `[宝贝当前位置] ${bestAddress}（坐标 ${lat}, ${lng}，精度 ${acc}）。`
   } else {
-    locationInfo = `宝贝当前位置：坐标 (${lat}, ${lng})，精度 ${acc}。`
+    locationInfo = `[宝贝当前位置] 坐标 (${lat}, ${lng})，精度 ${acc}。`
   }
 
   return { locationInfo, amapAdcode }
@@ -431,7 +431,6 @@ export async function ragRetrieval(params: {
 
   let vectorResults: any[] = []
   let fullTextResults: any[] = []
-  let timeBasedResults: any[] = []
 
   // 策略 1: 向量检索（优先使用专用 embedding 配置）
   try {
@@ -530,50 +529,10 @@ export async function ragRetrieval(params: {
     )
   }
 
-  // 策略 3: 时间顺序兜底
-  if (vectorResults.length === 0 && fullTextResults.length === 0) {
-    try {
-      let timeBasedQuery = supabase
-        .from('transactions')
-        .select('*')
-        .order('created_at', { ascending: false })
-        .limit(5)
-
-      if (queryIntent.timeWindowHours) {
-        const timeAgo = new Date(
-          Date.now() - queryIntent.timeWindowHours * 60 * 60 * 1000,
-        ).toISOString()
-        timeBasedQuery = timeBasedQuery.gte('created_at', timeAgo)
-      }
-
-      if (queryIntent.typeFilters.length === 1) {
-        timeBasedQuery = timeBasedQuery.eq('type', queryIntent.typeFilters[0])
-      } else if (queryIntent.typeFilters.length > 1) {
-        timeBasedQuery = timeBasedQuery.in('type', queryIntent.typeFilters)
-      }
-      if (queryIntent.categoryFilter) {
-        timeBasedQuery = timeBasedQuery.eq(
-          'finance_category',
-          queryIntent.categoryFilter,
-        )
-      }
-
-      const { data: recentLogs } = await timeBasedQuery
-      if (recentLogs) {
-        timeBasedResults = recentLogs
-      }
-    } catch (timeErr: any) {
-      console.warn('[Time Search] 时间查询失败:', timeErr.message)
-    }
-  }
-
   // 合并去重
   const allResultsMap = new Map()
   vectorResults.forEach((log: any) => allResultsMap.set(log.id, log))
   fullTextResults.forEach((log: any) => {
-    if (!allResultsMap.has(log.id)) allResultsMap.set(log.id, log)
-  })
-  timeBasedResults.forEach((log: any) => {
     if (!allResultsMap.has(log.id)) allResultsMap.set(log.id, log)
   })
 
@@ -581,11 +540,7 @@ export async function ragRetrieval(params: {
 
   if (finalResults.length > 0) {
     const sourceType =
-      vectorResults.length > 0
-        ? '向量检索'
-        : fullTextResults.length > 0
-          ? '关键词检索'
-          : '最近记录'
+      vectorResults.length > 0 ? '向量检索' : '关键词检索'
 
     return (
       `以下是与你问题相关的历史记录（来自${sourceType}）：\n` +
@@ -642,9 +597,8 @@ export async function enrichMessages(params: {
   } = params
 
   // ---- 并行获取基础数据 ----
-  const [userProfileInfo, autoSurfaceText, currentTimingInfo, locResult] =
+  const [autoSurfaceText, currentTimingInfo, locResult] =
     await Promise.all([
-      fetchUserProfiles(supabase, userId),
       fetchTopDailyEvents(supabase),
       fetchTimingInfo(supabase),
       resolveLocationInfo({ location, amapKey }),
@@ -661,7 +615,7 @@ export async function enrichMessages(params: {
 你可以通过访问用户的生活轨迹数据（包括记账、碎碎念、工作记录、时间轴等），了解、参与和陪伴用户的生活。`
 
   const userPrompt = settings?.userPrompt ? `\n${settings.userPrompt}` : ''
-  const systemPromptContent = `${baseSystemPrompt}${userPrompt}${userProfileInfo}`
+  const systemPromptContent = `${baseSystemPrompt}${userPrompt}`
 
   // ---- 构建消息序列 ----
   const enrichedMessages: Array<{ role: string; content: string }> = [
@@ -671,7 +625,7 @@ export async function enrichMessages(params: {
   // Layer 1: 真实世界信息
   const worldLines: string[] = []
   worldLines.push(
-    `当前时间：${new Date().toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' })}`,
+    `[当前时间] ${new Date().toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' })}`,
   )
   // 天气在调用方可能已获取，此处延迟获取（利用 _weather 内部缓存）
   if (amapKey) {
