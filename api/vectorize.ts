@@ -68,33 +68,53 @@ export default async function handler(req: any, res: any) {
   }
 
   // 支持单个 ID 向量化或全量同步请求
-  const { transaction_id, mode } = body
+  const { transaction_id, event_id, mode, table } = body
+  const targetTable = table || 'transactions' // 'transactions' | 'daily_event_items'
   const supabaseAdmin = createClient(supabaseUrl, supabaseServiceKey)
 
   try {
-    let tasks = []
+    let tasks: any[] = []
+    const tableName = targetTable === 'daily_event_items' ? 'daily_event_items' : 'transactions'
 
     if (transaction_id) {
-      // 模式 A: 针对特定 ID 向量化
-      const { data: tx, error: fetchError } = await supabaseAdmin
-        .from('transactions')
+      const { data: row, error: fetchError } = await supabaseAdmin
+        .from(tableName)
         .select('*')
         .eq('id', transaction_id)
         .single()
-      
-      if (fetchError || !tx) throw new Error('Transaction not found')
-      tasks = [tx]
-    } else if (mode === 'all') {
-      // 模式 B: 全量同步（处理尚未向量化的数据）
-      const { data, error: fetchError } = await supabaseAdmin
-        .from('transactions')
+
+      if (fetchError || !row) throw new Error('Row not found')
+      tasks = [row]
+    } else if (event_id) {
+      const { data: row, error: fetchError } = await supabaseAdmin
+        .from('daily_event_items')
         .select('*')
-        .is('embedding', null)
-        .in('type', ['记账', 'whisper']) // 仅处理这两类
-        .limit(5) // 减小批次到 5 条，防止 Vercel 超时 (Hobby 限制 10s)
-      
-      if (fetchError) throw new Error(fetchError.message)
-      tasks = data || []
+        .eq('id', event_id)
+        .single()
+
+      if (fetchError || !row) throw new Error('Event not found')
+      tasks = [row]
+    } else if (mode === 'all') {
+      if (targetTable === 'daily_event_items') {
+        const { data, error: fetchError } = await supabaseAdmin
+          .from('daily_event_items')
+          .select('*')
+          .is('embedding', null)
+          .limit(10)
+
+        if (fetchError) throw new Error(fetchError.message)
+        tasks = data || []
+      } else {
+        const { data, error: fetchError } = await supabaseAdmin
+          .from('transactions')
+          .select('*')
+          .is('embedding', null)
+          .in('type', ['记账', 'whisper'])
+          .limit(5)
+
+        if (fetchError) throw new Error(fetchError.message)
+        tasks = data || []
+      }
     }
 
     if (tasks.length === 0) {
@@ -107,8 +127,10 @@ export default async function handler(req: any, res: any) {
     const results = []
     let errorCount = 0
 
-    for (const tx of tasks) {
-      const text = formatTransactionToText(tx)
+    for (const row of tasks) {
+      const text = targetTable === 'daily_event_items'
+        ? row.content
+        : formatTransactionToText(row)
       
       try {
         const embRes = await fetch(embEndpoint, {
@@ -126,7 +148,7 @@ export default async function handler(req: any, res: any) {
         if (!embRes.ok) {
           const errText = await embRes.text()
           results.push({ 
-            id: tx.id, 
+            id: row.id, 
             success: false, 
             error: `Embedding API failed (Model: ${embeddingModel}): ${errText}` 
           })
@@ -140,23 +162,23 @@ export default async function handler(req: any, res: any) {
         if (embedding) {
           // 使用 { count: 'exact' } 强制要求返回受影响行数
           const { error: updateError, data: updatedData } = await supabaseAdmin
-            .from('transactions')
+            .from(tableName)
             .update({ embedding })
-            .eq('id', tx.id)
+            .eq('id', row.id)
             .select()
 
           if (updateError) {
-            results.push({ id: tx.id, success: false, error: `DB Update Error: ${updateError.message}` })
+            results.push({ id: row.id, success: false, error: `DB Update Error: ${updateError.message}` })
             errorCount++
           } else if (!updatedData || updatedData.length === 0) {
-            results.push({ id: tx.id, success: false, error: 'DB Update Failed: No rows affected (check RLS)' })
+            results.push({ id: row.id, success: false, error: 'DB Update Failed: No rows affected (check RLS)' })
             errorCount++
           } else {
-            results.push({ id: tx.id, success: true })
+            results.push({ id: row.id, success: true })
           }
         }
       } catch (e: any) {
-        results.push({ id: tx.id, success: false, error: e.message })
+        results.push({ id: row.id, success: false, error: e.message })
         errorCount++
       }
     }
