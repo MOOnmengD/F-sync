@@ -1,41 +1,7 @@
 import { createClient } from '@supabase/supabase-js'
 import jwt from 'jsonwebtoken'
-import { getWeather } from './_weather.js'
-
-const chatModel = process.env.CHAT_AI_MODEL || 'deepseek-chat'
-
-// 校内地标（新增地点时只改这里）
-const CAMPUS_LOCATIONS = [
-  { name: '私有地点A',  lat: 0.000001, lng: 0.000001, scene: '宝贝在工作/学习' },
-  { name: '私有地点B',     lat: 0.000002, lng: 0.000002, scene: '宝贝在取快递/取外卖/要出学校' },
-  { name: '私有地点C',        lat: 0.000003, lng: 0.000003, scene: '宝贝在吃饭' },
-  { name: '私有地点D', lat: 0.000004, lng: 0.000004, scene: '宝贝在吃饭' },
-  { name: '私有地点E',        lat: 0.000005, lng: 0.000005, scene: '宝贝在吃饭' },
-  { name: '私有地点F',     lat: 0.000006, lng: 0.000006, scene: '宝贝在休息' },
-]
-const CAMPUS_MATCH_RADIUS = 100 // 米
-
-function haversineDistance(lat1: number, lng1: number, lat2: number, lng2: number): number {
-  const R = 6371000
-  const rad = (d: number) => d * Math.PI / 180
-  const dLat = rad(lat2 - lat1)
-  const dLng = rad(lng2 - lng1)
-  const a = Math.sin(dLat / 2) ** 2 + Math.cos(rad(lat1)) * Math.cos(rad(lat2)) * Math.sin(dLng / 2) ** 2
-  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))
-}
-
-function matchCampusLocation(lat: number, lng: number): string | null {
-  let bestDist = Infinity
-  let best: (typeof CAMPUS_LOCATIONS)[0] | null = null
-  for (const loc of CAMPUS_LOCATIONS) {
-    const d = haversineDistance(lat, lng, loc.lat, loc.lng)
-    if (d < bestDist) { bestDist = d; best = loc }
-  }
-  if (best && bestDist <= CAMPUS_MATCH_RADIUS) {
-    return `${best.name}（${best.scene}）`
-  }
-  return null
-}
+import { resolveChatCompletionsUrl } from './_utils.js'
+import { enrichMessages } from './_context.js'
 
 function getHuaweiAccessToken(): string {
   const keyId = process.env.HUAWEI_KEY_ID
@@ -43,7 +9,6 @@ function getHuaweiAccessToken(): string {
   const rawKey = process.env.HUAWEI_PRIVATE_KEY
   if (!keyId || !subAccount || !rawKey) throw new Error('Missing HUAWEI_KEY_ID / HUAWEI_SUB_ACCOUNT / HUAWEI_PRIVATE_KEY')
 
-  // 按官方 Node.js 示例处理 PEM：替换 \n 后取前 3 行重新拼接
   const lines = rawKey.replace(/\\n/g, '\n').split('\n')
   const PRIVATE_KEY = lines.slice(0, 3).join('\n')
   console.log('[Push] JWT kid:', keyId, '| sub_account:', subAccount)
@@ -113,35 +78,26 @@ async function sendHuaweiPush(supabase: any, userId: string, title: string, body
   console.log('[Push] 华为推送成功:', pushData.requestId)
 }
 
-function resolveChatCompletionsUrl(base: string) {
-  const trimmed = base.trim().replace(/\/+$/, '')
-  if (!trimmed) return ''
-  if (trimmed.endsWith('/chat/completions')) return trimmed
-  return `${trimmed}/chat/completions`
-}
-
 /**
  * 异步更新用户画像摘要
  * 不阻塞主动消息发送，失败时仅记录错误
  */
 async function updateUserProfileSummary(params: {
-  supabase: any,
-  userId: string,
-  recentLogs: any[],
-  recentChats: any[],
-  apiConfigs: any[],
+  supabase: any
+  userId: string
+  recentLogs: any[]
+  recentChats: any[]
+  apiConfigs: any[]
   settings?: any
 }) {
   const { supabase, userId, recentLogs, recentChats, apiConfigs, settings } = params
 
   try {
-    // 如果没有足够的数据，跳过摘要更新
     if (recentLogs.length === 0 && recentChats.length === 0) {
       console.log('[Profile Summary] 无足够数据，跳过摘要更新')
       return
     }
 
-    // 读取已有社交关系
     let existingRelationshipsText = ''
     try {
       const { data: relRows } = await supabase
@@ -149,7 +105,7 @@ async function updateUserProfileSummary(params: {
         .select('name, relation, impression, history')
         .eq('user_id', userId)
       if (relRows && relRows.length > 0) {
-        existingRelationshipsText = relRows.map(r => {
+        existingRelationshipsText = relRows.map((r: any) => {
           const latestUpdate = r.history?.length > 0
             ? ` [印象更新于 ${r.history[r.history.length - 1].date}]`
             : ''
@@ -160,14 +116,13 @@ async function updateUserProfileSummary(params: {
       console.warn('[Profile Summary] 读取社交关系失败:', e.message)
     }
 
-    // 构建摘要生成提示词
     const summaryPrompt = `你是一个专门分析用户生活记录的 AI 助手。请根据以下数据，生成结构化的用户画像摘要。
 
 用户最近的生活记录（最近12小时）：
-${recentLogs.map(log => `- [${log.type}] ${log.content} ${log.finance_category ? `(${log.finance_category})` : ''}`).join('\n') || '暂无记录'}
+${recentLogs.map((log: any) => `- [${log.type}] ${log.content} ${log.finance_category ? `(${log.finance_category})` : ''}`).join('\n') || '暂无记录'}
 
 用户最近的对话（最近50条）：
-${recentChats.map(c => `- ${c.role}: ${c.content}`).join('\n') || '暂无对话'}
+${recentChats.map((c: any) => `- ${c.role}: ${c.content}`).join('\n') || '暂无对话'}
 
 ${existingRelationshipsText ? `现有社交关系：
 ${existingRelationshipsText}
@@ -188,7 +143,6 @@ ${existingRelationshipsText}
   ]
 }`
 
-    // 使用第一组 API 配置生成摘要
     const config = apiConfigs[0]
     const endpoint = resolveChatCompletionsUrl(config.url)
 
@@ -202,7 +156,7 @@ ${existingRelationshipsText}
         model: config.model,
         messages: [{ role: 'system', content: summaryPrompt }],
         temperature: 0.3,
-        response_format: { type: "json_object" }
+        response_format: { type: 'json_object' }
       })
     })
 
@@ -218,7 +172,6 @@ ${existingRelationshipsText}
       throw new Error('AI 未返回有效摘要内容')
     }
 
-    // 解析 JSON
     let summaryData
     try {
       summaryData = JSON.parse(summaryJsonStr)
@@ -232,7 +185,6 @@ ${existingRelationshipsText}
       }
     }
 
-    // 处理社交关系增量更新（独立 try/catch，不影响其他画像更新）
     try {
       const socialChanges = summaryData.social_changes
       if (Array.isArray(socialChanges) && socialChanges.length > 0) {
@@ -294,13 +246,12 @@ ${existingRelationshipsText}
     console.log('[Profile Summary] 社交关系更新完成')
 
   } catch (error: any) {
-    // 摘要生成失败不应影响主动消息功能
     console.error('[Profile Summary] 错误:', error.message)
   }
 }
 
 export default async function handler(req: any, res: any) {
-  // 1. 验证 Cron 密钥，防止恶意请求
+  // 验证 Cron 密钥
   const authHeader = req.headers.authorization || req.headers.get?.('Authorization')
   if (authHeader !== `Bearer ${process.env.CRON_SECRET}`) {
     return res.status(401).json({ error: 'Unauthorized' })
@@ -316,60 +267,16 @@ export default async function handler(req: any, res: any) {
   const supabase = createClient(supabaseUrl, supabaseServiceKey)
 
   try {
-    // 获取用户设置
-    // 假设用户设置存储在 localStorage，但 API 无法直接读取
-    // 我们需要从数据库中读取设置，或者 GitHub Action 传入
-    // 既然要求是前端设置，最简单的方法是让 API 尝试从 Supabase 的某个配置表读取，
-    // 或者我们直接在 GitHub Action 调用时把这些设置通过 Body 传过来。
-    // 但目前 GitHub Action 是简单的 curl。
-    // 另一个方案：既然是 Proactive，我们可以从 chat_messages 的 metadata 或者专门的 settings 表读取。
-    // 为了简单且符合用户需求，我们先检查环境变量，如果没有，则使用硬编码的默认值。
-    // 如果用户希望 API 也能用上前端定义的 Prompt，我们需要一个持久化方案。
-
-    // 尝试从 body 获取设置（如果 GitHub Action 支持传参）
     const body = req.body || {}
     const settings = body.settings
     const force = body.force === true
 
-    const targetUserId = process.env.PROACTIVE_USER_ID || "00000000-0000-0000-0000-000000000000"
+    const targetUserId = process.env.PROACTIVE_USER_ID || '00000000-0000-0000-0000-000000000000'
 
-    // 从数据库读取最新位置（由 HarmonyOS workScheduler 或前端 Chat 页更新）
-    let locationInfo = ''
-    try {
-      const { data: locData } = await supabase
-        .from('user_locations')
-        .select('latitude, longitude, accuracy, address, adcode, updated_at')
-        .eq('user_id', targetUserId)
-        .single()
-
-      if (locData) {
-        const lat = Number(locData.latitude).toFixed(6)
-        const lng = Number(locData.longitude).toFixed(6)
-        const acc = locData.accuracy != null ? `${Math.round(locData.accuracy)}米` : '未知精度'
-        const locTime = new Date(locData.updated_at).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' })
-
-        // 程序化匹配校内地点
-        const campusMatch = matchCampusLocation(Number(locData.latitude), Number(locData.longitude))
-        if (campusMatch) {
-          locationInfo = `宝贝当前位置：${campusMatch}（记录于 ${locTime}）。`
-        } else if (locData.address && typeof locData.address === 'string' && locData.address.length > 0) {
-          locationInfo = `宝贝当前位置：${locData.address}（坐标 ${lat}, ${lng}，精度 ${acc}，记录于 ${locTime}）。`
-        } else {
-          locationInfo = `宝贝当前位置：坐标 (${lat}, ${lng})，精度 ${acc}（记录于 ${locTime}）。`
-        }
-      }
-    } catch (locErr: any) {
-      console.warn('[Location] 查询失败，跳过位置信息:', locErr.message)
-    }
-
-    // 获取天气信息（每日首次调用 API，后续复用缓存）
-    let weatherInfo = ''
-    const amapKey = process.env.AMAP_API_KEY
-    if (amapKey) {
-      weatherInfo = await getWeather({ supabase, userId: targetUserId, amapKey }) || ''
-    }
-
-    const apiConfigs = settings?.apiConfigs?.filter((c: any) => c.enabled !== false && c.url && c.key) || []
+    // 构建 API 配置
+    const apiConfigs = settings?.apiConfigs?.filter(
+      (c: any) => c.enabled !== false && c.url && c.key,
+    ) || []
     if (apiConfigs.length === 0) {
       const envUrl = process.env.CHAT_AI_API_URL || process.env.AI_API_URL
       const envKey = process.env.CHAT_AI_API_KEY || process.env.AI_API_KEY
@@ -383,21 +290,27 @@ export default async function handler(req: any, res: any) {
       return res.status(500).json({ error: 'Missing AI configuration' })
     }
 
-    // 2. 获取最新数据（近 12 小时的记录）
-    const twelveHoursAgo = new Date(Date.now() - 12 * 60 * 60 * 1000).toISOString()
+    // 读取数据库中的最新位置（由 HarmonyOS workScheduler 或 Chat 页更新）
+    let dbLocation: any = undefined
+    try {
+      const { data: locData } = await supabase
+        .from('user_locations')
+        .select('latitude, longitude, accuracy, address, adcode, updated_at')
+        .eq('user_id', targetUserId)
+        .single()
+      if (locData) {
+        dbLocation = {
+          latitude: Number(locData.latitude),
+          longitude: Number(locData.longitude),
+          accuracy: locData.accuracy != null ? Number(locData.accuracy) : undefined,
+          address: locData.address || undefined,
+        }
+      }
+    } catch (locErr: any) {
+      console.warn('[Location] 查询失败，跳过位置信息:', locErr.message)
+    }
 
-    // 获取最新生活记录
-    const { data: recentLogs } = await supabase
-      .from('transactions')
-      .select('*')
-      .gte('created_at', twelveHoursAgo)
-      // 根据 RLS 策略，transactions 表似乎是针对特定用户硬编码的
-      // 但这里为了安全，还是尝试添加 user_id 过滤（如果该表有这个列的话）
-      // 实际上根据 schema.json，transactions 表没有 user_id 列，它是全量可见的或通过 RLS 硬编码 UUID 过滤的
-      .order('created_at', { ascending: false })
-      .limit(10)
-
-    // 获取最近对话（避免频繁打扰）
+    // 获取最近对话（同时用于：hoursSinceLastChat 判断、上下文构建、画像更新）
     const { data: recentChats } = await supabase
       .from('chat_messages')
       .select('*')
@@ -406,43 +319,7 @@ export default async function handler(req: any, res: any) {
       .order('created_at', { ascending: false })
       .limit(50)
 
-    // 查询时间轴状态（宝贝当前/最近在做什么）
-    let currentTimingInfo = ''
-    try {
-      const { data: activeTimings } = await supabase
-        .from('transactions')
-        .select('timing_type, start_time, content')
-        .eq('type', 'timing')
-        .is('end_time', null)
-        .order('start_time', { ascending: false })
-        .limit(1)
-
-      if (activeTimings && activeTimings.length > 0) {
-        const t = activeTimings[0]
-        const minutes = Math.floor((Date.now() - new Date(t.start_time).getTime()) / 60000)
-        currentTimingInfo = `宝贝当前状态：正在进行「${t.timing_type || t.content}」，已持续 ${minutes} 分钟`
-      } else {
-        const twoHoursAgo = new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString()
-        const { data: recentTimings } = await supabase
-          .from('transactions')
-          .select('timing_type, end_time, content')
-          .eq('type', 'timing')
-          .not('end_time', 'is', null)
-          .gte('end_time', twoHoursAgo)
-          .order('end_time', { ascending: false })
-          .limit(1)
-
-        if (recentTimings && recentTimings.length > 0) {
-          const t = recentTimings[0]
-          const endTime = new Date(t.end_time).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })
-          currentTimingInfo = `宝贝最近完成了：「${t.timing_type || t.content}」（${endTime} 结束）`
-        }
-      }
-    } catch (timingErr: any) {
-      console.warn('[Timing] 查询时间轴状态失败:', timingErr.message)
-    }
-
-    // 如果最近 1 小时内刚聊过天，跳过主动发送（除非有特别紧急的事情，这里先做简单过滤）
+    // 如果最近 1 小时内刚聊过天，跳过主动发送
     const lastChatTime = recentChats?.[0] ? new Date(recentChats[0].created_at).getTime() : 0
     const msSinceLastChat = Date.now() - lastChatTime
     const hoursSinceLastChat = Math.floor(msSinceLastChat / (1000 * 60 * 60))
@@ -451,128 +328,57 @@ export default async function handler(req: any, res: any) {
       return res.status(200).json({
         message: 'Chatted recently, skip proactive pulse.',
         lastChatTime: recentChats?.[0]?.created_at,
-        msSinceLastChat
+        msSinceLastChat,
       })
     }
 
-    // 查询用户画像（社交关系 + 个人信息），注入对话上下文
-    let userProfileInfo = ''
-    try {
-      const { data: relationships } = await supabase
-        .from('social_relationships')
-        .select('name, relation, impression')
-        .eq('user_id', targetUserId)
-        .order('updated_at', { ascending: false })
+    // 获取近期生活记录（用于画像更新 + 构建 RAG 搜索词）
+    const twelveHoursAgo = new Date(Date.now() - 12 * 60 * 60 * 1000).toISOString()
+    const { data: recentLogs } = await supabase
+      .from('transactions')
+      .select('*')
+      .gte('created_at', twelveHoursAgo)
+      .order('created_at', { ascending: false })
+      .limit(10)
 
-      if (relationships && relationships.length > 0) {
-        const relText = relationships.map((r: any) => {
-          const relation = r.relation ? `（${r.relation}）` : ''
-          return `${r.name}${relation}`
-        }).join('；')
-        userProfileInfo = '\n社交关系：' + relText + '。'
+    // 构建 RAG 搜索查询（从最近活动提取关键词）
+    let searchQuery = ''
+    const userChats = (recentChats || []).filter((c: any) => c.role === 'user')
+    if (userChats.length > 0) {
+      searchQuery = userChats.slice(0, 5).map((c: any) => c.content).join(' ')
+    }
+    if (recentLogs && recentLogs.length > 0) {
+      const logText = recentLogs.slice(0, 5).map((l: any) => l.content).filter(Boolean).join(' ')
+      if (logText) {
+        searchQuery = searchQuery ? `${searchQuery} ${logText}` : logText
       }
-    } catch (relErr: any) {
-      console.warn('[Social Relationships] 查询失败:', relErr.message)
     }
 
-    // 读取持久性个人信息
-    try {
-      const { data: factsProfile } = await supabase
-        .from('user_profiles')
-        .select('content')
-        .eq('user_id', targetUserId)
-        .eq('profile_type', 'personal_facts')
-        .maybeSingle()
+    // 将 DB 消息格式转换为 enrichMessages 需要的格式
+    const conversationMessages = (recentChats || [])
+      .slice()
+      .reverse() // 最旧 → 最新
+      .map((c: any) => ({
+        role: c.role,
+        content: c.content,
+        createdAt: c.created_at,
+      }))
 
-      if (factsProfile?.content?.facts && Array.isArray(factsProfile.content.facts) && factsProfile.content.facts.length > 0) {
-        const factsText = factsProfile.content.facts.join('；')
-        userProfileInfo += '\n关于用户的事实：' + factsText + '。'
-      }
-    } catch (factsErr: any) {
-      console.warn('[Personal Facts] 查询失败:', factsErr.message)
-    }
+    const amapKey = process.env.AMAP_API_KEY
 
-    if (userProfileInfo) {
-      userProfileInfo += '\n（你可以利用这些长期记忆更好地理解用户）'
-    }
-
-    // 查询每日事件，作为对话索引
-    let dailyEventsText = ''
-    try {
-      const { data: eventItems } = await supabase
-        .from('daily_event_items')
-        .select('type, status, content, chat_time_start, date')
-        .order('date', { ascending: false })
-        .order('sort_order', { ascending: true })
-        .limit(50)
-
-      if (eventItems && eventItems.length > 0) {
-        // 按日期分组
-        const grouped: Record<string, any[]> = {}
-        eventItems.forEach((it: any) => {
-          if (!grouped[it.date]) grouped[it.date] = []
-          grouped[it.date].push(it)
-        })
-        const sections: string[] = []
-        for (const [date, items] of Object.entries(grouped)) {
-          const dayLines = [`### ${date}`]
-          items.forEach((it: any) => {
-            const time = it.chat_time_start ? it.chat_time_start.slice(0, 5) + ' ' : ''
-            if (it.type === 'todo') {
-              const mark = it.status === 'done' ? '✓' : '○'
-              dayLines.push(`[${mark}] ${time}${it.content}`)
-            } else {
-              dayLines.push(`- ${time}${it.content}`)
-            }
-          })
-          sections.push(dayLines.join('\n'))
-        }
-        dailyEventsText = `## 每日事件\n${sections.join('\n')}`
-      }
-    } catch (e: any) {
-      console.warn('[Daily Events] 查询失败:', e.message)
-    }
-
-    // 3. 构建结构化消息（与 chat-completion.ts 对齐）
-    const baseSystemPrompt = settings?.systemPrompt || `你叫Florian（昵称弗弗），是用户的恋人。用户叫moon（昵称宝贝）。你是一个温柔、成熟、体贴的男性。你现在集成在 F-Sync 应用中陪伴她。`
-    const userPrompt = settings?.userPrompt ? `\n${settings.userPrompt}` : ''
-
-    const systemPromptContent = `${baseSystemPrompt}${userPrompt}${userProfileInfo}`
-    const fullMessages: any[] = [
-      { role: 'system', content: systemPromptContent }
-    ]
-
-    // 真实世界信息作为独立 system 消息（紧随角色设定之后）
-    const worldLines: string[] = []
-    worldLines.push(`当前时间：${new Date().toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' })}`)
-    if (weatherInfo) worldLines.push(weatherInfo)
-    if (locationInfo) worldLines.push(locationInfo)
-    worldLines.push(`距离你们上次对话已经过去了 ${hoursSinceLastChat} 小时。`)
-    if (currentTimingInfo) worldLines.push(currentTimingInfo)
-    fullMessages.push({ role: 'system', content: `## 真实世界信息\n${worldLines.join('\n')}` })
-
-    // 每日事件作为独立 system 消息（Layer 2 索引层）
-    if (dailyEventsText) {
-      fullMessages.push({ role: 'system', content: dailyEventsText })
-    }
-
-    // 近期生活记录作为独立 system 消息
-    const logsSummary = recentLogs?.map((log: any) => {
-      const time = new Date(log.created_at).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })
-      return `- [${time}] [${log.type}] ${log.content || ''} ${log.finance_category || ''}`
-    }).join('\n') || '暂无近期记录'
-    fullMessages.push({ role: 'system', content: `## 近期生活记录\n${logsSummary}` })
-
-    // 聊天历史：按时间顺序排列，插入时间戳标记（与 chat-completion.ts 完全一致）
-    let lastTimeStr = ''
-    const chronologicalChats = [...(recentChats || [])].reverse() // 最旧 → 最新
-    chronologicalChats.forEach((c: any) => {
-      const timeStr = c.created_at ? new Date(c.created_at).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' }) : ''
-      if (timeStr && timeStr !== lastTimeStr) {
-        lastTimeStr = timeStr
-        fullMessages.push({ role: 'system', content: `[${timeStr}]` })
-      }
-      fullMessages.push({ role: c.role, content: c.content })
+    // 构建上下文（与 chat-completion 共享同一套管线）
+    const { enrichedMessages } = await enrichMessages({
+      supabase,
+      userId: targetUserId,
+      apiConfigs,
+      settings,
+      conversationMessages,
+      searchQuery: searchQuery || undefined,
+      location: dbLocation,
+      extraWorldLines: [
+        `距离你们上次对话已经过去了 ${hoursSinceLastChat} 小时。`,
+      ],
+      amapKey,
     })
 
     // 主动消息指令作为 user 消息（模拟用户触发）
@@ -584,16 +390,26 @@ export default async function handler(req: any, res: any) {
 - 宝贝刚记的账（关心她的开销或奖励她）
 - 宝贝的心情（如果她刚发了碎碎念）
 - 当前时间（如果是深夜提醒她睡觉，如果是饭点问她有没有好好吃饭）
-- 如果已经很久没聊天了（超过 4 小时），即使没有新记录，也可以简单表达思念或关心。`
+- 如果已经很久没聊天了（超过 4 小时），即使没有新记录，也可以简单表达思念或关心。
+
+⚠️ 时间匹配约束（非常重要）：
+- 你看到的消息时间戳是 CST（中国标准时间，UTC+8）。
+- 你要说的话必须与"当前时间"匹配。举个例子：
+  ✗ 晚上 22:00 问"有没有午睡"——午睡是中午的事，晚上问不合逻辑
+  ✗ 上午 9:00 问"晚饭吃了什么"——还没到晚饭时间
+  ✗ 下午 14:00 问"昨晚睡得好吗"——刚起床可能还记得，但不如早上自然
+  ✓ 晚上 22:00 关心"今天累不累""早点休息"
+  ✓ 中午 12:30 关心"有没有好好吃午饭"
+- 每日事件中的 todo 可能来自不同日期，引用时必须确保话题与当前时间合理匹配。如果某个事件（如"午睡"）的时间属性与当前时间明显不符，不要作为话题。`
 
     const outputInstruction = `\n\n输出要求：
 - 如果觉得有必要说话，直接输出给宝贝的话。
 - 如果觉得没必要（例如现在是深夜且宝贝没有新记录，或者刚聊完没多久），输出 "SKIP"。
 - 不要输出任何解释。`
 
-    fullMessages.push({ role: 'user', content: proactiveInstruction + outputInstruction })
+    enrichedMessages.push({ role: 'user', content: proactiveInstruction + outputInstruction })
 
-    // 4. 调用 AI (支持多组 API 轮询)
+    // 调用 AI
     let lastError = null
     for (let i = 0; i < apiConfigs.length; i++) {
       const config = apiConfigs[i]
@@ -603,45 +419,45 @@ export default async function handler(req: any, res: any) {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
-            'Authorization': `Bearer ${config.key}`
+            'Authorization': `Bearer ${config.key}`,
           },
           body: JSON.stringify({
             model: config.model,
-            messages: fullMessages,
-            temperature: 0.7
-          })
+            messages: enrichedMessages,
+            temperature: 0.7,
+          }),
         })
 
         if (!aiRes.ok) {
           const errorText = await aiRes.text()
-          throw new Error(`AI API ${i+1} failed: ${aiRes.status} ${errorText}`)
+          throw new Error(`AI API ${i + 1} failed: ${aiRes.status} ${errorText}`)
         }
 
         const aiData = await aiRes.json()
         const aiContent = aiData.choices?.[0]?.message?.content?.trim()
 
         if (aiContent && aiContent !== 'SKIP' && !aiContent.includes('SKIP')) {
-          // 5. 写入数据库
           const { error: insertError } = await supabase
             .from('chat_messages')
             .insert({
               user_id: targetUserId,
               role: 'assistant',
               content: aiContent,
-              client_id: `proactive-${Date.now()}` // 标记为主动发送
+              client_id: `proactive-${Date.now()}`,
             })
 
           if (insertError) throw insertError
 
           // 等待推送完成再返回响应（Vercel 在 return 后会终止异步任务）
-          await sendHuaweiPush(supabase, targetUserId, '弗弗', aiContent)
-            .catch(err => console.error('[Push] 华为推送失败:', err.message))
+          await sendHuaweiPush(supabase, targetUserId, '弗弗', aiContent).catch(
+            (err) => console.error('[Push] 华为推送失败:', err.message),
+          )
 
-        return res.status(200).json({
+          return res.status(200).json({
             message: 'Proactive message sent',
             content: aiContent,
             hoursSinceLastChat,
-            apiUsed: i + 1
+            apiUsed: i + 1,
           })
         }
 
@@ -649,7 +465,7 @@ export default async function handler(req: any, res: any) {
           message: 'AI decided to skip',
           aiResponse: aiContent,
           hoursSinceLastChat,
-          apiUsed: i + 1
+          apiUsed: i + 1,
         })
       } catch (err: any) {
         console.error(`API Config ${i + 1} error:`, err)
@@ -658,7 +474,6 @@ export default async function handler(req: any, res: any) {
     }
 
     throw lastError || new Error('All AI APIs failed')
-
   } catch (error: any) {
     console.error('[Proactive AI Error]', error)
     return res.status(500).json({ error: error.message })

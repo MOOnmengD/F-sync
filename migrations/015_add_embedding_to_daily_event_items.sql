@@ -4,7 +4,7 @@
 BEGIN;
 
 -- 1. 添加 embedding 列（与 transactions.embedding 同维度）
-ALTER TABLE daily_event_items ADD COLUMN IF NOT EXISTS embedding vector(3072);
+ALTER TABLE daily_event_items ADD COLUMN IF NOT EXISTS embedding vector(1024);
 
 -- 2. 创建向量相似度搜索函数
 CREATE OR REPLACE FUNCTION match_daily_event_items(
