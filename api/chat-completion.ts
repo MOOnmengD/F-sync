@@ -264,10 +264,143 @@ export default async function handler(req: any, res: any) {
     searchInput = `${messages[messages.length - 2].content} ${userQuery}`
   }
 
+  // --- 检索前置判断：当前对话是否涉及过去话题 ---
+  const supabaseAdmin = createClient(supabaseUrl, supabaseServiceKey)
+  let retrievedChatMessages: any[] = []
+
+  try {
+    // 提取最近 6 条消息（3 user + 3 assistant）
+    const recentUserMsgs: any[] = []
+    const recentAsstMsgs: any[] = []
+    for (let i = messages.length - 1; i >= 0; i--) {
+      const m = messages[i]
+      if (m.role === 'user' && recentUserMsgs.length < 3) recentUserMsgs.unshift(m)
+      if (m.role === 'assistant' && recentAsstMsgs.length < 3) recentAsstMsgs.unshift(m)
+      if (recentUserMsgs.length >= 3 && recentAsstMsgs.length >= 3) break
+    }
+    const recentMsgs = [...recentUserMsgs, ...recentAsstMsgs].sort(
+      (a, b) => new Date(a.createdAt || 0).getTime() - new Date(b.createdAt || 0).getTime()
+    )
+
+    if (recentMsgs.length >= 2) {
+      const dialogText = recentMsgs.map(m =>
+        `${m.role === 'user' ? '用户' : 'AI'}: ${m.content}`
+      ).join('\n')
+
+      const firstConfig = apiConfigs[0]
+      const judgeEndpoint = resolveChatCompletionsUrl(firstConfig.url)
+      const judgeRes = await fetch(judgeEndpoint, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${firstConfig.key}`
+        },
+        body: JSON.stringify({
+          model: firstConfig.model,
+          messages: [
+            { role: 'system', content: '你是一个对话分析模块。判断以下对话中，用户的当前消息是否涉及过去讨论过的话题或事件。\n\n如果是，生成用于检索的关键词/短句（使用用户使用的语言）。\n如果否，返回 needs_retrieval: false。\n\n只输出 JSON：\n{"needs_retrieval": true, "keywords": "简短的关键词或短句"}\n或 {"needs_retrieval": false}' },
+            { role: 'user', content: dialogText }
+          ],
+          temperature: 0,
+          response_format: { type: 'json_object' }
+        })
+      })
+
+      if (judgeRes.ok) {
+        const judgeData = await judgeRes.json()
+        const judgeRaw = judgeData.choices?.[0]?.message?.content?.trim()
+        let judgeResult: any = null
+        try {
+          judgeResult = JSON.parse(judgeRaw)
+        } catch {
+          const match = judgeRaw?.match(/\{[\s\S]*\}/)
+          if (match) { try { judgeResult = JSON.parse(match[0]) } catch { /* skip */ } }
+        }
+
+        if (judgeResult?.needs_retrieval && judgeResult?.keywords) {
+          // 向量检索 daily_event_items
+          try {
+            const embEndpoint = resolveEmbeddingUrl(firstConfig.url)
+            const embeddingKey = process.env.EMBEDDING_API_KEY || firstConfig.key
+
+            const embRes = await fetch(embEndpoint, {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${embeddingKey}`
+              },
+              body: JSON.stringify({ model: embeddingModel, input: judgeResult.keywords })
+            })
+
+            if (embRes.ok) {
+              const embData = await embRes.json()
+              const queryEmbedding = embData.data?.[0]?.embedding
+
+              if (queryEmbedding && supabaseUrl && supabaseServiceKey && userId) {
+                const { data: matchedEvents } = await supabaseAdmin.rpc('match_daily_event_items', {
+                  query_embedding: queryEmbedding,
+                  match_threshold: 0.3,
+                  match_count: 5
+                })
+
+                if (matchedEvents && matchedEvents.length > 0) {
+                  const chatIds = new Set<string>()
+                  for (const event of matchedEvents) {
+                    const eventDate = event.date
+                    const startTime = event.chat_time_start
+                    const endTime = event.chat_time_end
+
+                    if (!eventDate || !startTime) continue
+
+                    const padStart = startTime.length === 8 ? startTime : startTime + ':00'
+                    const padEnd = endTime
+                      ? (endTime.length === 8 ? endTime : endTime + ':00')
+                      : padStart
+
+                    const startCST = new Date(`${eventDate}T${padStart}+08:00`)
+                    const endCST = new Date(`${eventDate}T${padEnd}+08:00`)
+                    const startUTC = new Date(startCST.getTime() - 5 * 60 * 1000).toISOString()
+                    const endUTC = new Date(endCST.getTime() + 5 * 60 * 1000).toISOString()
+
+                    const { data: chats } = await supabaseAdmin
+                      .from('chat_messages')
+                      .select('*')
+                      .eq('user_id', userId)
+                      .neq('role', 'system')
+                      .gte('created_at', startUTC)
+                      .lte('created_at', endUTC)
+                      .order('created_at', { ascending: true })
+
+                    if (chats) {
+                      for (const c of chats) {
+                        if (!chatIds.has(c.id)) {
+                          chatIds.add(c.id)
+                          retrievedChatMessages.push(c)
+                        }
+                      }
+                    }
+                  }
+
+                  // 按时间排序
+                  retrievedChatMessages.sort(
+                    (a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
+                  )
+                }
+              }
+            }
+          } catch (retrievalErr: any) {
+            console.warn('[Memory Retrieval] 检索失败:', retrievalErr.message)
+          }
+        }
+      }
+    }
+  } catch (judgeErr: any) {
+    console.warn('[Memory Judge] 检索判断失败:', judgeErr.message)
+  }
+
   let contextInfo = ''
 
   // --- RAG 逻辑开始 ---
-  const supabaseAdmin = createClient(supabaseUrl, supabaseServiceKey)
   let vectorResults: any[] = []
   let fullTextResults: any[] = []
   let timeBasedResults: any[] = []
@@ -473,42 +606,32 @@ export default async function handler(req: any, res: any) {
     }
   }
 
-  // 查询每日事件，作为对话索引注入上下文
-  let dailyEventsText = ''
+  // 自动浮出 top-3 最近事件（始终注入，轻量摘要）
+  let autoSurfaceText = ''
   if (userId && supabaseUrl && supabaseServiceKey) {
     try {
-      const { data: eventItems } = await supabaseAdmin
+      const { data: topEvents } = await supabaseAdmin
         .from('daily_event_items')
         .select('type, status, content, chat_time_start, date')
         .order('date', { ascending: false })
         .order('sort_order', { ascending: true })
-        .limit(50)
+        .limit(3)
 
-      if (eventItems && eventItems.length > 0) {
-        // 按日期分组
-        const grouped: Record<string, any[]> = {}
-        eventItems.forEach((it: any) => {
-          if (!grouped[it.date]) grouped[it.date] = []
-          grouped[it.date].push(it)
+      if (topEvents && topEvents.length > 0) {
+        const lines: string[] = []
+        topEvents.forEach((it: any) => {
+          const time = it.chat_time_start ? it.chat_time_start.slice(0, 5) + ' ' : ''
+          if (it.type === 'todo') {
+            const mark = it.status === 'done' ? '✓' : '○'
+            lines.push(`[${mark}] ${it.date} ${time}${it.content}`)
+          } else {
+            lines.push(`- ${it.date} ${time}${it.content}`)
+          }
         })
-        const sections: string[] = []
-        for (const [date, items] of Object.entries(grouped)) {
-          const dayLines = [`### ${date}`]
-          items.forEach((it: any) => {
-            const time = it.chat_time_start ? it.chat_time_start.slice(0, 5) + ' ' : ''
-            if (it.type === 'todo') {
-              const mark = it.status === 'done' ? '✓' : '○'
-              dayLines.push(`[${mark}] ${time}${it.content}`)
-            } else {
-              dayLines.push(`- ${time}${it.content}`)
-            }
-          })
-          sections.push(dayLines.join('\n'))
-        }
-        dailyEventsText = `## 每日事件\n${sections.join('\n')}`
+        autoSurfaceText = `## 最近事件\n${lines.join('\n')}`
       }
     } catch (e: any) {
-      console.warn('[Daily Events] 查询失败:', e.message)
+      console.warn('[Auto Surface] 查询失败:', e.message)
     }
   }
 
@@ -531,16 +654,33 @@ export default async function handler(req: any, res: any) {
   const worldMsg = { role: 'system', content: `## 真实世界信息\n${worldLines.join('\n')}` }
   fullMessages.splice(1, 0, worldMsg)
 
-  // 每日事件作为独立 system 消息（Layer 2 索引层）
-  if (dailyEventsText) {
-    const eventsMsg = { role: 'system', content: dailyEventsText }
-    fullMessages.splice(2, 0, eventsMsg)
+  // 自动浮出 top-3 事件（Layer 2 — 始终注入的轻量索引）
+  let spliceIdx = 2 // 在 worldMsg 之后
+  if (autoSurfaceText) {
+    const autoMsg = { role: 'system', content: autoSurfaceText }
+    fullMessages.splice(spliceIdx, 0, autoMsg)
+    spliceIdx++
   }
 
-  // RAG 检索到的生活记录数据作为独立 system 消息
+  // 按需检索到的原始对话（Layer 3 — 仅在检索命中时注入）
+  if (retrievedChatMessages.length > 0) {
+    const chatLines = retrievedChatMessages.map((c: any) => {
+      const time = new Date(c.created_at).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' })
+      const speaker = c.role === 'user' ? '宝贝' : 'Florian'
+      return `[${time}] ${speaker}: ${c.content}`
+    })
+    const retrievedMsg = {
+      role: 'system',
+      content: `## 相关历史对话\n以下是与当前话题相关的历史对话原文：\n${chatLines.join('\n')}`
+    }
+    fullMessages.splice(spliceIdx, 0, retrievedMsg)
+    spliceIdx++
+  }
+
+  // RAG 检索到的生活记录数据（Layer 4）
   if (contextInfo) {
-    const contextMsg = { role: 'system', content: `## 生活记录数据（可能与当前对话无关）\n通过向量/关键词检索，可能与当前对话无关：\n${contextInfo.replace(/^\n*以下是与你问题相关的历史记录（来自[^）]*）：\n?/, '')}` }
-    fullMessages.splice(2, 0, contextMsg)
+    const contextMsg = { role: 'system', content: `## 生活记录数据\n通过向量/关键词检索，可能与当前对话相关：\n${contextInfo.replace(/^\n*以下是与你问题相关的历史记录（来自[^）]*）：\n?/, '')}` }
+    fullMessages.splice(spliceIdx, 0, contextMsg)
   }
 
   // 将位置旁路写入 DB，供 proactive-ai 后续使用（非阻塞）

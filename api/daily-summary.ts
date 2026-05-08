@@ -296,30 +296,25 @@ ${existingRelationshipsText}
 
     // ===== 第三步：生成每日事件（对话索引）=====
     try {
-      const eventsPrompt = `你是 F-Sync 应用的每日事件提取＋约定记录模块。请根据用户与 AI 在 ${dateLabel} 的以下对话记录，提取客观的"每日事件"和"约定"。
+      const eventsPrompt = `你是 F-Sync 应用的每日事件提取模块。请根据用户与 AI 在 ${dateLabel} 的以下对话记录，提取客观的"每日事件"。
 
 ### 对话记录（每条前面的 [HH:MM] 为对话时间）：
 ${chatsText}
 
 ### 情况说明：
-- 每日事件是AI长期记忆的基础，因此，每日事件应绝对客观准确，严禁杜撰或揣测未发生的事。
-- 每日事件会全量发送给AI，所以，为了减少ｔｏｋｅｎ消耗，在准确的前提下，每日事件应尽可能简洁。
-- 当用户在当前对话中提到过去发生的某件事时，AI会根据每日事件确定这件事发生在哪一天，然后获取当天的原始对话数据。因此，每日事件作为当前与过去的索引和桥梁而存在，应当重点突出、便于查询。
+- 每日事件是AI长期记忆的基础，因此，每日事件应绝对客观准确，严禁杜撰或揣测未发生的事,并在准确的前提下尽可能简洁。
+- 当用户在当前对话中提到过去发生的某件事时，AI会向量检索每日事件。因此，每日事件作为当前与过去的索引和桥梁，应当重点突出、便于查询。
 - 每日事件起到目录、提纲或索引的功能。
-- 约定包括AI 承诺要做的事、用户计划要做的事、双方约定的事项。
-- 约定起到备忘录和TODO清单的作用。
 ### 提取要求：
-- 以AI的视角提取每日事件和约定，以＂宝贝＂称呼用户，以＂弗弗＂称呼 AI，用户与AI为恋人关系。
+- 以AI的视角提取每日事件，以＂宝贝＂称呼用户，以＂弗弗＂称呼 AI，用户与AI为恋人关系。
 - 客观、准确、简洁，每条不超过 30 字。
 - 不要写入琐碎的日常寒暄，只提取有信息量的事件。
 - 只记录"今天发生了什么"（时效性事件），不要记录用户的持久性个人信息（如生日日期、长期偏好等）。
-- 根据对话时间 [HH:MM] 为每条事件或约定估算对应对话的起止时间。chat_time_start 是该事件被讨论的第一条消息的时间，chat_time_end 是最后一条消息的时间（格式均为 HH:MM）。如果事件只有一句对话，start 和 end 填相同值。
+- 根据对话时间 [HH:MM] 输出每条事件对应对话的起止时间。chat_time_start 是该事件被讨论的第一条消息的时间，chat_time_end 是最后一条消息的时间（格式均为 HH:MM）。如果事件只有一句对话，start 和 end 填相同值。
 
 ### 输出格式
 输出一个纯 JSON 数组，每个元素格式：
 {"type":"event","content":"事件描述","chat_time_start":"HH:MM","chat_time_end":"HH:MM"}
-或 {"type":"todo","status":"pending","content":"约定描述","chat_time_start":"HH:MM","chat_time_end":"HH:MM"}
-或 {"type":"todo","status":"done","content":"已完成约定","chat_time_start":"HH:MM","chat_time_end":"HH:MM"}
 chat_time_start 和 chat_time_end 都必填，如果无法确定则填写距离最近的对话标记时间。
 如果无事可记，输出空数组 []。不要输出任何额外文字，只输出 JSON。`
 
@@ -356,10 +351,8 @@ chat_time_start 和 chat_time_end 都必填，如果无法确定则填写距离�
           }
 
           if (items.length > 0) {
-            // 排序：events 在前 todos 在后，各自按 chat_time_start 从早到晚
+            // 按 chat_time_start 从早到晚排序
             items.sort((a: any, b: any) => {
-              const typeOrder: Record<string, number> = { event: 0, todo: 1 }
-              if (typeOrder[a.type] !== typeOrder[b.type]) return typeOrder[a.type] - typeOrder[b.type]
               const timeA = a.chat_time_start || '23:59'
               const timeB = b.chat_time_start || '23:59'
               return timeA.localeCompare(timeB)
@@ -383,14 +376,54 @@ chat_time_start 和 chat_time_end 都必填，如果无法确定则填写距离�
               sort_order: idx
             }))
 
-            const { error: eventsError } = await supabase
+            const { error: eventsError, data: insertedRows } = await supabase
               .from('daily_event_items')
               .insert(rows)
+              .select('id, content')
 
             if (eventsError) {
               console.error('[Daily Summary] daily_event_items insert failed:', eventsError)
             } else {
               results.push(`daily events for ${diaryDate} saved (${items.length} items)`)
+
+              // 为事件生成 embedding（独立 try/catch，失败不影响日记生成）
+              if (insertedRows && insertedRows.length > 0) {
+                try {
+                  const embApiKey = process.env.EMBEDDING_API_KEY || aiKey
+                  const embApiUrl = process.env.EMBEDDING_API_URL || aiUrl
+                  const embModel = process.env.EMBEDDING_MODEL || 'text-embedding-3-small'
+
+                  let embEndpoint = embApiUrl.trim().replace(/\/+$/, '')
+                  if (!embEndpoint.endsWith('/embeddings')) embEndpoint = `${embEndpoint}/embeddings`
+
+                  for (const row of insertedRows) {
+                    try {
+                      const embRes = await fetch(embEndpoint, {
+                        method: 'POST',
+                        headers: {
+                          'Content-Type': 'application/json',
+                          'Authorization': `Bearer ${embApiKey}`
+                        },
+                        body: JSON.stringify({ model: embModel, input: row.content })
+                      })
+                      if (embRes.ok) {
+                        const embData = await embRes.json()
+                        const embedding = embData.data?.[0]?.embedding
+                        if (embedding) {
+                          await supabase
+                            .from('daily_event_items')
+                            .update({ embedding })
+                            .eq('id', row.id)
+                        }
+                      }
+                    } catch {
+                      // 单个事件的 embedding 失败不影响其他事件
+                    }
+                  }
+                } catch (embErr: any) {
+                  console.warn('[Daily Summary] embedding generation failed:', embErr.message)
+                }
+              }
             }
           } else {
             results.push(`daily events for ${diaryDate} skipped (no events)`)
