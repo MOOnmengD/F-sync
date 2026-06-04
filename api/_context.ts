@@ -691,11 +691,11 @@ export async function enrichMessages(params: {
     })
   }
 
-  // 3) RAG 检索到的生活记录
+  // 3) RAG 检索到的生活记录（用户产生的数据，用 user 角色避免 system 权重过高）
   for (const record of ragRecords) {
     timeBoundItems.push({
       timestamp: record.timestamp,
-      role: 'system',
+      role: 'user',
       content: record.content,
     })
   }
