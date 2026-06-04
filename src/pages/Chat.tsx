@@ -6,6 +6,9 @@ import { IconButton } from '../shared/ui/IconButton'
 import { useChatStore, type ChatMessage } from '../store/chat'
 import { supabase } from '../supabaseClient'
 import { useSettingsStore } from '../store/settings'
+import { QuickRecordButtonBar } from '../components/QuickRecordButtonBar'
+import { QuickRecordPopup } from '../components/QuickRecordPopup'
+import type { QuickMode } from '../types/domain'
 
 // 位置缓存，避免频繁调用原生定位（5 分钟窗口）
 let locationCache: { latitude: number; longitude: number; accuracy: number; address?: string; timestamp: number } | null = null
@@ -1389,6 +1392,7 @@ export default function Chat() {
   const [isProfileDiaryOpen, setIsProfileDiaryOpen] = useState(false)
   const [profileDiaryInitialTab, setProfileDiaryInitialTab] = useState<'profile' | 'diary'>('profile')
   const [isDailyEventsOpen, setIsDailyEventsOpen] = useState(false)
+  const [quickRecordMode, setQuickRecordMode] = useState<QuickMode | null>(null)
   const [textareaHeight, setTextareaHeight] = useState(44)
   const [selectedImages, setSelectedImages] = useState<CompressedImage[]>([])
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -1743,6 +1747,8 @@ export default function Chat() {
         <div ref={bottomRef} />
       </div>
 
+      <QuickRecordButtonBar onSelect={(mode) => setQuickRecordMode(mode)} />
+
       <footer className="p-4 bg-base-bg pb-[calc(env(safe-area-inset-bottom)+1rem)]">
         {selectedImages.length > 0 && (
           <div className="flex gap-2 mb-3 overflow-x-auto pb-1">
@@ -1817,6 +1823,11 @@ export default function Chat() {
       <DailyEventsModal
         isOpen={isDailyEventsOpen}
         onClose={() => setIsDailyEventsOpen(false)}
+      />
+      <QuickRecordPopup
+        open={quickRecordMode !== null}
+        initialMode={quickRecordMode || 'finance'}
+        onClose={() => setQuickRecordMode(null)}
       />
 
       <input
