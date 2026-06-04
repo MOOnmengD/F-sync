@@ -69,7 +69,9 @@ export async function fetchUserProfiles(
 // 最近事件（top-3 daily_event_items，始终注入的轻量索引）
 // ============================================================
 
-export async function fetchTopDailyEvents(supabase: any): Promise<string> {
+export async function fetchTopDailyEvents(
+  supabase: any,
+): Promise<Array<{ timestamp: Date; content: string }>> {
   try {
     const { data: topEvents } = await supabase
       .from('daily_event_items')
@@ -79,22 +81,29 @@ export async function fetchTopDailyEvents(supabase: any): Promise<string> {
       .limit(3)
 
     if (topEvents && topEvents.length > 0) {
-      const lines: string[] = []
-      topEvents.forEach((it: any) => {
-        const time = it.chat_time_start ? it.chat_time_start.slice(0, 5) + ' ' : ''
+      return topEvents.map((it: any) => {
+        const timeStr = it.chat_time_start
+          ? it.chat_time_start.slice(0, 5) + ' '
+          : ''
+        let content: string
         if (it.type === 'todo') {
           const mark = it.status === 'done' ? '✓' : '○'
-          lines.push(`[${mark}] ${it.date} ${time}${it.content}`)
+          content = `[${mark}] ${timeStr}${it.content}`
         } else {
-          lines.push(`- ${it.date} ${time}${it.content}`)
+          content = `- ${timeStr}${it.content}`
         }
+        // 用 date + chat_time_start 构建时间戳；无具体时间则用当天正午
+        const timePart = it.chat_time_start || '12:00:00'
+        const padTime =
+          timePart.length === 8 ? timePart : timePart + ':00'
+        const timestamp = new Date(`${it.date}T${padTime}+08:00`)
+        return { timestamp, content }
       })
-      return `## 最近事件\n${lines.join('\n')}`
     }
   } catch (e: any) {
     console.warn('[Auto Surface] 查询失败:', e.message)
   }
-  return ''
+  return []
 }
 
 // ============================================================
@@ -424,7 +433,7 @@ export async function ragRetrieval(params: {
   supabase: any
   apiConfigs: Array<{ url: string; key: string; model: string }>
   searchQuery: string
-}): Promise<string> {
+}): Promise<Array<{ timestamp: Date; content: string }>> {
   const { supabase, apiConfigs, searchQuery } = params
 
   const queryIntent = analyzeQueryIntent(searchQuery)
@@ -539,21 +548,13 @@ export async function ragRetrieval(params: {
   const finalResults = Array.from(allResultsMap.values())
 
   if (finalResults.length > 0) {
-    const sourceType =
-      vectorResults.length > 0 ? '向量检索' : '关键词检索'
-
-    return (
-      `以下是与你问题相关的历史记录（来自${sourceType}）：\n` +
-      finalResults
-        .map((log: any) => {
-          const date = new Date(log.created_at).toLocaleDateString('zh-CN')
-          return `[${date}] [${log.type}] ${log.content}`
-        })
-        .join('\n')
-    )
+    return finalResults.map((log: any) => ({
+      timestamp: new Date(log.created_at),
+      content: `[${log.type}] ${log.content}`,
+    }))
   }
 
-  return ''
+  return []
 }
 
 // ============================================================
@@ -597,12 +598,11 @@ export async function enrichMessages(params: {
   } = params
 
   // ---- 并行获取基础数据 ----
-  const [autoSurfaceText, currentTimingInfo, locResult] =
-    await Promise.all([
-      fetchTopDailyEvents(supabase),
-      fetchTimingInfo(supabase),
-      resolveLocationInfo({ location, amapKey }),
-    ])
+  const [dailyEvents, currentTimingInfo, locResult] = await Promise.all([
+    fetchTopDailyEvents(supabase),
+    fetchTimingInfo(supabase),
+    resolveLocationInfo({ location, amapKey }),
+  ])
 
   const { locationInfo, amapAdcode } = locResult
 
@@ -622,7 +622,7 @@ export async function enrichMessages(params: {
     { role: 'system', content: systemPromptContent },
   ]
 
-  // Layer 1: 真实世界信息
+  // Layer 1: 真实世界信息（meta 层，不参与时间排序）
   const worldLines: string[] = []
   worldLines.push(
     `[当前时间] ${new Date().toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' })}`,
@@ -640,15 +640,7 @@ export async function enrichMessages(params: {
     content: `## 真实世界信息\n${worldLines.join('\n')}`,
   })
 
-  let nextIdx = 2 // 后续 system 消息的插入位置
-
-  // Layer 2: 最近事件（top-3，始终注入）
-  if (autoSurfaceText) {
-    enrichedMessages.push({ role: 'system', content: autoSurfaceText })
-    nextIdx++
-  }
-
-  // Layer 3: 检索前置判断 → 相关历史对话
+  // ---- 检索阶段 ----
   const retrievedChats = await retrievalJudgeAndFetch({
     supabase,
     userId,
@@ -656,79 +648,110 @@ export async function enrichMessages(params: {
     conversationMessages,
   })
 
-  if (retrievedChats.length > 0) {
-    const chatLines = retrievedChats.map((c: any) => {
-      const time = new Date(c.created_at).toLocaleString('zh-CN', {
-        timeZone: 'Asia/Shanghai',
-      })
-      const speaker = c.role === 'user' ? '宝贝' : 'Florian'
-      return `[${time}] ${speaker}: ${c.content}`
-    })
-    enrichedMessages.push({
-      role: 'system',
-      content: `## 相关历史对话\n以下是与当前话题相关的历史对话原文：\n${chatLines.join('\n')}`,
-    })
-    nextIdx++
-  }
-
-  // Layer 4: RAG 生活记录检索
+  let ragRecords: Array<{ timestamp: Date; content: string }> = []
   if (searchQuery) {
-    const contextInfo = await ragRetrieval({
+    ragRecords = await ragRetrieval({
       supabase,
       apiConfigs,
       searchQuery,
     })
-
-    if (contextInfo) {
-      const cleaned = contextInfo.replace(
-        /^\n*以下是与你问题相关的历史记录（来自[^）]*）：\n?/,
-        '',
-      )
-      enrichedMessages.push({
-        role: 'system',
-        content: `## 生活记录数据\n通过向量/关键词检索，可能与当前对话相关：\n${cleaned}`,
-      })
-      nextIdx++
-    }
   }
 
-  // ---- 注入对话消息（带时间戳 + 日期分隔线） ----
+  // ---- 合并所有带时间戳的内容，统一按时间排序 ----
+
+  // 当前会话消息的 id → client_id，用于去重检索对话
+  const convMsgIds = new Set(
+    conversationMessages.map((m: any) => m.id).filter(Boolean),
+  )
+
+  interface TimeBoundItem {
+    timestamp: Date
+    role: string
+    content: string
+  }
+
+  const timeBoundItems: TimeBoundItem[] = []
+
+  // 1) 最近事件（daily_event_items 摘要，轻量 system 标注）
+  for (const event of dailyEvents) {
+    timeBoundItems.push({
+      timestamp: event.timestamp,
+      role: 'system',
+      content: event.content,
+    })
+  }
+
+  // 2) 检索到的历史对话 — 用真实角色融入，以 client_id 去重
+  for (const chat of retrievedChats) {
+    if (chat.client_id && convMsgIds.has(chat.client_id)) continue
+    timeBoundItems.push({
+      timestamp: new Date(chat.created_at),
+      role: chat.role,
+      content: chat.content,
+    })
+  }
+
+  // 3) RAG 检索到的生活记录
+  for (const record of ragRecords) {
+    timeBoundItems.push({
+      timestamp: record.timestamp,
+      role: 'system',
+      content: record.content,
+    })
+  }
+
+  // 4) 当前会话消息
+  for (const m of conversationMessages) {
+    if (m.role === 'system') continue
+    const ts = m.createdAt ? new Date(m.createdAt) : new Date()
+    timeBoundItems.push({
+      timestamp: ts,
+      role: m.role,
+      content: m.content,
+    })
+  }
+
+  // 按时间升序排列
+  timeBoundItems.sort(
+    (a, b) => a.timestamp.getTime() - b.timestamp.getTime(),
+  )
+
+  // ---- 统一渲染：日期分隔线 + 时间戳 + 消息 ----
   let lastTimeStr = ''
   let lastDateStr = ''
-  for (const m of conversationMessages) {
-    if (m.role !== 'system') {
-      const d = m.createdAt ? new Date(m.createdAt) : null
-      const timeStr = d
-        ? d.toLocaleString('zh-CN', {
-            timeZone: 'Asia/Shanghai',
-          })
-        : ''
-      // 日期变化时插入分隔线（程序自动检测，不依赖 AI）
-      // 注意：必须用 Asia/Shanghai 时区，与上方 timeStr 保持一致；否则 Vercel UTC 环境会导致日期偏移
-      if (d) {
-        const dateStr = d.toLocaleDateString('zh-CN', {
-          timeZone: 'Asia/Shanghai',
-          year: 'numeric',
-          month: '2-digit',
-          day: '2-digit',
-        }).replace(/\//g, '')
-        if (dateStr !== lastDateStr) {
-          lastDateStr = dateStr
-          enrichedMessages.push({
-            role: 'system',
-            content: `=== ${dateStr} ===`,
-          })
-        }
-      }
-      if (timeStr && timeStr !== lastTimeStr) {
-        lastTimeStr = timeStr
-        enrichedMessages.push({
-          role: 'system',
-          content: `[${timeStr}]`,
-        })
-      }
+  for (const item of timeBoundItems) {
+    const dateStr = item.timestamp
+      .toLocaleDateString('zh-CN', {
+        timeZone: 'Asia/Shanghai',
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+      })
+      .replace(/\//g, '')
+    if (dateStr !== lastDateStr) {
+      lastDateStr = dateStr
+      lastTimeStr = '' // 日期变化时重置，确保新一天的第一个时间戳必定显示
+      enrichedMessages.push({
+        role: 'system',
+        content: `=== ${dateStr} ===`,
+      })
     }
-    enrichedMessages.push(m)
+
+    const timeStr = item.timestamp.toLocaleString('zh-CN', {
+      timeZone: 'Asia/Shanghai',
+    })
+    if (timeStr !== lastTimeStr) {
+      lastTimeStr = timeStr
+      enrichedMessages.push({
+        role: 'system',
+        content: `[${timeStr}]`,
+      })
+    }
+
+    enrichedMessages.push({
+      role: item.role,
+      content: item.content,
+    })
   }
 
   return { enrichedMessages, locationInfo, amapAdcode }
