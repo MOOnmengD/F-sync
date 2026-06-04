@@ -692,15 +692,28 @@ export async function enrichMessages(params: {
     }
   }
 
-  // ---- 注入对话消息（带时间戳） ----
+  // ---- 注入对话消息（带时间戳 + 日期分隔线） ----
   let lastTimeStr = ''
+  let lastDateStr = ''
   for (const m of conversationMessages) {
     if (m.role !== 'system') {
-      const timeStr = m.createdAt
-        ? new Date(m.createdAt).toLocaleString('zh-CN', {
+      const d = m.createdAt ? new Date(m.createdAt) : null
+      const timeStr = d
+        ? d.toLocaleString('zh-CN', {
             timeZone: 'Asia/Shanghai',
           })
         : ''
+      // 日期变化时插入分隔线（程序自动检测，不依赖 AI）
+      if (d) {
+        const dateStr = `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, '0')}${String(d.getDate()).padStart(2, '0')}`
+        if (dateStr !== lastDateStr) {
+          lastDateStr = dateStr
+          enrichedMessages.push({
+            role: 'system',
+            content: `=== ${dateStr} ===`,
+          })
+        }
+      }
       if (timeStr && timeStr !== lastTimeStr) {
         lastTimeStr = timeStr
         enrichedMessages.push({

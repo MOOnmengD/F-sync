@@ -1366,7 +1366,7 @@ function MessageBubble({ msg, isTyping, onDelete, onResend }: { msg: ChatMessage
   )
 }
 
-const CONTEXT_WINDOW = 50
+const CONTEXT_WINDOW = 30
 const MAX_INPUT_HEIGHT = 160
 
 export default function Chat() {

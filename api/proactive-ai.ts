@@ -317,7 +317,7 @@ export default async function handler(req: any, res: any) {
       .eq('user_id', targetUserId)
       .neq('role', 'system')
       .order('created_at', { ascending: false })
-      .limit(50)
+      .limit(30)
 
     // 如果最近 1 小时内刚聊过天，跳过主动发送
     const lastChatTime = recentChats?.[0] ? new Date(recentChats[0].created_at).getTime() : 0
