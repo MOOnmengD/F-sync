@@ -704,8 +704,14 @@ export async function enrichMessages(params: {
           })
         : ''
       // 日期变化时插入分隔线（程序自动检测，不依赖 AI）
+      // 注意：必须用 Asia/Shanghai 时区，与上方 timeStr 保持一致；否则 Vercel UTC 环境会导致日期偏移
       if (d) {
-        const dateStr = `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, '0')}${String(d.getDate()).padStart(2, '0')}`
+        const dateStr = d.toLocaleDateString('zh-CN', {
+          timeZone: 'Asia/Shanghai',
+          year: 'numeric',
+          month: '2-digit',
+          day: '2-digit',
+        }).replace(/\//g, '')
         if (dateStr !== lastDateStr) {
           lastDateStr = dateStr
           enrichedMessages.push({
