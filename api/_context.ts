@@ -622,7 +622,7 @@ export async function enrichMessages(params: {
     { role: 'system', content: systemPromptContent },
   ]
 
-  // Layer 1: 真实世界信息（meta 层，不参与时间排序）
+  // ---- 真实世界信息（暂存，稍后插入到当前用户消息之前） ----
   const worldLines: string[] = []
   worldLines.push(
     `[当前时间] ${new Date().toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' })}`,
@@ -635,10 +635,7 @@ export async function enrichMessages(params: {
   if (locationInfo) worldLines.push(locationInfo)
   if (extraWorldLines?.length) worldLines.push(...extraWorldLines)
   if (currentTimingInfo) worldLines.push(currentTimingInfo)
-  enrichedMessages.push({
-    role: 'system',
-    content: `## 真实世界信息\n${worldLines.join('\n')}`,
-  })
+  const worldInfoContent = `## 真实世界信息\n${worldLines.join('\n')}`
 
   // ---- 检索阶段 ----
   const retrievedChats = await retrievalJudgeAndFetch({
@@ -751,6 +748,26 @@ export async function enrichMessages(params: {
     enrichedMessages.push({
       role: item.role,
       content: item.content,
+    })
+  }
+
+  // ---- 将真实世界信息插入到当前用户消息之前 ----
+  // 从末尾向前查找最后一条 user 消息（即当前用户刚发的问题）
+  let insertIdx = enrichedMessages.length - 1
+  while (insertIdx >= 0 && enrichedMessages[insertIdx].role !== 'user') {
+    insertIdx--
+  }
+
+  if (insertIdx >= 0) {
+    enrichedMessages.splice(insertIdx, 0, {
+      role: 'system',
+      content: worldInfoContent,
+    })
+  } else {
+    // 无用户消息的极端情况：放在 system prompt 之后
+    enrichedMessages.splice(1, 0, {
+      role: 'system',
+      content: worldInfoContent,
     })
   }
 
