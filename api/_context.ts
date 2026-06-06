@@ -751,24 +751,32 @@ export async function enrichMessages(params: {
     })
   }
 
-  // ---- 将真实世界信息插入到当前用户消息之前 ----
+  // ---- 将"历史对话后提示词"和"真实世界信息"插入到当前用户消息之前 ----
   // 从末尾向前查找最后一条 user 消息（即当前用户刚发的问题）
   let insertIdx = enrichedMessages.length - 1
   while (insertIdx >= 0 && enrichedMessages[insertIdx].role !== 'user') {
     insertIdx--
   }
 
-  if (insertIdx >= 0) {
-    enrichedMessages.splice(insertIdx, 0, {
+  // 收集需注入的内容（顺序：提示词 → 真实世界信息，倒数第3、第2条）
+  const preUserItems: Array<{ role: string; content: string }> = []
+  const postHistoryPrompt = settings?.postHistoryPrompt?.trim()
+  if (postHistoryPrompt) {
+    preUserItems.push({
       role: 'system',
-      content: worldInfoContent,
+      content: `## 提示\n${postHistoryPrompt}`,
     })
+  }
+  preUserItems.push({
+    role: 'system',
+    content: worldInfoContent,
+  })
+
+  if (insertIdx >= 0) {
+    enrichedMessages.splice(insertIdx, 0, ...preUserItems)
   } else {
     // 无用户消息的极端情况：放在 system prompt 之后
-    enrichedMessages.splice(1, 0, {
-      role: 'system',
-      content: worldInfoContent,
-    })
+    enrichedMessages.splice(1, 0, ...preUserItems)
   }
 
   return { enrichedMessages, locationInfo, amapAdcode }

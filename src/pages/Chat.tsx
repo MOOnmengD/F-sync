@@ -290,6 +290,7 @@ function SettingsModal({ isOpen, onClose, vectorSyncStatus, onVectorSync, onClea
               {[
                 { label: 'AI 角色设定', key: 'systemPrompt' as const, desc: '定义 AI 的性格和背景' },
                 { label: '用户基本情况', key: 'userPrompt' as const, desc: '告诉 AI 关于你的信息' },
+                { label: '历史对话后提示词', key: 'postHistoryPrompt' as const, desc: '在所有历史对话之后、当前问题之前注入的指令' },
                 { label: '定时触发逻辑', key: 'proactivePrompt' as const, desc: '主动发送消息时的额外指令' }
               ].map((item) => (
                 <div key={item.key} className="space-y-2 group">
@@ -1584,6 +1585,7 @@ export default function Chat() {
           settings: {
             systemPrompt: settings.systemPrompt,
             userPrompt: settings.userPrompt,
+            postHistoryPrompt: settings.postHistoryPrompt,
             apiConfigs: settings.apiConfigs
           },
           userId: user?.id,

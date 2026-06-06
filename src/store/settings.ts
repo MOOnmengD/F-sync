@@ -13,6 +13,7 @@ export interface ApiConfig {
 export interface AISettings {
   systemPrompt: string
   userPrompt: string
+  postHistoryPrompt: string
   proactivePrompt: string
   apiConfigs: ApiConfig[]
 }
@@ -48,6 +49,7 @@ export const useSettingsStore = create<SettingsState>()(
       settings: {
         systemPrompt: DEFAULT_SYSTEM_PROMPT,
         userPrompt: '',
+        postHistoryPrompt: '',
         proactivePrompt: DEFAULT_PROACTIVE_PROMPT,
         apiConfigs: [
           { name: '配置 1', url: '', key: '', model: '', enabled: true },
@@ -105,6 +107,7 @@ export const useSettingsStore = create<SettingsState>()(
         const merged: AISettings = {
           systemPrompt: cloud.systemPrompt ?? current.systemPrompt,
           userPrompt: cloud.userPrompt ?? current.userPrompt,
+          postHistoryPrompt: cloud.postHistoryPrompt ?? current.postHistoryPrompt,
           proactivePrompt: cloud.proactivePrompt ?? current.proactivePrompt,
           apiConfigs: Array.isArray(cloud.apiConfigs) && cloud.apiConfigs.length > 0
             ? migrateConfigs(cloud.apiConfigs)
