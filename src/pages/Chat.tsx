@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { ArrowLeft, BookOpen, Check, ChevronDown, ChevronUp, GripVertical, ImagePlus, ListTodo, Loader2, Pencil, Plus, RefreshCw, Send, Settings, Sparkles, X, Save, Eye, EyeOff, ClipboardPaste, Copy, FileText, Trash2 } from 'lucide-react'
 import ReactMarkdown from 'react-markdown'
@@ -1327,7 +1327,7 @@ function formatContextContent(content: any): string {
   return String(content)
 }
 
-function MessageBubble({ msg, isTyping, onDelete, onResend }: { msg: ChatMessage; isTyping?: boolean; onDelete?: (id: string) => void; onResend?: (id: string) => void }) {
+const MessageBubble = memo(function MessageBubble({ msg, isTyping, onDelete, onResend }: { msg: ChatMessage; isTyping?: boolean; onDelete?: (id: string) => void; onResend?: (id: string) => void }) {
   const isUser = msg.role === 'user'
   const [confirmingAction, setConfirmingAction] = useState<'delete' | 'resend' | null>(null)
   const segments = msg.content ? splitContent(msg.content) : []
@@ -1487,7 +1487,7 @@ function MessageBubble({ msg, isTyping, onDelete, onResend }: { msg: ChatMessage
       )}
     </div>
   )
-}
+})
 
 const CONTEXT_WINDOW = 30
 const MAX_INPUT_HEIGHT = 160
@@ -1672,7 +1672,7 @@ export default function Chat() {
     }
   }, [syncMessages])
 
-  const sendToAi = async (aiMsgId: string) => {
+  const sendToAi = useCallback(async (aiMsgId: string) => {
     try {
       const state = useChatStore.getState()
       const context = state.messages
@@ -1746,7 +1746,7 @@ export default function Chat() {
       console.error('[Chat] Error:', error)
       updateMessage(aiMsgId, { content: `抱歉，出错了：${error.message}` })
     }
-  }
+  }, [settings])
 
   const handleSend = async () => {
     const text = input.trim()
@@ -1775,7 +1775,7 @@ export default function Chat() {
     setLoading(false)
   }
 
-  const handleResend = async (aiMsgId: string) => {
+  const handleResend = useCallback(async (aiMsgId: string) => {
     const state = useChatStore.getState()
     const aiIndex = state.messages.findIndex(m => m.id === aiMsgId)
     if (aiIndex <= 0) return
@@ -1790,7 +1790,7 @@ export default function Chat() {
 
     await sendToAi(newAiMsgId)
     setLoading(false)
-  }
+  }, [deleteMessage, addMessage, setLoading, sendToAi])
 
   const handleImageSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files
