@@ -558,6 +558,54 @@ export async function ragRetrieval(params: {
 }
 
 // ============================================================
+// 距离上次对话的时间
+// ============================================================
+
+async function getTimeSinceLastConversation(
+  supabase: any,
+  userId: string,
+  conversationMessages: Array<{ role: string; content: string; createdAt?: string }>,
+): Promise<string> {
+  try {
+    // 当前会话第一条消息的时间戳（标志本次对话开始）
+    const firstMsg = conversationMessages[0]
+    const convStartTime = firstMsg?.createdAt
+      ? new Date(firstMsg.createdAt)
+      : new Date()
+
+    // 查找本次对话开始前最近的一条聊天记录
+    const { data: lastMsgs } = await supabase
+      .from('chat_messages')
+      .select('created_at')
+      .eq('user_id', userId)
+      .neq('role', 'system')
+      .lt('created_at', convStartTime.toISOString())
+      .order('created_at', { ascending: false })
+      .limit(1)
+
+    if (!lastMsgs || lastMsgs.length === 0) return ''
+
+    const lastMsgTime = new Date(lastMsgs[0].created_at)
+    const diffMs = convStartTime.getTime() - lastMsgTime.getTime()
+    const diffMinutes = Math.floor(diffMs / 60000)
+
+    // 相隔不超过 3 分钟，视为同一轮对话，不添加
+    if (diffMinutes <= 3) return ''
+
+    const hours = Math.floor(diffMinutes / 60)
+    const minutes = diffMinutes % 60
+
+    if (hours > 0) {
+      return `[距离上次对话已经过去了${hours}小时${minutes}分钟]`
+    }
+    return `[距离上次对话已经过去了${minutes}分钟]`
+  } catch (e: any) {
+    console.warn('[TimeSinceLastConv] 查询失败:', e.message)
+    return ''
+  }
+}
+
+// ============================================================
 // 主入口：构建完整的 AI 对话上下文
 // ============================================================
 
@@ -633,6 +681,14 @@ export async function enrichMessages(params: {
     if (weatherInfo) worldLines.push(weatherInfo)
   }
   if (locationInfo) worldLines.push(locationInfo)
+  if (userId) {
+    const timeSinceLastConv = await getTimeSinceLastConversation(
+      supabase,
+      userId,
+      conversationMessages,
+    )
+    if (timeSinceLastConv) worldLines.push(timeSinceLastConv)
+  }
   if (extraWorldLines?.length) worldLines.push(...extraWorldLines)
   if (currentTimingInfo) worldLines.push(currentTimingInfo)
   const worldInfoContent = `## 真实世界信息\n${worldLines.join('\n')}`
