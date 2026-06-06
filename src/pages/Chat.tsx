@@ -112,77 +112,81 @@ function WelcomeBubble() {
   )
 }
 
+// 模块级常量，避免每次渲染重新创建对象引用导致 ReactMarkdown 重复解析
+const remarkPlugins = [remarkGfm]
+const markdownComponents = {
+  p: ({ children }: any) => (
+    <p className="text-sm text-base-text whitespace-pre-wrap break-words mb-1 last:mb-0">{children}</p>
+  ),
+  code: ({ className, children, ...props }: any) => {
+    const isInline = !className
+    if (isInline) {
+      return (
+        <code className="px-1 py-0.5 bg-base-line/50 rounded text-xs font-mono text-base-text/80" {...props}>
+          {children}
+        </code>
+      )
+    }
+    return (
+      <pre className="my-2 p-3 bg-[#F7F5F2] border border-base-line rounded-xl overflow-x-auto">
+        <code className={`text-xs font-mono text-base-text/80 ${className || ''}`} {...props}>
+          {children}
+        </code>
+      </pre>
+    )
+  },
+  a: ({ href, children }: any) => (
+    <a
+      href={href}
+      target="_blank"
+      rel="noopener noreferrer"
+      className="text-[#B4AEE8] underline underline-offset-2 hover:text-[#9B95D8] transition-colors"
+    >
+      {children}
+    </a>
+  ),
+  ul: ({ children }: any) => (
+    <ul className="list-disc pl-5 my-1 space-y-0.5 text-sm text-base-text">{children}</ul>
+  ),
+  ol: ({ children }: any) => (
+    <ol className="list-decimal pl-5 my-1 space-y-0.5 text-sm text-base-text">{children}</ol>
+  ),
+  li: ({ children }: any) => <li className="text-sm text-base-text">{children}</li>,
+  h1: ({ children }: any) => <h1 className="text-base font-bold text-base-text mt-3 mb-1">{children}</h1>,
+  h2: ({ children }: any) => <h2 className="text-sm font-bold text-base-text mt-2 mb-1">{children}</h2>,
+  h3: ({ children }: any) => <h3 className="text-sm font-semibold text-base-text mt-2 mb-1">{children}</h3>,
+  h4: ({ children }: any) => <h4 className="text-sm font-medium text-base-text mt-1 mb-1">{children}</h4>,
+  h5: ({ children }: any) => <h5 className="text-sm font-medium text-base-text/80 mt-1 mb-1">{children}</h5>,
+  h6: ({ children }: any) => <h6 className="text-sm font-medium text-base-text/70 mt-1 mb-1">{children}</h6>,
+  blockquote: ({ children }: any) => (
+    <blockquote className="border-l-2 border-[#B4AEE8] pl-3 my-1 text-base-text/70 italic">
+      {children}
+    </blockquote>
+  ),
+  hr: () => <hr className="my-2 border-base-line" />,
+  strong: ({ children }: any) => <strong className="font-bold text-base-text">{children}</strong>,
+  em: ({ children }: any) => <em className="italic text-base-text">{children}</em>,
+  del: ({ children }: any) => <del className="line-through text-base-text/60">{children}</del>,
+  table: ({ children }: any) => (
+    <div className="my-2 overflow-x-auto">
+      <table className="min-w-full text-sm border-collapse">{children}</table>
+    </div>
+  ),
+  th: ({ children }: any) => (
+    <th className="border border-base-line px-3 py-1.5 bg-[#F7F5F2] text-left font-medium text-base-text/80">
+      {children}
+    </th>
+  ),
+  td: ({ children }: any) => (
+    <td className="border border-base-line px-3 py-1.5 text-sm text-base-text">{children}</td>
+  ),
+}
+
 function MarkdownContent({ content }: { content: string }) {
   return (
     <ReactMarkdown
-      remarkPlugins={[remarkGfm]}
-      components={{
-        p: ({ children }) => (
-          <p className="text-sm text-base-text whitespace-pre-wrap break-words mb-1 last:mb-0">{children}</p>
-        ),
-        code: ({ className, children, ...props }: any) => {
-          const isInline = !className
-          if (isInline) {
-            return (
-              <code className="px-1 py-0.5 bg-base-line/50 rounded text-xs font-mono text-base-text/80" {...props}>
-                {children}
-              </code>
-            )
-          }
-          return (
-            <pre className="my-2 p-3 bg-[#F7F5F2] border border-base-line rounded-xl overflow-x-auto">
-              <code className={`text-xs font-mono text-base-text/80 ${className || ''}`} {...props}>
-                {children}
-              </code>
-            </pre>
-          )
-        },
-        a: ({ href, children }) => (
-          <a
-            href={href}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="text-[#B4AEE8] underline underline-offset-2 hover:text-[#9B95D8] transition-colors"
-          >
-            {children}
-          </a>
-        ),
-        ul: ({ children }) => (
-          <ul className="list-disc pl-5 my-1 space-y-0.5 text-sm text-base-text">{children}</ul>
-        ),
-        ol: ({ children }) => (
-          <ol className="list-decimal pl-5 my-1 space-y-0.5 text-sm text-base-text">{children}</ol>
-        ),
-        li: ({ children }) => <li className="text-sm text-base-text">{children}</li>,
-        h1: ({ children }) => <h1 className="text-base font-bold text-base-text mt-3 mb-1">{children}</h1>,
-        h2: ({ children }) => <h2 className="text-sm font-bold text-base-text mt-2 mb-1">{children}</h2>,
-        h3: ({ children }) => <h3 className="text-sm font-semibold text-base-text mt-2 mb-1">{children}</h3>,
-        h4: ({ children }) => <h4 className="text-sm font-medium text-base-text mt-1 mb-1">{children}</h4>,
-        h5: ({ children }) => <h5 className="text-sm font-medium text-base-text/80 mt-1 mb-1">{children}</h5>,
-        h6: ({ children }) => <h6 className="text-sm font-medium text-base-text/70 mt-1 mb-1">{children}</h6>,
-        blockquote: ({ children }) => (
-          <blockquote className="border-l-2 border-[#B4AEE8] pl-3 my-1 text-base-text/70 italic">
-            {children}
-          </blockquote>
-        ),
-        hr: () => <hr className="my-2 border-base-line" />,
-        strong: ({ children }) => <strong className="font-bold text-base-text">{children}</strong>,
-        em: ({ children }) => <em className="italic text-base-text">{children}</em>,
-        del: ({ children }) => <del className="line-through text-base-text/60">{children}</del>,
-        table: ({ children }) => (
-          <div className="my-2 overflow-x-auto">
-            <table className="min-w-full text-sm border-collapse">{children}</table>
-          </div>
-        ),
-        th: ({ children }) => (
-          <th className="border border-base-line px-3 py-1.5 bg-[#F7F5F2] text-left font-medium text-base-text/80">
-            {children}
-          </th>
-        ),
-        td: ({ children }) => (
-          <td className="border border-base-line px-3 py-1.5 text-sm text-base-text">{children}</td>
-        ),
-      }}
+      remarkPlugins={remarkPlugins}
+      components={markdownComponents}
     >
       {content}
     </ReactMarkdown>
