@@ -1,6 +1,8 @@
-import { useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { ArrowLeft, BookOpen, Check, ChevronDown, ChevronUp, GripVertical, ImagePlus, ListTodo, Loader2, Pencil, Plus, RefreshCw, Send, Settings, Sparkles, X, Save, Eye, EyeOff, ClipboardPaste, Copy, FileText, Trash2 } from 'lucide-react'
+import ReactMarkdown from 'react-markdown'
+import remarkGfm from 'remark-gfm'
 import { compressImage, type CompressedImage } from '../utils/image'
 import { IconButton } from '../shared/ui/IconButton'
 import { useChatStore, type ChatMessage } from '../store/chat'
@@ -56,6 +58,37 @@ async function getCurrentLocation(): Promise<{ latitude: number; longitude: numb
   })
 }
 
+// ===== Token 估算工具 =====
+// 普适的分词器估算方法：中文 ~1.5 token/字，英文 ~4 字符/token
+// 与大多数 LLM 分词器（GPT、DeepSeek 等）的误差在 ±15% 以内
+
+function countTextTokens(text: string): number {
+  if (!text) return 0
+  // 匹配 CJK 字符（中日韩统一表意文字 + 扩展 + 兼容）
+  const cjkChars = (text.match(/[一-鿿㐀-䶿豈-﫿]/g) || []).length
+  const otherChars = text.length - cjkChars
+  return Math.ceil(cjkChars / 1.5 + otherChars / 4)
+}
+
+function estimateTotalTokens(messages: any[]): number {
+  let total = 0
+  for (const msg of messages) {
+    const content = msg.content
+    if (typeof content === 'string') {
+      total += countTextTokens(content)
+    } else if (Array.isArray(content)) {
+      for (const part of content) {
+        if (part.type === 'text' && part.text) {
+          total += countTextTokens(part.text)
+        } else if (part.type === 'image_url') {
+          total += 85 // 图片 base token 开销（低分辨率模式下的粗略估算）
+        }
+      }
+    }
+  }
+  return total
+}
+
 function formatTime(timestamp: number) {
   const d = new Date(timestamp)
   const hh = String(d.getHours()).padStart(2, '0')
@@ -76,6 +109,83 @@ function WelcomeBubble() {
         </p>
       </div>
     </div>
+  )
+}
+
+function MarkdownContent({ content }: { content: string }) {
+  return (
+    <ReactMarkdown
+      remarkPlugins={[remarkGfm]}
+      components={{
+        p: ({ children }) => (
+          <p className="text-sm text-base-text whitespace-pre-wrap break-words mb-1 last:mb-0">{children}</p>
+        ),
+        code: ({ className, children, ...props }: any) => {
+          const isInline = !className
+          if (isInline) {
+            return (
+              <code className="px-1 py-0.5 bg-base-line/50 rounded text-xs font-mono text-base-text/80" {...props}>
+                {children}
+              </code>
+            )
+          }
+          return (
+            <pre className="my-2 p-3 bg-[#F7F5F2] border border-base-line rounded-xl overflow-x-auto">
+              <code className={`text-xs font-mono text-base-text/80 ${className || ''}`} {...props}>
+                {children}
+              </code>
+            </pre>
+          )
+        },
+        a: ({ href, children }) => (
+          <a
+            href={href}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-[#B4AEE8] underline underline-offset-2 hover:text-[#9B95D8] transition-colors"
+          >
+            {children}
+          </a>
+        ),
+        ul: ({ children }) => (
+          <ul className="list-disc pl-5 my-1 space-y-0.5 text-sm text-base-text">{children}</ul>
+        ),
+        ol: ({ children }) => (
+          <ol className="list-decimal pl-5 my-1 space-y-0.5 text-sm text-base-text">{children}</ol>
+        ),
+        li: ({ children }) => <li className="text-sm text-base-text">{children}</li>,
+        h1: ({ children }) => <h1 className="text-base font-bold text-base-text mt-3 mb-1">{children}</h1>,
+        h2: ({ children }) => <h2 className="text-sm font-bold text-base-text mt-2 mb-1">{children}</h2>,
+        h3: ({ children }) => <h3 className="text-sm font-semibold text-base-text mt-2 mb-1">{children}</h3>,
+        h4: ({ children }) => <h4 className="text-sm font-medium text-base-text mt-1 mb-1">{children}</h4>,
+        h5: ({ children }) => <h5 className="text-sm font-medium text-base-text/80 mt-1 mb-1">{children}</h5>,
+        h6: ({ children }) => <h6 className="text-sm font-medium text-base-text/70 mt-1 mb-1">{children}</h6>,
+        blockquote: ({ children }) => (
+          <blockquote className="border-l-2 border-[#B4AEE8] pl-3 my-1 text-base-text/70 italic">
+            {children}
+          </blockquote>
+        ),
+        hr: () => <hr className="my-2 border-base-line" />,
+        strong: ({ children }) => <strong className="font-bold text-base-text">{children}</strong>,
+        em: ({ children }) => <em className="italic text-base-text">{children}</em>,
+        del: ({ children }) => <del className="line-through text-base-text/60">{children}</del>,
+        table: ({ children }) => (
+          <div className="my-2 overflow-x-auto">
+            <table className="min-w-full text-sm border-collapse">{children}</table>
+          </div>
+        ),
+        th: ({ children }) => (
+          <th className="border border-base-line px-3 py-1.5 bg-[#F7F5F2] text-left font-medium text-base-text/80">
+            {children}
+          </th>
+        ),
+        td: ({ children }) => (
+          <td className="border border-base-line px-3 py-1.5 text-sm text-base-text">{children}</td>
+        ),
+      }}
+    >
+      {content}
+    </ReactMarkdown>
   )
 }
 
@@ -125,13 +235,14 @@ function ContextViewerModal({ isOpen, onClose, context }: { isOpen: boolean; onC
   )
 }
 
-function SettingsModal({ isOpen, onClose, vectorSyncStatus, onVectorSync, onClearMessages, onOpenContext }: {
+function SettingsModal({ isOpen, onClose, vectorSyncStatus, onVectorSync, onClearMessages, onOpenContext, tokenCount }: {
   isOpen: boolean
   onClose: () => void
   vectorSyncStatus: 'synced' | 'pending' | 'syncing'
   onVectorSync: () => void
   onClearMessages: () => void
   onOpenContext: () => void
+  tokenCount: number | null
 }) {
   const { settings, updateSettings, saveToCloud, isCloudLoaded } = useSettingsStore()
   const [localSettings, setLocalSettings] = useState(settings)
@@ -569,6 +680,12 @@ function SettingsModal({ isOpen, onClose, vectorSyncStatus, onVectorSync, onClea
                 <FileText size={13} />
                 查看上下文
               </button>
+              {tokenCount !== null && (
+                <span className="h-9 px-4 text-xs text-base-text/40 border border-base-line rounded-full bg-[#FDFCFB] flex items-center gap-1.5">
+                  <span className="text-base-text/25 text-[10px]">TK</span>
+                  ~{tokenCount.toLocaleString()}
+                </span>
+              )}
             </div>
           </section>
         </div>
@@ -1239,9 +1356,7 @@ function MessageBubble({ msg, isTyping, onDelete, onResend }: { msg: ChatMessage
             ))}
           </div>
         )}
-        {content && (
-          <p className="text-sm text-base-text whitespace-pre-wrap break-words">{content}</p>
-        )}
+        {content && <MarkdownContent content={content} />}
       </div>
     </div>
   )
@@ -1390,6 +1505,12 @@ export default function Chat() {
   const [isSettingsOpen, setIsSettingsOpen] = useState(false)
   const [isContextOpen, setIsContextOpen] = useState(false)
   const [lastFullContext, setLastFullContext] = useState<any[]>([])
+
+  const tokenCount = useMemo(() => {
+    if (lastFullContext.length === 0) return null
+    return estimateTotalTokens(lastFullContext)
+  }, [lastFullContext])
+
   const [isProfileDiaryOpen, setIsProfileDiaryOpen] = useState(false)
   const [profileDiaryInitialTab, setProfileDiaryInitialTab] = useState<'profile' | 'diary'>('profile')
   const [isDailyEventsOpen, setIsDailyEventsOpen] = useState(false)
@@ -1811,6 +1932,7 @@ export default function Chat() {
         onVectorSync={handleManualVectorSync}
         onClearMessages={clearMessages}
         onOpenContext={() => setIsContextOpen(true)}
+        tokenCount={tokenCount}
       />
       <ContextViewerModal
         isOpen={isContextOpen}
