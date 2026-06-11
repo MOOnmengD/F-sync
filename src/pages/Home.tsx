@@ -9,12 +9,13 @@ import { PillButton } from '../shared/ui/PillButton'
 import { RepurchaseIndexPill } from '../shared/ui/RepurchaseIndexPill'
 import { useTimeline, TIMELINE_KINDS } from '../hooks/useTimeline'
 import { WeeklyTimeline } from '../components/WeeklyTimeline'
+import InvestmentPanel from '../components/InvestmentPanel'
 import { extractDate, formatCompactDateTime } from '../utils/dateUtils'
 import { extractAmount, pickItemNameFallback, formatAmount } from '../utils/amountUtils'
 
 const modeMeta: Record<
   QuickMode,
-  { label: string; accent: 'peach' | 'mint' | 'baby' | 'butter' | 'lavender' | 'timeline'; hint: string }
+  { label: string; accent: 'peach' | 'mint' | 'baby' | 'butter' | 'lavender' | 'timeline' | 'rose'; hint: string }
 > = {
   finance: { label: '记账', accent: 'mint', hint: '今天花了多少？一句话记下来' },
   review: { label: '点评', accent: 'peach', hint: '对一个物品/服务写一句感受' },
@@ -22,6 +23,7 @@ const modeMeta: Record<
   work: { label: '工作', accent: 'butter', hint: '记录推进点 / blockers / 下一步' },
   save: { label: '收藏', accent: 'lavender', hint: '保存链接/片段，稍后再整理' },
   timeline: { label: '时间轴', accent: 'timeline', hint: '计时记录：选择分类，开始 / 停止' },
+  invest: { label: '理财', accent: 'rose', hint: '' },
 }
 
 const accentHex: Record<(typeof modeMeta)[QuickMode]['accent'], string> = {
@@ -31,6 +33,7 @@ const accentHex: Record<(typeof modeMeta)[QuickMode]['accent'], string> = {
   butter: '#FFF1B8',
   lavender: '#E9D9FF',
   timeline: '#F2DEBD',
+  rose: '#FAD1D1',
 }
 
 export default function Home() {
@@ -59,6 +62,7 @@ export default function Home() {
   const [reviewTargetId, setReviewTargetId] = useState<string | null>(null)
 
   const [refreshKey, setRefreshKey] = useState(0)
+  const [userId, setUserId] = useState<string | null>(null)
 
   const {
     kind: timelineKind,
@@ -225,6 +229,14 @@ export default function Home() {
       repurchase_index: txRepurchaseIndex,
     })
   }
+
+  useEffect(() => {
+    const client = supabase
+    if (!client) return
+    client.auth.getUser().then(({ data }) => {
+      if (data?.user?.id) setUserId(data.user.id)
+    })
+  }, [])
 
   useEffect(() => {
     const vv = window.visualViewport
@@ -649,6 +661,12 @@ export default function Home() {
               onClick={() => setMode('timeline')}
               accent="timeline"
             />
+            <PillButton
+              label="理财"
+              active={mode === 'invest'}
+              onClick={() => setMode('invest')}
+              accent="rose"
+            />
           </div>
         </div>
       </header>
@@ -657,6 +675,10 @@ export default function Home() {
         <div className="mt-4">
           <WeeklyTimeline refreshKey={refreshKey} />
         </div>
+      ) : mode === 'invest' ? (
+        userId ? <InvestmentPanel userId={userId} /> : (
+          <div className="mt-4 text-center text-sm text-base-muted py-8">加载中…</div>
+        )
       ) : (
         <div className="mt-4 text-sm text-base-muted">{meta.hint}</div>
       )}
@@ -724,7 +746,7 @@ export default function Home() {
           </div>
         )}
 
-        {mode !== 'timeline' && (
+        {mode !== 'timeline' && mode !== 'invest' && (
           <>
             {mode === 'note' && (
               <div className="mb-2 rounded-2xl bg-base-surface p-3">

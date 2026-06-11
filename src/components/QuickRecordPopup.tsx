@@ -8,7 +8,7 @@ import { useRecordSender } from '../hooks/useRecordSender'
 
 const modeMeta: Record<
   QuickMode,
-  { label: string; accent: 'peach' | 'mint' | 'baby' | 'butter' | 'lavender' | 'timeline' }
+  { label: string; accent: 'peach' | 'mint' | 'baby' | 'butter' | 'lavender' | 'timeline' | 'rose' }
 > = {
   finance: { label: '记账', accent: 'mint' },
   review: { label: '点评', accent: 'peach' },
@@ -16,6 +16,7 @@ const modeMeta: Record<
   work: { label: '工作', accent: 'butter' },
   save: { label: '收藏', accent: 'lavender' },
   timeline: { label: '时间轴', accent: 'timeline' },
+  invest: { label: '理财', accent: 'rose' },
 }
 
 const accentHex: Record<(typeof modeMeta)[QuickMode]['accent'], string> = {
@@ -25,6 +26,7 @@ const accentHex: Record<(typeof modeMeta)[QuickMode]['accent'], string> = {
   butter: '#FFF1B8',
   lavender: '#E9D9FF',
   timeline: '#F2DEBD',
+  rose: '#FAD1D1',
 }
 
 type FinanceCategory = '衣' | '食' | '住' | '行' | '娱乐'
