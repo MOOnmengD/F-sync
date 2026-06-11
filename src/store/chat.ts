@@ -6,6 +6,7 @@ export interface ChatMessage {
   id: string
   role: 'user' | 'assistant' | 'system'
   content: string
+  thinking?: string // AI 思维链内容，从 <thinking> / <think> / <thought> 标签中提取
   createdAt: number
   isSynced?: boolean
   images?: string[] // base64 data URLs, only on user messages, not synced to cloud

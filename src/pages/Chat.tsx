@@ -100,6 +100,23 @@ function splitContent(content: string): string[] {
   return content.split(/\n{2,}/).map(s => s.trim()).filter(s => s.length > 0)
 }
 
+// 常见思维链标签：<thinking> (Claude/DeepSeek), <think> (Qwen/DeepSeek-R1), <thought> (通用)
+const THINKING_REGEX = /<(thinking|think|thought)>([\s\S]*?)<\/\1>/gi
+
+function extractThinking(content: string): { thinking: string; cleanContent: string } {
+  // 重置全局正则的 lastIndex，提取所有思维链标签内容
+  THINKING_REGEX.lastIndex = 0
+  const parts: string[] = []
+  let match: RegExpExecArray | null
+  while ((match = THINKING_REGEX.exec(content)) !== null) {
+    parts.push(match[2].trim())
+  }
+  // 移除所有思维链标签及其内容
+  THINKING_REGEX.lastIndex = 0
+  const clean = content.replace(THINKING_REGEX, '').trim()
+  return { thinking: parts.join('\n\n'), cleanContent: clean || content.trim() }
+}
+
 function WelcomeBubble() {
   return (
     <div className="flex justify-start">
@@ -1330,6 +1347,7 @@ function formatContextContent(content: any): string {
 const MessageBubble = memo(function MessageBubble({ msg, isTyping, onDelete, onResend }: { msg: ChatMessage; isTyping?: boolean; onDelete?: (id: string) => void; onResend?: (id: string) => void }) {
   const isUser = msg.role === 'user'
   const [confirmingAction, setConfirmingAction] = useState<'delete' | 'resend' | null>(null)
+  const [thinkingExpanded, setThinkingExpanded] = useState(false)
   const segments = msg.content ? splitContent(msg.content) : []
 
   const handleDeleteClick = () => setConfirmingAction('delete')
@@ -1341,6 +1359,8 @@ const MessageBubble = memo(function MessageBubble({ msg, isTyping, onDelete, onR
     else if (action === 'resend') onResend?.(msg.id)
   }
   const handleCancel = () => setConfirmingAction(null)
+
+  const hasThinking = !isUser && !!msg.thinking
 
   const bubbleBg = isUser ? 'bg-[#E8F5E9]' : 'bg-[#F0F7FF]'
   const justify = isUser ? 'flex-end' : 'flex-start'
@@ -1367,6 +1387,24 @@ const MessageBubble = memo(function MessageBubble({ msg, isTyping, onDelete, onR
 
   return (
     <div className={`flex flex-col gap-1.5 ${isUser ? 'items-end' : 'items-start'}`}>
+      {/* 思维链（内心独白）— 仅在 AI 消息且含有 thinking 时显示，位于气泡外部左上方 */}
+      {hasThinking && (
+        <div className="w-full">
+          <button
+            onClick={() => setThinkingExpanded(!thinkingExpanded)}
+            className="flex items-center gap-1 text-xs text-[#B4AEE8] hover:text-[#9B95D8] transition-colors ml-1"
+          >
+            <span>{thinkingExpanded ? '收起内心独白' : '内心独白...'}</span>
+            {thinkingExpanded ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
+          </button>
+          {thinkingExpanded && (
+            <div className="mt-1 ml-1 w-[85%] rounded-2xl border border-[#E0DCF5] bg-[#F8F7FF] px-4 py-3">
+              <p className="text-xs text-base-text/60 whitespace-pre-wrap leading-relaxed">{msg.thinking}</p>
+            </div>
+          )}
+        </div>
+      )}
+
       {segments.length > 0 ? (
         <>
           {segments.map((segment, i) => {
@@ -1675,15 +1713,27 @@ export default function Chat() {
   const sendToAi = useCallback(async (aiMsgId: string) => {
     try {
       const state = useChatStore.getState()
-      const context = state.messages
+      const contextMsgs = state.messages
         .filter(m => m.content || m.images?.length)
         .slice(-CONTEXT_WINDOW)
-        .map((m, i, arr) => {
+
+      // 只将最后一条带思维链的消息的思维链加入上下文
+      const lastThinkingIdx = contextMsgs.reduce((best, msg, idx) =>
+        msg.role === 'assistant' && msg.thinking ? idx : best, -1)
+
+      const context = contextMsgs.map((m, i, arr) => {
           const lastImageIdx = arr.reduce((best, msg, idx) =>
             msg.role === 'user' && msg.images?.length ? idx : best, -1)
+
+          // 只有最后一条带思维链的消息才在上下文中包含思维链
+          let content = m.content
+          if (m.role === 'assistant' && m.thinking && i === lastThinkingIdx) {
+            content = `<thinking>\n${m.thinking}\n</thinking>\n\n${content}`
+          }
+
           return {
             role: m.role,
-            content: m.content,
+            content,
             createdAt: m.createdAt,
             images: i === lastImageIdx ? m.images : undefined
           }
@@ -1735,8 +1785,9 @@ export default function Chat() {
         setLastFullContext(context)
       }
 
-      const aiContent = data.choices?.[0]?.message?.content || 'AI 暂时无法回答。'
-      updateMessage(aiMsgId, { content: aiContent })
+      const aiRawContent = data.choices?.[0]?.message?.content || 'AI 暂时无法回答。'
+      const { thinking, cleanContent } = extractThinking(aiRawContent)
+      updateMessage(aiMsgId, { content: cleanContent, thinking: thinking || undefined })
 
       const unsyncedCount = state.messages.filter(m => !m.isSynced).length
       if (unsyncedCount >= 10) {
