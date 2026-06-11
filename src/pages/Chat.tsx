@@ -210,7 +210,38 @@ function MarkdownContent({ content }: { content: string }) {
   )
 }
 
-function ContextViewerModal({ isOpen, onClose, context }: { isOpen: boolean; onClose: () => void; context: any[] }) {
+function formatContextForExport(context: any[]): string {
+  const now = new Date().toLocaleString('zh-CN', { hour12: false })
+  const lines: string[] = []
+  lines.push(`F-Sync AI 全量上下文`)
+  lines.push(`导出时间: ${now}  |  消息总数: ${context.length} 条`)
+  lines.push('─'.repeat(40))
+  lines.push('')
+
+  for (const msg of context) {
+    const role = (msg.role || 'unknown').toUpperCase()
+    const time = msg.createdAt
+      ? new Date(msg.createdAt).toLocaleString('zh-CN', { hour12: false })
+      : ''
+    lines.push(`[${role}] ${time}`)
+    lines.push(formatContextContent(msg.content))
+    lines.push('')
+  }
+
+  return lines.join('\n')
+}
+
+async function copyContextToClipboard(context: any[]): Promise<boolean> {
+  try {
+    const text = formatContextForExport(context)
+    await navigator.clipboard.writeText(text)
+    return true
+  } catch {
+    return false
+  }
+}
+
+function ContextViewerModal({ isOpen, onClose, context, onCopyAll }: { isOpen: boolean; onClose: () => void; context: any[]; onCopyAll: () => void }) {
   if (!isOpen) return null
 
   return (
@@ -218,9 +249,19 @@ function ContextViewerModal({ isOpen, onClose, context }: { isOpen: boolean; onC
       <div className="bg-[#FDFCFB] w-full max-w-2xl rounded-3xl flex flex-col max-h-[90vh] shadow-2xl overflow-hidden border border-base-line">
         <div className="px-6 py-4 border-b border-base-line flex items-center justify-between bg-[#F7F5F2]">
           <h2 className="text-lg font-bold text-base-text">发送给 AI 的全量上下文</h2>
-          <button onClick={onClose} className="p-2 hover:bg-base-line rounded-full transition-colors">
-            <X size={20} className="text-base-text/50" />
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={onCopyAll}
+              disabled={context.length === 0}
+              className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-base-text/70 bg-white border border-base-line rounded-full hover:bg-base-line/50 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+            >
+              <Copy size={14} />
+              复制全部
+            </button>
+            <button onClick={onClose} className="p-2 hover:bg-base-line rounded-full transition-colors">
+              <X size={20} className="text-base-text/50" />
+            </button>
+          </div>
         </div>
         
         <div className="flex-1 overflow-y-auto p-6 space-y-4 font-mono text-xs">
@@ -1547,6 +1588,7 @@ export default function Chat() {
   const [isSettingsOpen, setIsSettingsOpen] = useState(false)
   const [isContextOpen, setIsContextOpen] = useState(false)
   const [lastFullContext, setLastFullContext] = useState<any[]>([])
+  const [toast, setToast] = useState<string | null>(null)
 
   const tokenCount = useMemo(() => {
     if (lastFullContext.length === 0) return null
@@ -1568,6 +1610,13 @@ export default function Chat() {
   useEffect(() => {
     loadFromCloud()
   }, [loadFromCloud])
+
+  // 0. Toast 自动消失
+  useEffect(() => {
+    if (!toast) return
+    const t = window.setTimeout(() => setToast(null), 1500)
+    return () => window.clearTimeout(t)
+  }, [toast])
 
   // 1. 同步云端消息
   useEffect(() => {
@@ -1993,6 +2042,10 @@ export default function Chat() {
         isOpen={isContextOpen}
         onClose={() => setIsContextOpen(false)}
         context={lastFullContext}
+        onCopyAll={async () => {
+          const ok = await copyContextToClipboard(lastFullContext)
+          setToast(ok ? '已复制到剪贴板' : '复制失败，请重试')
+        }}
       />
       <ProfileDiaryModal
         isOpen={isProfileDiaryOpen}
@@ -2017,6 +2070,15 @@ export default function Chat() {
         onChange={handleImageSelect}
         className="hidden"
       />
+
+      {toast && (
+        <div
+          className="fixed left-1/2 z-50 -translate-x-1/2 rounded-full border border-base-line bg-base-surface/95 px-4 py-2 text-xs text-base-text backdrop-blur-sm"
+          style={{ bottom: '96px' }}
+        >
+          {toast}
+        </div>
+      )}
     </div>
   )
 }
