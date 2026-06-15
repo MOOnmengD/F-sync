@@ -56,7 +56,7 @@ function stripMarkdown(text: string): string {
 }
 
 const MAX_CHARS = 10000
-const TTS_ENDPOINT = 'https://api.minimax.chat/v1/text_to_speech'
+const TTS_ENDPOINT = 'https://api.minimax.chat/v1/t2a_v2'
 
 interface TTSResponse {
   audioDataUrl: string
@@ -103,6 +103,7 @@ export default async function handler(req: any, res: any) {
           voice_id: 'Chinese (Mandarin)_Gentleman',
           speed: 0.83,
         },
+        output_format: 'hex',
         audio_setting: {
           format: 'mp3',
           audio_sample_rate: 32000,
@@ -128,12 +129,14 @@ export default async function handler(req: any, res: any) {
 
   if (contentType.includes('application/json')) {
     const json = await ttsResponse.json()
-    // 适配多种可能的 JSON 字段名
-    audioBase64 = json.audio || json.data || json.audio_data || json.audio_base64 || ''
-    if (!audioBase64) {
+    // MiniMax 返回 { data: { audio: "<hex>" } }，audio 为 hex 编码的音频数据
+    const hexAudio: string = json.data?.audio || json.audio || ''
+    if (!hexAudio || typeof hexAudio !== 'string' || hexAudio.length < 10) {
       console.error('[TTS] Unexpected JSON response:', JSON.stringify(json).slice(0, 300))
       return res.status(500).json({ error: 'Unexpected TTS response format' })
     }
+    // 将 hex 编码转换为 base64
+    audioBase64 = Buffer.from(hexAudio, 'hex').toString('base64')
   } else {
     // 二进制音频数据
     const arrayBuffer = await ttsResponse.arrayBuffer()
