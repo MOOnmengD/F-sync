@@ -1,6 +1,6 @@
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { ArrowLeft, BookOpen, Check, ChevronDown, ChevronUp, GripVertical, ImagePlus, ListTodo, Loader2, Pencil, Plus, RefreshCw, Send, Settings, Sparkles, X, Save, Eye, EyeOff, ClipboardPaste, Copy, FileText, Trash2 } from 'lucide-react'
+import { ArrowLeft, BookOpen, Check, ChevronDown, ChevronUp, GripVertical, ImagePlus, ListTodo, Loader2, Pencil, Plus, RefreshCw, Send, Settings, Sparkles, Volume2, VolumeX, X, Save, Eye, EyeOff, ClipboardPaste, Copy, FileText, Trash2 } from 'lucide-react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { compressImage, type CompressedImage } from '../utils/image'
@@ -1385,7 +1385,14 @@ function formatContextContent(content: any): string {
   return String(content)
 }
 
-const MessageBubble = memo(function MessageBubble({ msg, isTyping, onDelete, onResend }: { msg: ChatMessage; isTyping?: boolean; onDelete?: (id: string) => void; onResend?: (id: string) => void }) {
+const MessageBubble = memo(function MessageBubble({ msg, isTyping, onDelete, onResend, onReadAloud, isReading }: {
+  msg: ChatMessage
+  isTyping?: boolean
+  onDelete?: (id: string) => void
+  onResend?: (id: string) => void
+  onReadAloud?: (msg: ChatMessage) => void
+  isReading?: boolean
+}) {
   const isUser = msg.role === 'user'
   const [confirmingAction, setConfirmingAction] = useState<'delete' | 'resend' | null>(null)
   const [thinkingExpanded, setThinkingExpanded] = useState(false)
@@ -1462,6 +1469,15 @@ const MessageBubble = memo(function MessageBubble({ msg, isTyping, onDelete, onR
                     )}
                     <div className={`flex items-center gap-2 ${isUser ? 'flex-row-reverse' : 'flex-row'}`}>
                       <p className="text-xs text-base-text/40">{formatTime(msg.createdAt)}</p>
+                      {!isUser && onReadAloud && !isTyping && msg.content && (
+                        <button
+                          onClick={() => onReadAloud(msg)}
+                          disabled={isReading}
+                          className="p-1 rounded-full text-base-text/20 hover:text-[#B4AEE8] hover:bg-[#F0EEFF] active:scale-90 transition-all duration-150 disabled:opacity-50"
+                        >
+                          {isReading ? <Loader2 size={12} className="animate-spin" /> : <Volume2 size={12} />}
+                        </button>
+                      )}
                       {onResend && !isTyping && (
                         <button
                           onClick={handleResendClick}
@@ -1527,6 +1543,15 @@ const MessageBubble = memo(function MessageBubble({ msg, isTyping, onDelete, onR
           )}
           <div className={`flex items-center gap-2 ${isUser ? 'flex-row-reverse' : 'flex-row'}`}>
             <p className="text-xs text-base-text/40">{formatTime(msg.createdAt)}</p>
+            {!isUser && onReadAloud && !isTyping && msg.content && (
+              <button
+                onClick={() => onReadAloud(msg)}
+                disabled={isReading}
+                className="p-1 rounded-full text-base-text/20 hover:text-[#B4AEE8] hover:bg-[#F0EEFF] active:scale-90 transition-all duration-150 disabled:opacity-50"
+              >
+                {isReading ? <Loader2 size={12} className="animate-spin" /> : <Volume2 size={12} />}
+              </button>
+            )}
             {onResend && !isTyping && (
               <button
                 onClick={handleResendClick}
@@ -1589,6 +1614,44 @@ export default function Chat() {
   const [isContextOpen, setIsContextOpen] = useState(false)
   const [lastFullContext, setLastFullContext] = useState<any[]>([])
   const [toast, setToast] = useState<string | null>(null)
+  const [autoReadEnabled, setAutoReadEnabled] = useState(() =>
+    localStorage.getItem('fsync.auto-read-tts.v1') === 'true'
+  )
+  const [readingMsgId, setReadingMsgId] = useState<string | null>(null)
+  const audioCtxRef = useRef<{ audio: HTMLAudioElement } | null>(null)
+
+  const toggleAutoRead = useCallback(() => {
+    setAutoReadEnabled((prev) => {
+      const next = !prev
+      localStorage.setItem('fsync.auto-read-tts.v1', String(next))
+      return next
+    })
+  }, [])
+
+  const requestAndPlay = useCallback(async (messageText: string, msgId: string) => {
+    if (!messageText.trim()) return
+    setReadingMsgId(msgId)
+    try {
+      const res = await fetch('/api/text-to-speech', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text: messageText }),
+      })
+      if (!res.ok) return
+      const { audioDataUrl } = await res.json()
+      if (!audioDataUrl) return
+
+      // 打断旧播放，开始新播放
+      audioCtxRef.current?.audio.pause()
+      const audio = new Audio(audioDataUrl)
+      audioCtxRef.current = { audio }
+      await audio.play()
+    } catch {
+      // 静默降级：TTS 失败不影响页面正常使用
+    } finally {
+      setReadingMsgId(null)
+    }
+  }, [])
 
   const tokenCount = useMemo(() => {
     if (lastFullContext.length === 0) return null
@@ -1838,6 +1901,11 @@ export default function Chat() {
       const { thinking, cleanContent } = extractThinking(aiRawContent)
       updateMessage(aiMsgId, { content: cleanContent, thinking: thinking || undefined })
 
+      // 自动朗读（不 await，后台执行，不阻塞 UI）
+      if (autoReadEnabled && cleanContent) {
+        requestAndPlay(cleanContent, aiMsgId)
+      }
+
       const unsyncedCount = state.messages.filter(m => !m.isSynced).length
       if (unsyncedCount >= 10) {
         void syncMessages()
@@ -1846,7 +1914,7 @@ export default function Chat() {
       console.error('[Chat] Error:', error)
       updateMessage(aiMsgId, { content: `抱歉，出错了：${error.message}` })
     }
-  }, [settings])
+  }, [settings, autoReadEnabled, requestAndPlay])
 
   const handleSend = async () => {
     const text = input.trim()
@@ -1929,6 +1997,18 @@ export default function Chat() {
         <div className="flex items-center gap-2">
           <button
             type="button"
+            onClick={toggleAutoRead}
+            className="h-10 w-10 border rounded-full bg-base-surface active:opacity-70 flex items-center justify-center transition-colors"
+            style={{
+              borderColor: autoReadEnabled ? '#B4AEE8' : undefined,
+              color: autoReadEnabled ? '#B4AEE8' : undefined,
+            }}
+            title={autoReadEnabled ? '自动朗读已开启' : '自动朗读已关闭'}
+          >
+            {autoReadEnabled ? <Volume2 size={16} /> : <VolumeX size={16} />}
+          </button>
+          <button
+            type="button"
             onClick={() => setIsSettingsOpen(true)}
             className="h-10 w-10 text-base-text/50 border border-base-line rounded-full bg-base-surface active:opacity-70 flex items-center justify-center"
           >
@@ -1969,6 +2049,8 @@ export default function Chat() {
             isTyping={isLoading && idx === messages.length - 1}
             onDelete={deleteMessage}
             onResend={msg.role === 'assistant' ? handleResend : undefined}
+            onReadAloud={msg.role === 'assistant' ? (m) => requestAndPlay(m.content, m.id) : undefined}
+            isReading={readingMsgId === msg.id}
           />
         ))}
         <div ref={bottomRef} />
