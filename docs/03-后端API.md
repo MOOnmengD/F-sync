@@ -280,12 +280,13 @@ AI 对话上下文构建模块（详见 [05-AI系统设计](./05-AI系统设计.
 1. 校验 `text` 非空
 2. 清理 Markdown 语法（去除粗体/斜体/链接/代码块/标题/引用/列表等标记）
 3. 截断到 10000 字符（安全边界）
-4. 调用 MiniMax 同步 TTS API：`POST https://api.minimax.chat/v1/text_to_speech`
+4. 调用 MiniMax 同步 TTS API：`POST https://api.minimax.chat/v1/t2a_v2`
    - 模型：`speech-2.8-hd`
    - 音色：`Chinese (Mandarin)_Gentleman`
    - 语速：`0.83`
-   - 格式：mp3 / 32000Hz / 128kbps / 双声道
-5. 接收二进制音频，转为 base64 Data URL 返回
+   - 输出格式：`hex`（MiniMax 返回 `data.audio` 字段为 hex 编码音频）
+   - 音频参数：mp3 / 32000Hz / 128kbps / 双声道
+5. 接收 JSON 响应，将 hex 音频转为 base64 Data URL 返回
 
 **环境变量**：`MINIMAX_API_KEY`
 
