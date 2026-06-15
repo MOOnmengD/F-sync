@@ -62,10 +62,6 @@ interface TTSResponse {
   audioDataUrl: string
 }
 
-interface TTSError {
-  error: string
-}
-
 export default async function handler(req: any, res: any) {
   // 1. 仅接受 POST
   if (req.method !== 'POST') {

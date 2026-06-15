@@ -16,6 +16,7 @@
 | `/api/debug-search` | GET/POST | 无 | 调试用全文搜索 |
 | `/api/backfill-events` | POST | 无 | 事件回填工具 |
 | `/api/text-to-speech` | POST | 无 | AI 消息语音合成（TTS） |
+| `/api/investment` | POST | 无 | 投资管理（操作/更新CR/CRUD） |
 
 ---
 
@@ -289,6 +290,47 @@ AI 对话上下文构建模块（详见 [05-AI系统设计](./05-AI系统设计.
 **环境变量**：`MINIMAX_API_KEY`
 
 **前端调用**：Chat 页面中 AI 消息气泡的朗读按钮，以及自动朗读开关。
+
+---
+
+### `POST /api/investment`
+
+**用途**：统一的投资管理端点（合并了原有的 investment-action / investment-update-cr / investment-manage）。通过 `type` 字段区分操作。
+
+**输入（type: 'action' — 执行投资操作）**：
+```json
+{
+  "type": "action",
+  "userId": "uuid",
+  "investmentId": "uuid",
+  "suggestionId": "uuid|null",
+  "actualAmountCents": 10000,
+  "actionType": "confirm_suggestion|override_suggestion|manual_adjust",
+  "cBeforeCents": 50000,
+  "cAfterCents": 60000
+}
+```
+
+**输入（type: 'update_cr' — 更新持仓价值与收益率）**：
+```json
+{
+  "type": "update_cr",
+  "userId": "uuid",
+  "investmentId": "uuid",
+  "currentValueCents": 60000,
+  "currentProfitRate": 0.15
+}
+```
+
+**输入（type: 'manage' — 创建/更新/停用投资）**：
+```json
+{
+  "type": "manage",
+  "userId": "uuid",
+  "action": "create|update|deactivate",
+  "...": "各 action 对应不同字段"
+}
+```
 
 ---
 

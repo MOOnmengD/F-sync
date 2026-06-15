@@ -91,15 +91,13 @@ export default async function handler(req: any, res: any) {
 
     // 读取已有社交关系，供画像增量更新使用
     let existingRelationshipsText = ''
-    let existingRelationshipRows: any[] = []
     try {
       const { data: relRows } = await supabase
         .from('social_relationships')
         .select('name, relation, impression, history')
         .eq('user_id', targetUserId)
       if (relRows && relRows.length > 0) {
-        existingRelationshipRows = relRows
-        existingRelationshipsText = relRows.map(r => {
+        existingRelationshipsText = relRows.map((r: any) => {
           const latestUpdate = r.history?.length > 0
             ? ` [印象更新于 ${r.history[r.history.length - 1].date}]`
             : ''

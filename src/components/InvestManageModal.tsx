@@ -81,10 +81,11 @@ export default function InvestManageModal({ open, onClose, userId, onChanged }: 
     setError(null)
 
     try {
-      const res = await fetch('/api/investment-manage', {
+      const res = await fetch('/api/investment', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
+          type: 'manage',
           userId,
           action: 'create',
           fundCode: form.fund_code || null,
@@ -127,10 +128,11 @@ export default function InvestManageModal({ open, onClose, userId, onChanged }: 
     setError(null)
 
     try {
-      const res = await fetch('/api/investment-manage', {
+      const res = await fetch('/api/investment', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
+          type: 'manage',
           userId,
           action: 'update',
           investmentId: editingId,
@@ -164,10 +166,10 @@ export default function InvestManageModal({ open, onClose, userId, onChanged }: 
     setSaving(true)
     setError(null)
     try {
-      const res = await fetch('/api/investment-manage', {
+      const res = await fetch('/api/investment', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ userId, action: 'deactivate', investmentId: id }),
+        body: JSON.stringify({ type: 'manage', userId, action: 'deactivate', investmentId: id }),
       })
       const data = await res.json()
       if (!res.ok) throw new Error(data.error || '停用失败')
@@ -184,10 +186,10 @@ export default function InvestManageModal({ open, onClose, userId, onChanged }: 
     setSaving(true)
     setError(null)
     try {
-      const res = await fetch('/api/investment-manage', {
+      const res = await fetch('/api/investment', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ userId, action: 'update', investmentId: id, isActive: true }),
+        body: JSON.stringify({ type: 'manage', userId, action: 'update', investmentId: id, isActive: true }),
       })
       const data = await res.json()
       if (!res.ok) throw new Error(data.error || '启用失败')

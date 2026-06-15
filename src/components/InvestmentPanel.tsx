@@ -60,10 +60,11 @@ export default function InvestmentPanel({ userId }: Props) {
   }, [funds])
 
   const handleUpdateCR = useCallback(async (investmentId: string, c: number, r: number) => {
-    const res = await fetch('/api/investment-update-cr', {
+    const res = await fetch('/api/investment', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
+        type: 'update_cr',
         userId,
         investmentId,
         currentValueCents: c,
@@ -104,10 +105,11 @@ export default function InvestmentPanel({ userId }: Props) {
         ? fund.current_value_cents - actualAmountCents
         : fund.current_value_cents
 
-    const res = await fetch('/api/investment-action', {
+    const res = await fetch('/api/investment', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
+        type: 'action',
         userId,
         investmentId,
         suggestionId: null, // 前端计算，暂不关联 suggestion 记录
