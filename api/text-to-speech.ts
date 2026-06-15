@@ -101,7 +101,7 @@ export default async function handler(req: any, res: any) {
         text: cleanText,
         voice_setting: {
           voice_id: 'Chinese (Mandarin)_Gentleman',
-          speed: 0.83,
+          speed: 1.0,
         },
         output_format: 'hex',
         audio_setting: {

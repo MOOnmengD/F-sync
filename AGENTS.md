@@ -1,8 +1,6 @@
-# CLAUDE.md
+# AGENTS.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
-
----
+This file provides guidance to Codex (Codex.ai/code) when working with code in this repository.
 
 ## ⚠️ 文档优先工作流（必读）
 
@@ -25,18 +23,18 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ### 文档索引
 
-| 文档 | 内容 |
-|------|------|
-| [INDEX.md](docs/INDEX.md) | 全局索引，按功能/技术栈快速查找 |
-| [01-项目概览](docs/01-项目概览.md) | 项目定位、技术栈、架构总览 |
-| [02-前端页面](docs/02-前端页面.md) | 所有前端页面功能、组件、交互 |
-| [03-后端API](docs/03-后端API.md) | 全部 API 端点详细说明 |
-| [04-数据库](docs/04-数据库.md) | 全部数据表结构、字段、RLS、迁移 |
-| [05-AI系统设计](docs/05-AI系统设计.md) | AI 角色、RAG、上下文构建、画像 |
-| [06-推送与定时任务](docs/06-推送与定时任务.md) | Push Kit、GitHub Actions |
-| [07-状态管理与数据流](docs/07-状态管理与数据流.md) | Zustand stores、数据流 |
-| [08-配置与环境变量](docs/08-配置与环境变量.md) | 全部环境变量、配置文件 |
-| [方案文档/](docs/方案文档/) | 功能设计文档 + 模板 |
+| 文档                                               | 内容                            |
+| -------------------------------------------------- | ------------------------------- |
+| [INDEX.md](docs/INDEX.md)                          | 全局索引，按功能/技术栈快速查找 |
+| [01-项目概览](docs/01-项目概览.md)                 | 项目定位、技术栈、架构总览      |
+| [02-前端页面](docs/02-前端页面.md)                 | 所有前端页面功能、组件、交互    |
+| [03-后端API](docs/03-后端API.md)                   | 全部 API 端点详细说明           |
+| [04-数据库](docs/04-数据库.md)                     | 全部数据表结构、字段、RLS、迁移 |
+| [05-AI系统设计](docs/05-AI系统设计.md)             | AI 角色、RAG、上下文构建、画像  |
+| [06-推送与定时任务](docs/06-推送与定时任务.md)     | Push Kit、GitHub Actions        |
+| [07-状态管理与数据流](docs/07-状态管理与数据流.md) | Zustand stores、数据流          |
+| [08-配置与环境变量](docs/08-配置与环境变量.md)     | 全部环境变量、配置文件          |
+| [方案文档/](docs/方案文档/)                        | 功能设计文档 + 模板             |
 
 ---
 
@@ -47,6 +45,7 @@ F-Sync 是一个个人生活记录 + AI 生活助手 Web 应用，部署在 http
 **开发者背景**：工科生，软件开发新手，用词可能不够专业，先确认需求再编程，开发过程中务必避免幻觉。
 
 **两个代码仓库**：
+
 - Web 端：`D:/F-Sync/`（本仓库）
 - HarmonyOS 端：`C:/Users/User/DevEcoStudioProjects/FSync/`
 
@@ -96,13 +95,13 @@ GitHub Actions ──curl──→ Vercel api/*（定时触发）
 
 **数据流总览**（详见 [07-状态管理](docs/07-状态管理与数据流.md)）：
 
-| 流程 | 路径 |
-|------|------|
+| 流程      | 路径                                                         |
+| --------- | ------------------------------------------------------------ |
 | 记账/记录 | Home → `/api/parse-transaction` → transactions → `/api/vectorize` |
-| AI 对话 | Chat → `/api/chat-completion`（RAG + 画像 + 上下文） → chat_messages |
-| 主动消息 | GitHub Actions → `/api/proactive-ai` → chat_messages + 华为推送 |
-| 每日摘要 | GitHub Actions → `/api/daily-summary` → daily_logs + 画像 + 事件 |
-| 设置同步 | localStorage ↔ Supabase user_settings |
+| AI 对话   | Chat → `/api/chat-completion`（RAG + 画像 + 上下文） → chat_messages |
+| 主动消息  | GitHub Actions → `/api/proactive-ai` → chat_messages + 华为推送 |
+| 每日摘要  | GitHub Actions → `/api/daily-summary` → daily_logs + 画像 + 事件 |
+| 设置同步  | localStorage ↔ Supabase user_settings                        |
 
 ### 设计规范
 
@@ -137,18 +136,20 @@ GitHub Actions ──curl──→ Vercel api/*（定时触发）
 **重要**：华为开发者文档 (`developer.huawei.com`) 是 JavaScript SPA 动态渲染，WebFetch 无法获取实际内容。**禁止直接 WebFetch 华为开发者文档 URL。**
 
 正确流程：
+
 1. 用户给出 `developer.huawei.com` URL 时，先用 **WebSearch** `site:developer.huawei.com <关键词>` 确认页面存在及版本
 2. 映射到对应的 OpenHarmony Gitee 仓库路径，用 **WebFetch** 拉取 raw Markdown 源文件
 
 **URL 映射规则**：
 
-| 华为开发者 URL 模式 | Gitee OpenHarmony Raw 路径 |
-|---|---|
+| 华为开发者 URL 模式                                          | Gitee OpenHarmony Raw 路径                                   |
+| ------------------------------------------------------------ | ------------------------------------------------------------ |
 | `developer.huawei.com/consumer/cn/doc/harmonyos-references/js-apis-xxx` | `gitee.com/openharmony/docs/raw/HEAD/zh-cn/application-dev/reference/apis/js-apis-xxx.md` |
 | `developer.huawei.com/consumer/en/doc/harmonyos-references-V*/js-apis-xxx` | `gitee.com/openharmony/docs/raw/HEAD/en/application-dev/reference/apis/js-apis-xxx.md` |
 | `developer.huawei.com/consumer/cn/doc/harmonyos-guides-V*/xxx` | `gitee.com/openharmony/docs/raw/HEAD/zh-cn/application-dev/xxx.md` |
 
 **注意事项**：
+
 - Gitee raw 文件会 302 重定向到 `raw.giteeusercontent.com`，WebFetch 跟随重定向后即可获取内容
 - 文件名大小写敏感，注意 `workScheduler` vs `workscheduler` 等驼峰差异
 - 较新的 API 可能在 Kit 子目录下，需结合 WebSearch 结果确认精确路径
@@ -159,6 +160,7 @@ GitHub Actions ──curl──→ Vercel api/*（定时触发）
 HarmonyOS 端本质上是 **WebView 壳**，核心功能由 Web 端实现。ArkTS 负责加载 WebView、注入 JS 桥接、提供原生通知和振动。
 
 **关键文件**：
+
 ```
 entry/src/main/ets/
   entryability/EntryAbility.ets   # 应用入口，初始化通知服务、请求权限
