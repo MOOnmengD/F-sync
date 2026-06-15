@@ -1653,6 +1653,11 @@ export default function Chat() {
     }
   }, [])
 
+  // 稳定的 MessageBubble 回调引用，避免每次渲染创建新函数导致 React.memo 失效
+  const handleReadAloud = useCallback((msg: ChatMessage) => {
+    requestAndPlay(msg.content, msg.id)
+  }, [requestAndPlay])
+
   const tokenCount = useMemo(() => {
     if (lastFullContext.length === 0) return null
     return estimateTotalTokens(lastFullContext)
@@ -2049,7 +2054,7 @@ export default function Chat() {
             isTyping={isLoading && idx === messages.length - 1}
             onDelete={deleteMessage}
             onResend={msg.role === 'assistant' ? handleResend : undefined}
-            onReadAloud={msg.role === 'assistant' ? (m) => requestAndPlay(m.content, m.id) : undefined}
+            onReadAloud={msg.role === 'assistant' ? handleReadAloud : undefined}
             isReading={readingMsgId === msg.id}
           />
         ))}
