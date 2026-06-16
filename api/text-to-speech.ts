@@ -100,7 +100,7 @@ export default async function handler(req: any, res: any) {
         model: 'speech-2.8-hd',
         text: cleanText,
         voice_setting: {
-          voice_id: 'Chinese (Mandarin)_Gentleman',
+          voice_id: 'xmz-minimax-voice',
           speed: 1.0,
         },
         output_format: 'hex',
