@@ -25,6 +25,20 @@ function statusAccent(s: MediaStatus): 'lavender' | 'butter' | 'mint' {
   return 'mint'
 }
 
+type Accent = 'peach' | 'mint' | 'baby' | 'butter' | 'lavender'
+
+const ACCENT_HEX: Record<Accent, string> = {
+  peach: '#FAD9D2',
+  mint: '#CFF3E5',
+  baby: '#D7E8FF',
+  butter: '#FFF1B8',
+  lavender: '#E9D9FF',
+}
+
+function typeAccent(t: MediaType): Accent {
+  return t === 'book' ? 'mint' : 'peach'
+}
+
 function formatDate(iso: string): string {
   const d = new Date(iso)
   const y = d.getFullYear()
@@ -423,11 +437,12 @@ export default function Library() {
                     key={t}
                     type="button"
                     onClick={() => setDraft((d) => ({ ...d, mediaType: t }))}
-                    className={`rounded-full px-4 py-2 text-sm border border-base-line ${
+                    className="rounded-full px-4 py-2 text-sm border border-base-line bg-base-surface text-base-muted"
+                    style={
                       draft.mediaType === t
-                        ? 'bg-pastel-mint text-base-text'
-                        : 'bg-base-surface text-base-muted'
-                    }`}
+                        ? { backgroundColor: ACCENT_HEX[typeAccent(t)], color: '#4B5563' }
+                        : undefined
+                    }
                   >
                     {MEDIA_TYPE_ICON[t]} {MEDIA_TYPE_LABEL[t]}
                   </button>
@@ -463,11 +478,12 @@ export default function Library() {
                     key={s}
                     type="button"
                     onClick={() => setDraft((d) => ({ ...d, status: s }))}
-                    className={`rounded-full px-4 py-2 text-sm border border-base-line ${
+                    className="rounded-full px-4 py-2 text-sm border border-base-line bg-base-surface text-base-muted"
+                    style={
                       draft.status === s
-                        ? 'bg-pastel-' + statusAccent(s) + ' text-base-text'
-                        : 'bg-base-surface text-base-muted'
-                    }`}
+                        ? { backgroundColor: ACCENT_HEX[statusAccent(s)], color: '#4B5563' }
+                        : undefined
+                    }
                   >
                     {label}
                   </button>
