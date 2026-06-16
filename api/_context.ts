@@ -567,38 +567,45 @@ async function getTimeSinceLastConversation(
   conversationMessages: Array<{ role: string; content: string; createdAt?: string }>,
 ): Promise<string> {
   try {
-    // 当前会话第一条消息的时间戳（标志本次对话开始）
-    const firstMsg = conversationMessages[0]
-    const convStartTime = firstMsg?.createdAt
-      ? new Date(firstMsg.createdAt)
+    // 取最后一条消息（即当前正在发送的消息）的时间戳作为参考点。
+    // 不能用 conversationMessages[0]，因为上下文窗口可能包含上一轮对话的大量消息，
+    // 导致 [0] 落在上一轮对话中间而非本轮起点，上一轮对话内部消息间隔极小，
+    // "上一轮最后一条"会被错误地定位为那条相邻消息，时间差 ≈ 0 → 永远不触发提示。
+    const lastMsg = conversationMessages[conversationMessages.length - 1]
+    const currentTime = lastMsg?.createdAt
+      ? new Date(lastMsg.createdAt)
       : new Date()
 
-    // 查找本次对话开始前最近的一条聊天记录
+    // 查找当前消息之前最近的一条已保存聊天记录
+    // （当前消息尚未写入 DB，因此查到的就是上一轮对话的最后一条消息）
     const { data: lastMsgs } = await supabase
       .from('chat_messages')
       .select('created_at')
       .eq('user_id', userId)
       .neq('role', 'system')
-      .lt('created_at', convStartTime.toISOString())
+      .lt('created_at', currentTime.toISOString())
       .order('created_at', { ascending: false })
       .limit(1)
 
     if (!lastMsgs || lastMsgs.length === 0) return ''
 
     const lastMsgTime = new Date(lastMsgs[0].created_at)
-    const diffMs = convStartTime.getTime() - lastMsgTime.getTime()
+    const diffMs = currentTime.getTime() - lastMsgTime.getTime()
     const diffMinutes = Math.floor(diffMs / 60000)
 
     // 相隔不超过 3 分钟，视为同一轮对话，不添加
     if (diffMinutes <= 3) return ''
 
-    const hours = Math.floor(diffMinutes / 60)
+    const days = Math.floor(diffMinutes / 1440)
+    const hours = Math.floor((diffMinutes % 1440) / 60)
     const minutes = diffMinutes % 60
 
-    if (hours > 0) {
-      return `[距离上次对话已经过去了${hours}小时${minutes}分钟]`
-    }
-    return `[距离上次对话已经过去了${minutes}分钟]`
+    const parts: string[] = []
+    if (days > 0) parts.push(`${days}天`)
+    if (hours > 0) parts.push(`${hours}小时`)
+    if (minutes > 0 || parts.length === 0) parts.push(`${minutes}分钟`)
+
+    return `[距离上次对话已经过去了${parts.join('')}]`
   } catch (e: any) {
     console.warn('[TimeSinceLastConv] 查询失败:', e.message)
     return ''
@@ -673,7 +680,7 @@ export async function enrichMessages(params: {
   // ---- 真实世界信息（暂存，稍后插入到当前用户消息之前） ----
   const worldLines: string[] = []
   worldLines.push(
-    `[当前时间] ${new Date().toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' })}`,
+    `[当前时间] ${new Date().toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai', weekday: 'long', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false })}`,
   )
   // 天气在调用方可能已获取，此处延迟获取（利用 _weather 内部缓存）
   if (amapKey) {
@@ -779,6 +786,7 @@ export async function enrichMessages(params: {
         year: 'numeric',
         month: '2-digit',
         day: '2-digit',
+        weekday: 'long',
       })
       .replace(/\//g, '')
     if (dateStr !== lastDateStr) {
