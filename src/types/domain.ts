@@ -58,6 +58,20 @@ export type HomeRecord =
       accent: 'peach' | 'mint' | 'baby' | 'butter' | 'lavender'
     }
 
+export type MediaType = 'book' | 'movie'
+export type MediaStatus = 'want_to_consume' | 'consuming' | 'consumed'
+
+export type MediaItem = {
+  id: string
+  userId: string
+  title: string
+  mediaType: MediaType
+  status: MediaStatus
+  review: string | null
+  createdAt: string
+  updatedAt: string
+}
+
 export type MockDb = {
   itemsById: Record<ItemId, Item>
   itemReviewsByItemId: Record<ItemId, ItemReview>

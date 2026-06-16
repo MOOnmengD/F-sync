@@ -10,6 +10,7 @@ import Vault from './pages/Vault'
 import Timeline from './pages/Timeline'
 import Login from './pages/Login'
 import Chat from './pages/Chat'
+import Library from './pages/Library'
 import Debug from './pages/Debug'
 import { supabase } from './supabaseClient'
 
@@ -99,6 +100,7 @@ export default function App() {
         <Route path="/" element={<Home />} />
         <Route path="/finance" element={<Finance />} />
         <Route path="/whisper" element={<Whisper />} />
+        <Route path="/library" element={<Library />} />
         <Route path="/work" element={<Work />} />
         <Route path="/vault" element={<Vault />} />
         <Route path="/timeline" element={<Timeline />} />
