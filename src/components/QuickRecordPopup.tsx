@@ -29,8 +29,8 @@ const accentHex: Record<(typeof modeMeta)[QuickMode]['accent'], string> = {
   rose: '#FAD1D1',
 }
 
-type FinanceCategory = '衣' | '食' | '住' | '行' | '娱乐'
-const FINANCE_CATEGORIES: FinanceCategory[] = ['衣', '食', '住', '行', '娱乐']
+type FinanceCategory = '衣' | '食' | '住' | '行' | '其他'
+const FINANCE_CATEGORIES: FinanceCategory[] = ['衣', '食', '住', '行', '其他']
 const BASE_MOODS = ['😐', '🥰', '😔', '🤬', '😖'] as const
 
 interface QuickRecordPopupProps {

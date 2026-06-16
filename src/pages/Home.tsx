@@ -3,7 +3,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { supabase } from '../supabaseClient'
 import { useUi } from '../store/ui'
-import type { QuickMode } from '../types/domain'
+import type { MediaStatus, MediaType, QuickMode } from '../types/domain'
 import { IconButton } from '../shared/ui/IconButton'
 import { PillButton } from '../shared/ui/PillButton'
 import { RepurchaseIndexPill } from '../shared/ui/RepurchaseIndexPill'
@@ -24,6 +24,7 @@ const modeMeta: Record<
   save: { label: '收藏', accent: 'lavender', hint: '保存链接/片段，稍后再整理' },
   timeline: { label: '时间轴', accent: 'timeline', hint: '计时记录：选择分类，开始 / 停止' },
   invest: { label: '理财', accent: 'rose', hint: '' },
+  media: { label: '书影', accent: 'baby', hint: '输入书名/影名和感受，一句话记下来' },
 }
 
 const accentHex: Record<(typeof modeMeta)[QuickMode]['accent'], string> = {
@@ -305,7 +306,7 @@ export default function Home() {
     return () => window.clearTimeout(t)
   }, [toast])
 
-  const financeCategories = useMemo(() => ['衣', '食', '住', '行', '娱乐'] as const, [])
+  const financeCategories = useMemo(() => ['衣', '食', '住', '行', '其他'] as const, [])
   const baseMoods = useMemo(() => ['😐', '🥰', '😔', '🤬', '😖'] as const, [])
   const moodOptions = useMemo(() => [...baseMoods, ...customMoods], [baseMoods, customMoods])
 
