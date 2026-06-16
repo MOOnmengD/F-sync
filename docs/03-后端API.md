@@ -7,6 +7,7 @@
 | 端点 | 方法 | 鉴权 | 用途 |
 |------|------|------|------|
 | `/api/parse-transaction` | POST | 无 | AI 解析记账文本 |
+| `/api/parse-media` | POST | 无 | AI 解析书影文本（标题+评价） |
 | `/api/chat-completion` | POST | 无（由 Supabase RLS 保护） | AI 对话（含 RAG） |
 | `/api/vectorize` | POST | 无 | 生成 embedding |
 | `/api/proactive-ai` | POST | `CRON_SECRET` | 主动消息 + 推送 |
@@ -84,6 +85,35 @@ AI 对话上下文构建模块（详见 [05-AI系统设计](./05-AI系统设计.
 - 温度 0.1（低随机性，确保解析一致性）
 
 **错误处理**：非 JSON 响应会尝试正则提取 `{...}` 块
+
+---
+
+### `POST /api/parse-media`
+
+**用途**：AI 解析用户自由文本书影输入，分离标题和评价。
+
+**输入**：
+```json
+{ "text": "三体 震撼的硬科幻，读完久久不能平静" }
+```
+
+**输出**：
+```json
+{
+  "title": "三体",
+  "review": "震撼的硬科幻，读完久久不能平静"
+}
+```
+
+**环境变量**：`AI_API_URL`, `AI_API_KEY`, `AI_MODEL`（默认 `deepseek-chat`）
+
+**AI Prompt 要点**：
+- 严格 JSON 输出，禁止改写/拆分用户原文
+- 空格作为字段分隔边界
+- 2 个输出字段：`title`（书名/影名）, `review`（用户评价，完全保留原文）
+- 温度 0.1（低随机性，确保解析一致性）
+
+**错误处理**：非 JSON 响应会尝试正则提取 `{...}` 块；与 `parse-transaction` 共享 AI 基础设施
 
 ---
 

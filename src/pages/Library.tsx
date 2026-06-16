@@ -1,4 +1,4 @@
-import { Menu, Plus, X, Pencil, Trash2 } from 'lucide-react'
+import { Menu, X, Pencil, Trash2 } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { supabase } from '../supabaseClient'
 import { useUi } from '../store/ui'
@@ -130,12 +130,6 @@ export default function Library() {
   useEffect(() => {
     void fetchItems()
   }, [typeFilter, statusFilter])
-
-  const openAdd = () => {
-    setEditingId(null)
-    setDraft(EMPTY_DRAFT)
-    setModalOpen(true)
-  }
 
   const openEdit = (item: MediaItem) => {
     setEditingId(item.id)
@@ -396,19 +390,7 @@ export default function Library() {
         )}
       </div>
 
-      {/* Add FAB */}
-      <div className="mt-6 flex justify-center">
-        <button
-          type="button"
-          onClick={openAdd}
-          className="inline-flex items-center gap-2 rounded-full border border-base-line bg-base-surface px-5 py-2.5 text-sm text-base-text active:opacity-70"
-        >
-          <Plus size={16} />
-          添加条目
-        </button>
-      </div>
-
-      {/* Add / Edit Modal */}
+      {/* Edit Modal */}
       {modalOpen && (
         <div
           className="fixed inset-0 z-50 flex items-end justify-center bg-black/20 backdrop-blur-sm"
@@ -423,9 +405,7 @@ export default function Library() {
               <div className="absolute left-0 top-1/2 -translate-y-1/2">
                 <IconButton label="关闭" onClick={closeModal} icon={<X size={18} />} />
               </div>
-              <div className="text-sm font-medium text-base-text">
-                {editingId ? '编辑条目' : '添加条目'}
-              </div>
+              <div className="text-sm font-medium text-base-text">编辑条目</div>
             </div>
 
             {/* Media type toggle */}

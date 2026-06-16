@@ -29,7 +29,7 @@ export type ItemReview = {
 
 export type Mood = string
 
-export type QuickMode = 'finance' | 'review' | 'note' | 'work' | 'save' | 'timeline' | 'invest'
+export type QuickMode = 'finance' | 'review' | 'note' | 'work' | 'save' | 'timeline' | 'invest' | 'media'
 
 export type HomeRecord =
   | {

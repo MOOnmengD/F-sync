@@ -48,6 +48,10 @@ export default function Home() {
   const setNecessity = useUi((s) => s.setFinanceNecessity)
   const mood = useUi((s) => s.noteMood)
   const setMood = useUi((s) => s.setNoteMood)
+  const mediaType = useUi((s) => s.mediaType)
+  const setMediaType = useUi((s) => s.setMediaType)
+  const mediaStatus = useUi((s) => s.mediaStatus)
+  const setMediaStatus = useUi((s) => s.setMediaStatus)
 
   const meta = modeMeta[mode]
   const [text, setText] = useState('')
@@ -137,6 +141,26 @@ export default function Home() {
       item_name: string | null
       brand: string | null
       details: string | null
+      review: string | null
+    }
+  }
+
+  const parseMediaByAi = async (raw: string) => {
+    const r = await fetch('/api/parse-media', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text: raw }),
+    })
+    const data = (await r.json().catch(() => null)) as unknown
+    if (!r.ok || !data || typeof data !== 'object') {
+      const msg =
+        typeof (data as any)?.error === 'string'
+          ? (data as any).error
+          : 'AI 解析失败（后端未返回有效 JSON）'
+      throw new Error(msg)
+    }
+    return data as {
+      title: string | null
       review: string | null
     }
   }
@@ -298,6 +322,15 @@ export default function Home() {
   )
   const chipActiveStyle = useMemo(() => ({ backgroundColor: accentHex[modeMeta.finance.accent] }), [])
   const noteMoodActiveStyle = useMemo(() => ({ backgroundColor: accentHex[modeMeta.note.accent] }), [])
+  const mediaTypeActiveStyle = useMemo(() => ({ backgroundColor: accentHex.lavender }), [])
+  const mediaStatusAccent: Record<MediaStatus, string> = useMemo(
+    () => ({
+      want_to_consume: accentHex.lavender,
+      consuming: accentHex.butter,
+      consumed: accentHex.mint,
+    }),
+    [],
+  )
 
   useEffect(() => {
     if (!toast) return
@@ -552,6 +585,60 @@ export default function Home() {
     }
   }
 
+  const sendMedia = async () => {
+    const raw = text.trim()
+    if (!raw) return
+
+    if (!supabase) {
+      setToast('先配置 Supabase URL/Key')
+      return
+    }
+
+    if (sending) return
+
+    const outboxId = makeClientId()
+    addOutbox({ id: outboxId, mode, raw, ts: Date.now() })
+    setText('')
+    setToast('记录中…')
+
+    setSending(true)
+    try {
+      const parsed = await parseMediaByAi(raw)
+      const title = parsed.title?.trim() || null
+      if (!title) {
+        setToast('AI 未解析出标题')
+        return
+      }
+      const review = parsed.review?.trim() || null
+
+      const finalType: MediaType = mediaType ?? 'book'
+      const finalStatus: MediaStatus = mediaStatus ?? 'want_to_consume'
+
+      const { error } = await supabase.from('media_items').insert({
+        title,
+        media_type: finalType,
+        status: finalStatus,
+        review,
+      })
+
+      if (error) {
+        setToast(error.message || '写入失败')
+        return
+      }
+
+      removeOutbox(outboxId)
+      setMediaType(null)
+      setMediaStatus(null)
+      setToast('已记录')
+    } catch (e: any) {
+      const msg = String(e?.message ?? e) || 'AI 解析失败'
+      setToast(`${msg}（已保存在本地草稿）`)
+      if (!text.trim()) setText(raw)
+    } finally {
+      setSending(false)
+    }
+  }
+
   const sendWhisper = async () => {
     const raw = text.trim()
     if (!raw) return
@@ -605,6 +692,11 @@ export default function Home() {
 
     if (mode === 'finance' || mode === 'review') {
       void sendTransaction()
+      return
+    }
+
+    if (mode === 'media') {
+      void sendMedia()
       return
     }
 
@@ -667,6 +759,12 @@ export default function Home() {
               active={mode === 'invest'}
               onClick={() => setMode('invest')}
               accent="rose"
+            />
+            <PillButton
+              label="书影"
+              active={mode === 'media'}
+              onClick={() => setMode('media')}
+              accent={modeMeta.media.accent}
             />
           </div>
         </div>
@@ -831,6 +929,54 @@ export default function Home() {
                 </div>
               </div>
             )}
+            {mode === 'media' && (
+              <div className="mb-2 rounded-2xl bg-base-surface p-3">
+                <div className="flex flex-wrap items-center gap-2">
+                  {(['book', 'movie'] as MediaType[]).map((t) => {
+                    const active = mediaType === t
+                    const label = t === 'book' ? '📖 书籍' : '🎬 影片'
+                    return (
+                      <button
+                        key={t}
+                        type="button"
+                        onClick={() => setMediaType(active ? null : t)}
+                        className={`rounded-full border border-base-line px-3 py-1 text-xs active:opacity-70 ${
+                          active ? 'text-base-text' : 'bg-transparent text-base-muted'
+                        }`}
+                        style={active ? mediaTypeActiveStyle : undefined}
+                      >
+                        {label}
+                      </button>
+                    )
+                  })}
+                </div>
+
+                <div className="mt-2 flex flex-wrap items-center gap-2">
+                  {(
+                    [
+                      ['want_to_consume', '想看'],
+                      ['consuming', '正在看'],
+                      ['consumed', '看过'],
+                    ] as [MediaStatus, string][]
+                  ).map(([s, label]) => {
+                    const active = mediaStatus === s
+                    return (
+                      <button
+                        key={s}
+                        type="button"
+                        onClick={() => setMediaStatus(active ? null : s)}
+                        className={`rounded-full border border-base-line px-3 py-1 text-xs active:opacity-70 ${
+                          active ? 'text-base-text' : 'bg-transparent text-base-muted'
+                        }`}
+                        style={active ? { backgroundColor: mediaStatusAccent[s] } : undefined}
+                      >
+                        {label}
+                      </button>
+                    )
+                  })}
+                </div>
+              </div>
+            )}
             {mode === 'finance' && pendingReviewTx && (
               <button
                 type="button"
@@ -903,7 +1049,7 @@ export default function Home() {
               </div>
 
               <div className="mt-2 pb-[env(safe-area-inset-bottom)]">
-                {mode !== 'finance' && mode !== 'note' && (
+                {mode !== 'finance' && mode !== 'note' && mode !== 'media' && (
                   <div className="flex flex-wrap gap-2">
                     <span className="rounded-full border border-base-line bg-base-bg px-3 py-1 text-xs text-base-muted">
                       自动关联 Item（后续）

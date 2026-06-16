@@ -17,6 +17,7 @@ const modeMeta: Record<
   save: { label: '收藏', accent: 'lavender' },
   timeline: { label: '时间轴', accent: 'timeline' },
   invest: { label: '理财', accent: 'rose' },
+  media: { label: '书影', accent: 'baby' },
 }
 
 const accentHex: Record<(typeof modeMeta)[QuickMode]['accent'], string> = {
