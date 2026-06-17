@@ -1,4 +1,5 @@
-import { useState, useEffect } from 'react'
+import { useEffect, useState } from 'react'
+import { Check, X } from 'lucide-react'
 import type { Suggestion } from '../utils/investmentCalculator'
 
 export type InvestmentData = {
@@ -16,7 +17,7 @@ export type InvestmentData = {
 
 type Props = {
   fund: InvestmentData
-  suggestion: Suggestion | null        // null = 尚未计算
+  suggestion: Suggestion | null
   onUpdate: (id: string, params: {
     c?: number
     r?: number
@@ -33,6 +34,9 @@ const cycleLabel: Record<string, string> = {
   none: '—',
 }
 
+export const investmentTableGrid =
+  'grid grid-cols-[minmax(84px,1.28fr)_minmax(80px,1fr)_minmax(64px,0.78fr)_minmax(84px,1.05fr)_40px] gap-x-2'
+
 function fmtYuan(cents: number): string {
   return (cents / 100).toFixed(2)
 }
@@ -47,17 +51,14 @@ function truncateName(name: string, max: number = 6): string {
 }
 
 export default function InvestmentCard({ fund, suggestion, onUpdate, onConfirm, onCalculateSingle }: Props) {
-  // 编辑状态
   const [editingField, setEditingField] = useState<'c' | 'r' | 'm' | 'stop' | null>(null)
   const [cDraft, setCDraft] = useState('')
   const [rDraft, setRDraft] = useState('')
   const [mDraft, setMDraft] = useState('')
   const [stopDraft, setStopDraft] = useState('')
-  const [actualAmount, setActualAmount] = useState('')
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  // 同步外部数据到草稿
   useEffect(() => { setCDraft(fmtYuan(fund.current_value_cents)) }, [fund.current_value_cents])
   useEffect(() => { setRDraft(fmtPct(fund.current_profit_rate)) }, [fund.current_profit_rate])
   useEffect(() => { setMDraft(fmtYuan(fund.target_amount_cents)) }, [fund.target_amount_cents])
@@ -65,18 +66,21 @@ export default function InvestmentCard({ fund, suggestion, onUpdate, onConfirm, 
     setStopDraft(fund.stop_profit_line != null ? (fund.stop_profit_line * 100).toFixed(0) : '')
   }, [fund.stop_profit_line])
 
-  // 有建议时默认填入建议金额
-  useEffect(() => {
-    if (suggestion && (suggestion.type === 'buy' || suggestion.type === 'sell')) {
-      setActualAmount(fmtYuan(suggestion.amountCents))
-    }
-  }, [suggestion])
+  const cancelEditing = () => {
+    setEditingField(null)
+    setError(null)
+    setCDraft(fmtYuan(fund.current_value_cents))
+    setRDraft(fmtPct(fund.current_profit_rate))
+    setMDraft(fmtYuan(fund.target_amount_cents))
+    setStopDraft(fund.stop_profit_line != null ? (fund.stop_profit_line * 100).toFixed(0) : '')
+  }
 
   const handleSave = async () => {
     setSaving(true)
     setError(null)
     try {
       const params: { c?: number; r?: number; m?: number; stopProfit?: number | null } = {}
+
       if (editingField === 'c') {
         const v = parseFloat(cDraft)
         if (isNaN(v) || v < 0) { setError('请输入有效金额'); setSaving(false); return }
@@ -102,6 +106,7 @@ export default function InvestmentCard({ fund, suggestion, onUpdate, onConfirm, 
           params.stopProfit = v / 100
         }
       }
+
       await onUpdate(fund.id, params)
       setEditingField(null)
     } catch {
@@ -111,16 +116,16 @@ export default function InvestmentCard({ fund, suggestion, onUpdate, onConfirm, 
     }
   }
 
-  const handleConfirm = async () => {
-    const v = parseFloat(actualAmount)
-    if (isNaN(v) || v <= 0) {
+  const handleConfirmAmount = async (amountCents: number) => {
+    if (!Number.isFinite(amountCents) || amountCents <= 0) {
       setError('请输入有效金额')
       return
     }
+
     setSaving(true)
     setError(null)
     try {
-      await onConfirm(fund.id, Math.round(v * 100))
+      await onConfirm(fund.id, amountCents)
     } catch {
       setError('确认失败')
     } finally {
@@ -128,57 +133,99 @@ export default function InvestmentCard({ fund, suggestion, onUpdate, onConfirm, 
     }
   }
 
-  const cancelEditing = () => {
-    setEditingField(null)
-    setError(null)
-    setCDraft(fmtYuan(fund.current_value_cents))
-    setRDraft(fmtPct(fund.current_profit_rate))
-    setMDraft(fmtYuan(fund.target_amount_cents))
-    setStopDraft(fund.stop_profit_line != null ? (fund.stop_profit_line * 100).toFixed(0) : '')
+  const confirmSuggested = () => {
+    if (!suggestion || suggestion.type === 'hold') return
+    void handleConfirmAmount(suggestion.amountCents)
   }
 
-  // 名称截断
+  const confirmCustomAmount = () => {
+    if (!suggestion || suggestion.type === 'hold') return
+    const value = window.prompt('请输入实际调仓金额（元）', fmtYuan(suggestion.amountCents))
+    if (value === null) return
+
+    const amount = parseFloat(value)
+    if (isNaN(amount) || amount <= 0) {
+      setError('请输入有效金额')
+      return
+    }
+    void handleConfirmAmount(Math.round(amount * 100))
+  }
+
+  const renderEditActions = () => (
+    <span className="inline-flex items-center gap-0.5">
+      <button
+        type="button"
+        onClick={handleSave}
+        disabled={saving}
+        title="保存"
+        aria-label="保存"
+        className="grid size-4 place-items-center rounded-full text-base-text active:opacity-70 disabled:opacity-40"
+      >
+        <Check size={10} />
+      </button>
+      <button
+        type="button"
+        onClick={cancelEditing}
+        disabled={saving}
+        title="取消"
+        aria-label="取消"
+        className="grid size-4 place-items-center rounded-full text-base-muted active:opacity-70 disabled:opacity-40"
+      >
+        <X size={10} />
+      </button>
+    </span>
+  )
+
   const displayName = truncateName(fund.fund_name)
   const isTruncated = fund.fund_name.length > 6
 
-  // 子行信息
   const subInfoParts: string[] = []
   if (fund.trading_cycle !== 'none') subInfoParts.push(`${cycleLabel[fund.trading_cycle]}调仓`)
   else subInfoParts.push('无周期')
   if (fund.strategy_tag) subInfoParts.push(fund.strategy_tag)
   const subInfo = subInfoParts.join(' · ')
 
-  // 建议列内容
   const renderSuggestion = () => {
-    if (!suggestion) return null
-    if (suggestion.type === 'hold') {
-      return <span className="text-xs text-base-muted">⏸ 持仓观望</span>
-    }
-    return (
-      <div className="space-y-1">
-        <div className="text-xs">
-          <span className={suggestion.type === 'buy' ? 'text-[#A3D9A5]' : 'text-[#F4A261]'}>
-            {suggestion.type === 'buy' ? '⚡建议补仓' : '⚡建议卖出'}
-          </span>
-          <span className="ml-1 font-medium text-base-text">¥{fmtYuan(suggestion.amountCents)}</span>
+    if (!suggestion) {
+      return (
+        <div className="text-right text-[11px] leading-5 text-base-muted">
+          待计算
         </div>
-        <div className="text-[10px] text-base-muted leading-tight">{suggestion.reason}</div>
-        {/* 确认操作 */}
-        <div className="flex items-center gap-1.5">
-          <input
-            value={actualAmount}
-            onChange={(e) => setActualAmount(e.target.value)}
-            className="w-16 rounded-lg border border-base-line bg-base-bg px-1.5 py-0.5 text-[11px] text-base-text focus:outline-none"
-            inputMode="decimal"
-            placeholder="金额"
-          />
-          <span className="text-[10px] text-base-muted">元</span>
+      )
+    }
+
+    if (suggestion.type === 'hold') {
+      return (
+        <div className="text-right" title={suggestion.reason}>
+          <div className="text-[12px] font-medium leading-5 text-base-muted">观望</div>
+          <div className="truncate text-[10px] leading-4 text-base-muted">未触发</div>
+        </div>
+      )
+    }
+
+    const tone = suggestion.type === 'buy' ? 'text-[#2F9E7E]' : 'text-[#D97757]'
+
+    return (
+      <div className="text-right" title={suggestion.reason}>
+        <div className={`truncate text-[12px] font-semibold leading-5 ${tone}`}>
+          {suggestion.type === 'buy' ? '补' : '卖'} ¥{fmtYuan(suggestion.amountCents)}
+        </div>
+        <div className="mt-0.5 flex justify-end gap-1 text-[10px] leading-4">
           <button
-            onClick={handleConfirm}
+            type="button"
+            onClick={confirmSuggested}
             disabled={saving}
-            className="rounded-full border border-base-line bg-base-bg px-2 py-0.5 text-[11px] text-base-text active:opacity-70 disabled:opacity-40"
+            className="text-base-text active:opacity-70 disabled:opacity-40"
           >
-            {saving ? '…' : '确认'}
+            确认
+          </button>
+          <button
+            type="button"
+            onClick={confirmCustomAmount}
+            disabled={saving}
+            className="text-base-muted active:opacity-70 disabled:opacity-40"
+          >
+            改额
           </button>
         </div>
       </div>
@@ -186,159 +233,143 @@ export default function InvestmentCard({ fund, suggestion, onUpdate, onConfirm, 
   }
 
   return (
-    <div className="rounded-2xl border border-base-line bg-base-surface p-3">
-      {/* 第一子行：基金名称 | 持仓 | 收益率 | 建议 | 操作 */}
-      <div className="flex items-start gap-2">
-        {/* 名称列 */}
-        <div className="min-w-0 flex-[2]" title={isTruncated ? fund.fund_name : undefined}>
-          <span className="text-sm font-medium text-base-text">{displayName}</span>
+    <div className="bg-base-surface px-3 py-2.5">
+      <div className={`${investmentTableGrid} items-start`}>
+        <div className="min-w-0" title={isTruncated ? fund.fund_name : undefined}>
+          <div className="truncate text-[13px] font-semibold leading-5 text-base-text">{displayName}</div>
+          <div className="truncate text-[10px] leading-4 text-base-muted">{subInfo}</div>
         </div>
 
-        {/* 持仓列 */}
-        <div className="flex-[1.5] text-right">
+        <div className="min-w-0 text-right">
           {editingField === 'c' ? (
-            <div className="flex items-center justify-end gap-1">
+            <div className="flex items-center justify-end gap-0.5">
               <input
                 value={cDraft}
                 onChange={(e) => setCDraft(e.target.value)}
                 onKeyDown={(e) => { if (e.key === 'Enter') handleSave(); if (e.key === 'Escape') cancelEditing() }}
-                className="w-16 rounded-lg border border-base-line bg-base-bg px-1 py-0.5 text-xs text-base-text text-right focus:outline-none"
+                className="w-12 rounded-lg border border-base-line bg-base-bg px-1 py-0.5 text-right text-[12px] text-base-text focus:outline-none"
                 inputMode="decimal"
                 autoFocus
               />
-              <button onClick={handleSave} disabled={saving} className="text-[10px] text-base-text active:opacity-70 shrink-0">保存</button>
+              {renderEditActions()}
             </div>
           ) : (
-            <div className="flex items-center justify-end gap-1">
-              <span className="text-sm font-medium text-base-text">¥{fmtYuan(fund.current_value_cents)}</span>
-              <button onClick={() => { setEditingField('c'); setError(null) }} className="text-base-muted active:opacity-70 shrink-0">
-                ✏️
-              </button>
-            </div>
+            <button
+              type="button"
+              onClick={() => { setEditingField('c'); setError(null) }}
+              className="block w-full text-right active:opacity-70"
+              title="编辑当前持仓"
+            >
+              <div className="truncate text-[13px] font-semibold leading-5 text-base-text">¥{fmtYuan(fund.current_value_cents)}</div>
+            </button>
           )}
         </div>
 
-        {/* 收益率列 */}
-        <div className="flex-[1.2] text-right">
+        <div className="min-w-0 text-right">
           {editingField === 'r' ? (
-            <div className="flex items-center justify-end gap-1">
+            <div className="flex items-center justify-end gap-0.5">
               <input
                 value={rDraft}
                 onChange={(e) => setRDraft(e.target.value)}
                 onKeyDown={(e) => { if (e.key === 'Enter') handleSave(); if (e.key === 'Escape') cancelEditing() }}
-                className="w-16 rounded-lg border border-base-line bg-base-bg px-1 py-0.5 text-xs text-base-text text-right focus:outline-none"
+                className="w-[42px] rounded-lg border border-base-line bg-base-bg px-1 py-0.5 text-right text-[12px] text-base-text focus:outline-none"
                 inputMode="decimal"
                 autoFocus
               />
-              <button onClick={handleSave} disabled={saving} className="text-[10px] text-base-text active:opacity-70 shrink-0">保存</button>
+              {renderEditActions()}
             </div>
           ) : (
-            <div className="flex items-center justify-end gap-1">
-              <span className={`text-sm font-medium ${
+            <button
+              type="button"
+              onClick={() => { setEditingField('r'); setError(null) }}
+              className="block w-full text-right active:opacity-70"
+              title="编辑当前收益率"
+            >
+              <div className={`truncate text-[13px] font-semibold leading-5 ${
                 fund.current_profit_rate < 0 ? 'text-[#E76F51]' : fund.current_profit_rate > 0 ? 'text-[#A3D9A5]' : 'text-base-muted'
               }`}>
                 {fmtPct(fund.current_profit_rate)}
-              </span>
-              <button onClick={() => { setEditingField('r'); setError(null) }} className="text-base-muted active:opacity-70 shrink-0">
-                ✏️
-              </button>
-            </div>
+              </div>
+            </button>
           )}
         </div>
 
-        {/* 建议列 — 大字号摘要 */}
-        <div className="flex-[2] min-w-0">
-          {suggestion && suggestion.type !== 'hold' ? (
-            <span className={`text-xs font-medium ${suggestion.type === 'buy' ? 'text-[#A3D9A5]' : 'text-[#F4A261]'}`}>
-              {suggestion.type === 'buy' ? '补仓' : '卖出'} ¥{fmtYuan(suggestion.amountCents)}
-            </span>
-          ) : suggestion?.type === 'hold' ? (
-            <span className="text-xs text-base-muted">持仓观望</span>
-          ) : null}
+        <div className="min-w-0">
+          {renderSuggestion()}
         </div>
 
-        {/* 操作按钮 */}
-        <div className="shrink-0">
+        <div className="text-right">
           <button
+            type="button"
             onClick={() => onCalculateSingle(fund.id)}
             disabled={saving}
-            className="rounded-lg border border-base-line bg-base-bg px-2 py-0.5 text-[11px] text-base-muted active:opacity-70 disabled:opacity-40"
+            className="h-8 w-11 rounded-lg border border-base-line bg-base-bg text-[11px] text-base-muted active:opacity-70 disabled:opacity-40"
           >
             计算
           </button>
         </div>
       </div>
 
-      {/* 第二子行：周期·标签 | 目标M | 止盈线 | 建议详情 */}
-      <div className="mt-1 flex items-start gap-2">
-        {/* 名称列下方：周期 + 标签 */}
-        <div className="min-w-0 flex-[2]">
-          <span className="text-[10px] text-base-muted">{subInfo}</span>
-        </div>
+      <div className={`${investmentTableGrid} mt-0.5 items-start`}>
+        <div />
 
-        {/* 持仓列下方：目标 M */}
-        <div className="flex-[1.5] text-right">
+        <div className="min-w-0 text-right">
           {editingField === 'm' ? (
-            <div className="flex items-center justify-end gap-1">
+            <div className="flex items-center justify-end gap-0.5">
               <input
                 value={mDraft}
                 onChange={(e) => setMDraft(e.target.value)}
                 onKeyDown={(e) => { if (e.key === 'Enter') handleSave(); if (e.key === 'Escape') cancelEditing() }}
-                className="w-16 rounded-lg border border-base-line bg-base-bg px-1 py-0.5 text-[10px] text-base-text text-right focus:outline-none"
+                className="w-12 rounded-lg border border-base-line bg-base-bg px-1 py-0.5 text-right text-[10px] text-base-text focus:outline-none"
                 inputMode="decimal"
                 autoFocus
               />
-              <button onClick={handleSave} disabled={saving} className="text-[10px] text-base-text active:opacity-70 shrink-0">保存</button>
+              {renderEditActions()}
             </div>
           ) : (
-            <div className="flex items-center justify-end gap-1">
-              <span className="text-[10px] text-base-muted">目标 ¥{fmtYuan(fund.target_amount_cents)}</span>
-              <button onClick={() => { setEditingField('m'); setError(null) }} className="text-base-muted active:opacity-70 shrink-0">
-                ✏️
-              </button>
-            </div>
+            <button
+              type="button"
+              onClick={() => { setEditingField('m'); setError(null) }}
+              className="block w-full truncate text-right text-[10px] leading-4 text-base-muted active:opacity-70"
+              title="编辑建议持仓"
+            >
+              建议 ¥{fmtYuan(fund.target_amount_cents)}
+            </button>
           )}
         </div>
 
-        {/* 收益率列下方：止盈线 */}
-        <div className="flex-[1.2] text-right">
+        <div className="min-w-0 text-right">
           {editingField === 'stop' ? (
-            <div className="flex items-center justify-end gap-1">
+            <div className="flex items-center justify-end gap-0.5">
               <input
                 value={stopDraft}
                 onChange={(e) => setStopDraft(e.target.value)}
                 onKeyDown={(e) => { if (e.key === 'Enter') handleSave(); if (e.key === 'Escape') cancelEditing() }}
-                className="w-12 rounded-lg border border-base-line bg-base-bg px-1 py-0.5 text-[10px] text-base-text text-right focus:outline-none"
+                className="w-[38px] rounded-lg border border-base-line bg-base-bg px-1 py-0.5 text-right text-[10px] text-base-text focus:outline-none"
                 inputMode="decimal"
-                placeholder="如15"
+                placeholder="15"
                 autoFocus
               />
-              <button onClick={handleSave} disabled={saving} className="text-[10px] text-base-text active:opacity-70 shrink-0">保存</button>
+              {renderEditActions()}
             </div>
           ) : (
-            <div className="flex items-center justify-end gap-1">
-              <span className="text-[10px] text-base-muted">
-                止盈 {fund.stop_profit_line != null ? `${(fund.stop_profit_line * 100).toFixed(0)}%` : '无'}
-              </span>
-              <button onClick={() => { setEditingField('stop'); setError(null) }} className="text-base-muted active:opacity-70 shrink-0">
-                ✏️
-              </button>
-            </div>
+            <button
+              type="button"
+              onClick={() => { setEditingField('stop'); setError(null) }}
+              className="block w-full truncate text-right text-[10px] leading-4 text-base-muted active:opacity-70"
+              title="编辑止盈线"
+            >
+              止盈 {fund.stop_profit_line != null ? `${(fund.stop_profit_line * 100).toFixed(0)}%` : '无'}
+            </button>
           )}
         </div>
 
-        {/* 建议详情列 */}
-        <div className="flex-[2] min-w-0">
-          {renderSuggestion()}
-        </div>
-
-        {/* 操作列占位（与第一子行对齐） */}
-        <div className="shrink-0 w-[34px]" />
+        <div />
+        <div />
       </div>
 
-      {/* 错误提示 */}
       {error && (
-        <div className="mt-1 text-[10px] text-[#E76F51]">{error}</div>
+        <div className="mt-1 text-right text-[10px] text-[#E76F51]">{error}</div>
       )}
     </div>
   )

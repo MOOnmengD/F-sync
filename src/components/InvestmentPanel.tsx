@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { ArrowUpDown, Calculator, ImageUp, Settings2 } from 'lucide-react'
 import { supabase } from '../supabaseClient'
-import InvestmentCard, { type InvestmentData } from './InvestmentCard'
+import InvestmentCard, { investmentTableGrid, type InvestmentData } from './InvestmentCard'
 import InvestManageModal from './InvestManageModal'
 import { calculateSuggestion, getDateLabel, type Suggestion } from '../utils/investmentCalculator'
 import { compressImage } from '../utils/image'
@@ -331,26 +332,31 @@ export default function InvestmentPanel({ userId }: Props) {
   }
 
   return (
-    <div className="mt-4 space-y-4">
+    <div className="mt-4 space-y-3">
       {/* 日期标签 */}
       <div className="text-xs text-base-muted">{dateLabel}</div>
 
       {/* 操作按钮 */}
-      <div className="flex items-center gap-2">
-        <span className="text-xs text-base-muted">
-          总资产 <span className="font-medium text-base-text">¥{(totalAssets / 100).toFixed(2)}</span>
-        </span>
+      <div className="flex flex-wrap items-center gap-2">
+        <div className="mr-auto min-w-[104px] text-xs text-base-muted">
+          总资产
+          <div className="text-sm font-semibold text-base-text">¥{(totalAssets / 100).toFixed(2)}</div>
+        </div>
         <button
+          type="button"
           onClick={handleCalculate}
           disabled={calculating || funds.length === 0}
-          className="rounded-xl border border-base-line bg-base-bg px-4 py-2 text-sm text-base-text active:opacity-70 disabled:opacity-40"
+          className="inline-flex items-center gap-1.5 rounded-xl border border-base-line bg-base-bg px-3 py-2 text-xs text-base-text active:opacity-70 disabled:opacity-40"
         >
+          <Calculator size={14} />
           {calculating ? '计算中…' : '计算建议'}
         </button>
         <button
+          type="button"
           onClick={() => setManageOpen(true)}
-          className="rounded-xl border border-base-line bg-base-bg px-4 py-2 text-sm text-base-muted active:opacity-70"
+          className="inline-flex items-center gap-1.5 rounded-xl border border-base-line bg-base-bg px-3 py-2 text-xs text-base-muted active:opacity-70"
         >
+          <Settings2 size={14} />
           管理持仓
         </button>
         <input
@@ -361,18 +367,22 @@ export default function InvestmentPanel({ userId }: Props) {
           className="hidden"
         />
         <button
+          type="button"
           onClick={() => fileInputRef.current?.click()}
           disabled={ocrLoading}
-          className="rounded-xl border border-base-line bg-base-bg px-4 py-2 text-sm text-base-muted active:opacity-70 disabled:opacity-40"
+          className="inline-flex items-center gap-1.5 rounded-xl border border-base-line bg-base-bg px-3 py-2 text-xs text-base-muted active:opacity-70 disabled:opacity-40"
         >
+          <ImageUp size={14} />
           {ocrLoading ? '识别中…' : '上传截图'}
         </button>
-        <div className="relative ml-auto">
+        <div className="relative">
           <button
+            type="button"
             onClick={() => setSortOpen((v) => !v)}
-            className="rounded-xl border border-base-line bg-base-bg px-3 py-2 text-sm text-base-muted active:opacity-70"
+            className="inline-flex items-center gap-1.5 rounded-xl border border-base-line bg-base-bg px-3 py-2 text-xs text-base-muted active:opacity-70"
           >
-            ↕ {sortLabel[sortBy]}
+            <ArrowUpDown size={14} />
+            {sortLabel[sortBy]}
           </button>
           {sortOpen && (
             <>
@@ -425,17 +435,30 @@ export default function InvestmentPanel({ userId }: Props) {
         </div>
       )}
 
-      {/* 基金卡片列表 */}
-      {sortedFunds.map((fund) => (
-        <InvestmentCard
-          key={fund.id}
-          fund={fund}
-          suggestion={suggestions.get(fund.id) ?? null}
-          onUpdate={handleUpdate}
-          onConfirm={handleConfirm}
-          onCalculateSingle={handleCalculateSingle}
-        />
-      ))}
+      {/* 基金表格 */}
+      {funds.length > 0 && (
+        <div className="overflow-x-auto rounded-2xl border border-base-line bg-base-surface">
+          <div className="min-w-96 divide-y divide-base-line">
+            <div className={`${investmentTableGrid} bg-base-bg px-3 py-2 text-[10px] font-medium leading-4 text-base-muted`}>
+              <div>基金</div>
+              <div className="text-right">当前 C / 建议 M</div>
+              <div className="text-right">收益 R / 止盈</div>
+              <div className="text-right">调仓建议</div>
+              <div className="text-right">操作</div>
+            </div>
+            {sortedFunds.map((fund) => (
+              <InvestmentCard
+                key={fund.id}
+                fund={fund}
+                suggestion={suggestions.get(fund.id) ?? null}
+                onUpdate={handleUpdate}
+                onConfirm={handleConfirm}
+                onCalculateSingle={handleCalculateSingle}
+              />
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* 已计算且全部为 hold 时，卡片区下方不额外提示；汇总已说明 */}
 
