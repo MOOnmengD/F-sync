@@ -2,9 +2,10 @@ import { useState, useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
   ChevronDown, ChevronUp, Eye, EyeOff, Copy, ClipboardPaste, Check,
-  Save, RotateCcw, ArrowRight,
+  Save, RotateCcw, ArrowRight, ArrowLeft,
 } from 'lucide-react'
 import { useSettingsStore, type ParseServiceConfig, type TtsServiceConfig } from '../store/settings'
+import { IconButton } from '../shared/ui/IconButton'
 import {
   DEFAULT_PARSE_TRANSACTION_SYSTEM_PROMPT,
   DEFAULT_PARSE_TRANSACTION_USER_PROMPT_TEMPLATE,
@@ -470,12 +471,15 @@ export default function Settings() {
     .join(', ') || '（使用默认）'
 
   return (
-    <div className="mx-auto min-h-dvh max-w-[480px] bg-base-bg px-4 pb-8 pt-4 text-base-text space-y-4">
+    <div className="mx-auto min-h-dvh max-w-[480px] bg-base-bg px-4 pb-8 pt-[calc(env(safe-area-inset-top)+0.75rem)] text-base-text space-y-4">
       {/* 页头 */}
-      <div className="flex items-center justify-between pt-2">
-        <h1 className="text-lg font-bold text-base-text">AI 设置</h1>
+      <div className="relative flex min-h-10 items-center justify-center">
+        <div className="absolute left-0 top-1/2 -translate-y-1/2">
+          <IconButton label="返回主页" onClick={() => navigate('/')} icon={<ArrowLeft size={18} />} />
+        </div>
+        <h1 className="text-sm font-medium text-base-text">AI 设置</h1>
         {!isCloudLoaded && (
-          <span className="text-[10px] text-[#8D6E00] bg-[#FFF8E1] px-2 py-0.5 rounded-full">
+          <span className="absolute right-0 top-1/2 -translate-y-1/2 text-[10px] text-[#8D6E00] bg-[#FFF8E1] px-2 py-0.5 rounded-full">
             同步中…
           </span>
         )}
