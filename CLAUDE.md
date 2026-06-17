@@ -73,7 +73,10 @@ npm run preview   # 预览构建产物
 - **路由**：React Router DOM v7
 - **状态管理**：Zustand（stores 在 `src/store/`，详情见 [07-状态管理](docs/07-状态管理与数据流.md)）
 - **后端服务**：Supabase（认证 + 数据库 + Realtime）
-- **部署**：Vercel（`api/` 目录自动成为 Serverless Functions）
+- **部署**：Vercel Hobby 计划（`api/` 目录自动成为 Serverless Functions）
+  - ⚠️ **Hobby 计划限制最多 12 个 Serverless Functions**（`_` 前缀的内部模块不计入）
+  - 新增 API 端点时，优先合并到已有的 Function 中（如 `investment.ts` 通过 `type` 字段分发多操作），而非新建文件
+  - 当前已用满 12 个，再无新增空间。如需更多端点，考虑改造为单入口路由（`api/index.ts`）统一分发
 - **AI**：OpenAI 兼容接口（支持 DeepSeek 等），通过环境变量 + 前端 Settings 配置
 
 ### 架构概览
