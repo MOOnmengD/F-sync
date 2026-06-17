@@ -69,7 +69,7 @@ export default async function handler(req: any, res: any) {
   }
 
   // 2. 校验输入
-  const { text } = req.body || {}
+  const { text, url, key, model, voiceId, speed } = req.body || {}
   if (!text || typeof text !== 'string' || !text.trim()) {
     return res.status(400).json({ error: 'Missing or empty text' })
   }
@@ -80,28 +80,42 @@ export default async function handler(req: any, res: any) {
     cleanText = cleanText.slice(0, MAX_CHARS)
   }
 
-  // 4. 读取 API Key
-  const apiKey = process.env.MINIMAX_API_KEY
+  // 4. 解析参数：body 优先 → 硬编码默认值
+  const ttsEndpoint = (typeof url === 'string' && url.trim())
+    ? url.trim()
+    : TTS_ENDPOINT
+  const apiKey = (typeof key === 'string' && key.trim())
+    ? key.trim()
+    : process.env.MINIMAX_API_KEY
   if (!apiKey) {
     console.error('[TTS] MINIMAX_API_KEY not configured')
     return res.status(500).json({ error: 'Server configuration error' })
   }
+  const ttsModel = (typeof model === 'string' && model.trim())
+    ? model.trim()
+    : 'speech-2.8-hd'
+  const voiceIdValue = (typeof voiceId === 'string' && voiceId.trim())
+    ? voiceId.trim()
+    : 'xmz-minimax-voice'
+  const speedValue = (typeof speed === 'number' && speed > 0 && speed <= 5)
+    ? speed
+    : 1.0
 
   // 5. 调用 MiniMax 同步 TTS API
   let ttsResponse: Response
   try {
-    ttsResponse = await fetch(TTS_ENDPOINT, {
+    ttsResponse = await fetch(ttsEndpoint, {
       method: 'POST',
       headers: {
         'Authorization': `Bearer ${apiKey}`,
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        model: 'speech-2.8-hd',
+        model: ttsModel,
         text: cleanText,
         voice_setting: {
-          voice_id: 'xmz-minimax-voice',
-          speed: 1.0,
+          voice_id: voiceIdValue,
+          speed: speedValue,
         },
         output_format: 'hex',
         audio_setting: {

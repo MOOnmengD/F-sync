@@ -12,6 +12,7 @@ import Login from './pages/Login'
 import Chat from './pages/Chat'
 import Library from './pages/Library'
 import Debug from './pages/Debug'
+import Settings from './pages/Settings'
 import { supabase } from './supabaseClient'
 
 export default function App() {
@@ -107,6 +108,7 @@ export default function App() {
         <Route path="/chat" element={<Chat />} />
         <Route path="/login" element={<Login />} />
         <Route path="/debug" element={<Debug />} />
+        <Route path="/settings" element={<Settings />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </>

@@ -1,8 +1,9 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { supabase } from '../supabaseClient'
 import InvestmentCard, { type InvestmentData } from './InvestmentCard'
 import InvestManageModal from './InvestManageModal'
 import { calculateSuggestion, getDateLabel, type Suggestion } from '../utils/investmentCalculator'
+import { compressImage } from '../utils/image'
 
 type Props = {
   userId: string
@@ -15,6 +16,58 @@ export default function InvestmentPanel({ userId }: Props) {
   const [suggestions, setSuggestions] = useState<Map<string, Suggestion>>(new Map())
   const [manageOpen, setManageOpen] = useState(false)
   const [calculating, setCalculating] = useState(false)
+  const [sortBy, setSortBy] = useState<string>('c-desc')
+  const [sortOpen, setSortOpen] = useState(false)
+
+  // OCR
+  const [ocrLoading, setOcrLoading] = useState(false)
+  const [ocrResults, setOcrResults] = useState<Array<{
+    fund_name: string
+    holding_cents: number | null
+    profit_rate: number | null
+    matchedId?: string  // 匹配到的现有基金 ID
+  }> | null>(null)
+  const fileInputRef = useRef<HTMLInputElement | null>(null)
+
+  // 总资产
+  const totalAssets = useMemo(() =>
+    funds.reduce((sum, f) => sum + f.current_value_cents, 0),
+    [funds],
+  )
+
+  // 排序
+  const sortedFunds = useMemo(() => {
+    const list = [...funds]
+    switch (sortBy) {
+      case 'c-asc':
+        list.sort((a, b) => a.current_value_cents - b.current_value_cents)
+        break
+      case 'c-desc':
+        list.sort((a, b) => b.current_value_cents - a.current_value_cents)
+        break
+      case 'r-asc':
+        list.sort((a, b) => a.current_profit_rate - b.current_profit_rate)
+        break
+      case 'r-desc':
+        list.sort((a, b) => b.current_profit_rate - a.current_profit_rate)
+        break
+      case 'cycle':
+        list.sort((a, b) => {
+          const order: Record<string, number> = { weekly: 0, monthly: 1, none: 2 }
+          return (order[a.trading_cycle] ?? 2) - (order[b.trading_cycle] ?? 2)
+        })
+        break
+    }
+    return list
+  }, [funds, sortBy])
+
+  const sortLabel: Record<string, string> = {
+    'c-desc': '持仓↓',
+    'c-asc': '持仓↑',
+    'r-desc': '收益率↓',
+    'r-asc': '收益率↑',
+    'cycle': '周期',
+  }
 
   const fetchFunds = useCallback(async () => {
     if (!supabase) return
@@ -40,26 +93,43 @@ export default function InvestmentPanel({ userId }: Props) {
     fetchFunds()
   }, [fetchFunds])
 
+  const calcOne = useCallback((fund: InvestmentData): Suggestion => {
+    return calculateSuggestion({
+      M: fund.target_amount_cents,
+      C: fund.current_value_cents,
+      R: fund.current_profit_rate,
+      stopProfitLine: fund.stop_profit_line,
+    })
+  }, [])
+
   const handleCalculate = useCallback(() => {
     setCalculating(true)
-    // 短暂延迟让用户感知计算过程
     setTimeout(() => {
       const map = new Map<string, Suggestion>()
-      for (const fund of funds) {
-        const s = calculateSuggestion({
-          M: fund.target_amount_cents,
-          C: fund.current_value_cents,
-          R: fund.current_profit_rate,
-          stopProfitLine: fund.stop_profit_line,
-        })
-        map.set(fund.id, s)
+      for (const fund of sortedFunds) {
+        map.set(fund.id, calcOne(fund))
       }
       setSuggestions(map)
       setCalculating(false)
     }, 200)
-  }, [funds])
+  }, [sortedFunds, calcOne])
 
-  const handleUpdateCR = useCallback(async (investmentId: string, c: number, r: number) => {
+  const handleCalculateSingle = useCallback((id: string) => {
+    const fund = funds.find((f) => f.id === id)
+    if (!fund) return
+    setSuggestions((prev) => {
+      const next = new Map(prev)
+      next.set(id, calcOne(fund))
+      return next
+    })
+  }, [funds, calcOne])
+
+  const handleUpdate = useCallback(async (investmentId: string, params: {
+    c?: number
+    r?: number
+    m?: number
+    stopProfit?: number | null
+  }) => {
     const res = await fetch('/api/investment', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -67,8 +137,10 @@ export default function InvestmentPanel({ userId }: Props) {
         type: 'update_cr',
         userId,
         investmentId,
-        currentValueCents: c,
-        currentProfitRate: r,
+        ...(params.c !== undefined ? { currentValueCents: params.c } : {}),
+        ...(params.r !== undefined ? { currentProfitRate: params.r } : {}),
+        ...(params.m !== undefined ? { targetAmountCents: params.m } : {}),
+        ...(params.stopProfit !== undefined ? { stopProfitLine: params.stopProfit } : {}),
       }),
     })
     const data = await res.json()
@@ -76,13 +148,18 @@ export default function InvestmentPanel({ userId }: Props) {
 
     // 本地更新状态
     setFunds((prev) =>
-      prev.map((f) =>
-        f.id === investmentId
-          ? { ...f, current_value_cents: c, current_profit_rate: r }
-          : f,
-      ),
+      prev.map((f) => {
+        if (f.id !== investmentId) return f
+        return {
+          ...f,
+          ...(params.c !== undefined ? { current_value_cents: params.c } : {}),
+          ...(params.r !== undefined ? { current_profit_rate: params.r } : {}),
+          ...(params.m !== undefined ? { target_amount_cents: params.m } : {}),
+          ...(params.stopProfit !== undefined ? { stop_profit_line: params.stopProfit } : {}),
+        }
+      }),
     )
-    // 清除该基金的旧建议（C/R 变了，需要重新计算）
+    // 清除该基金的旧建议（参数变了，需要重新计算）
     setSuggestions((prev) => {
       const next = new Map(prev)
       next.delete(investmentId)
@@ -154,6 +231,88 @@ export default function InvestmentPanel({ userId }: Props) {
     return { buy, sell, hold, totalBuy, totalSell }
   }, [suggestions])
 
+  // toast 临时状态
+  const [toastMsg, setToastMsg] = useState<string | null>(null)
+  const setToast = useCallback((msg: string) => {
+    setToastMsg(msg)
+    setTimeout(() => setToastMsg(null), 2500)
+  }, [])
+
+  const handleOcrUpload = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    setOcrLoading(true)
+    setOcrResults(null)
+
+    try {
+      const compressed = await compressImage(file)
+      const res = await fetch('/api/investment-ocr', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ imageDataUrl: compressed.dataUrl }),
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error || 'OCR 失败')
+
+      // 尝试匹配现有基金（按名称包含匹配）
+      const results = (data.funds || []).map((f: any) => {
+        const match = funds.find((existing) => {
+          const ocrName = f.fund_name.replace(/\s+/g, '')
+          const dbName = existing.fund_name.replace(/\s+/g, '')
+          return ocrName === dbName || ocrName.includes(dbName) || dbName.includes(ocrName)
+        })
+        return {
+          ...f,
+          matchedId: match?.id,
+        }
+      })
+      setOcrResults(results)
+    } catch (e: any) {
+      setToast(e.message || 'OCR 识别失败')
+    } finally {
+      setOcrLoading(false)
+    }
+
+    // 重置 input 以允许重新选择同一文件
+    if (fileInputRef.current) fileInputRef.current.value = ''
+  }, [funds, setToast])
+
+  const handleOcrApply = useCallback(async () => {
+    if (!ocrResults) return
+    // 批量更新匹配到的基金
+    let updated = 0
+    for (const r of ocrResults) {
+      if (!r.matchedId) continue
+      const params: { c?: number; r?: number } = {}
+      if (r.holding_cents !== null) params.c = r.holding_cents
+      if (r.profit_rate !== null) params.r = r.profit_rate
+      if (Object.keys(params).length === 0) continue
+
+      try {
+        await fetch('/api/investment', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            type: 'update_cr',
+            userId,
+            investmentId: r.matchedId,
+            ...(params.c !== undefined ? { currentValueCents: params.c } : {}),
+            ...(params.r !== undefined ? { currentProfitRate: params.r } : {}),
+          }),
+        })
+        updated++
+      } catch {
+        // 继续处理下一个
+      }
+    }
+    // 刷新数据
+    await fetchFunds()
+    setOcrResults(null)
+    if (updated > 0) {
+      setToast(`已更新 ${updated} 只基金`)
+    }
+  }, [ocrResults, userId, fetchFunds])
+
   const dateLabel = getDateLabel()
 
   if (loading) {
@@ -178,6 +337,9 @@ export default function InvestmentPanel({ userId }: Props) {
 
       {/* 操作按钮 */}
       <div className="flex items-center gap-2">
+        <span className="text-xs text-base-muted">
+          总资产 <span className="font-medium text-base-text">¥{(totalAssets / 100).toFixed(2)}</span>
+        </span>
         <button
           onClick={handleCalculate}
           disabled={calculating || funds.length === 0}
@@ -191,6 +353,52 @@ export default function InvestmentPanel({ userId }: Props) {
         >
           管理持仓
         </button>
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept="image/*"
+          onChange={handleOcrUpload}
+          className="hidden"
+        />
+        <button
+          onClick={() => fileInputRef.current?.click()}
+          disabled={ocrLoading}
+          className="rounded-xl border border-base-line bg-base-bg px-4 py-2 text-sm text-base-muted active:opacity-70 disabled:opacity-40"
+        >
+          {ocrLoading ? '识别中…' : '上传截图'}
+        </button>
+        <div className="relative ml-auto">
+          <button
+            onClick={() => setSortOpen((v) => !v)}
+            className="rounded-xl border border-base-line bg-base-bg px-3 py-2 text-sm text-base-muted active:opacity-70"
+          >
+            ↕ {sortLabel[sortBy]}
+          </button>
+          {sortOpen && (
+            <>
+              <div className="fixed inset-0 z-40" onClick={() => setSortOpen(false)} />
+              <div className="absolute right-0 top-full mt-1 z-50 min-w-[160px] rounded-xl border border-base-line bg-base-bg py-1 shadow-sm">
+                {[
+                  { key: 'c-desc', label: '持仓金额 从大到小' },
+                  { key: 'c-asc', label: '持仓金额 从小到大' },
+                  { key: 'r-desc', label: '收益率 从大到小' },
+                  { key: 'r-asc', label: '收益率 从小到大' },
+                  { key: 'cycle', label: '按调仓周期' },
+                ].map((opt) => (
+                  <button
+                    key={opt.key}
+                    onClick={() => { setSortBy(opt.key); setSortOpen(false) }}
+                    className={`w-full px-4 py-2 text-left text-xs active:opacity-70 ${
+                      sortBy === opt.key ? 'text-base-text font-medium' : 'text-base-muted'
+                    }`}
+                  >
+                    {opt.label}
+                  </button>
+                ))}
+              </div>
+            </>
+          )}
+        </div>
       </div>
 
       {/* 计算结果汇总 */}
@@ -218,13 +426,14 @@ export default function InvestmentPanel({ userId }: Props) {
       )}
 
       {/* 基金卡片列表 */}
-      {funds.map((fund) => (
+      {sortedFunds.map((fund) => (
         <InvestmentCard
           key={fund.id}
           fund={fund}
           suggestion={suggestions.get(fund.id) ?? null}
-          onUpdateCR={handleUpdateCR}
+          onUpdate={handleUpdate}
           onConfirm={handleConfirm}
+          onCalculateSingle={handleCalculateSingle}
         />
       ))}
 
@@ -237,6 +446,85 @@ export default function InvestmentPanel({ userId }: Props) {
         userId={userId}
         onChanged={fetchFunds}
       />
+
+      {/* OCR 识别结果弹窗 */}
+      {ocrResults !== null && (
+        <div
+          className="fixed inset-0 z-[60] flex items-end justify-center bg-black/15 px-4 pb-6 backdrop-blur-sm"
+          onClick={() => setOcrResults(null)}
+        >
+          <div
+            className="w-full max-w-[480px] max-h-[75dvh] overflow-y-auto rounded-2xl border border-base-line bg-base-surface p-4"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between mb-3">
+              <h2 className="text-sm font-medium text-base-text">
+                识别结果（{ocrResults.length} 只基金）
+              </h2>
+              <button onClick={() => setOcrResults(null)} className="text-xs text-base-muted active:opacity-70">
+                关闭
+              </button>
+            </div>
+
+            {ocrResults.length === 0 ? (
+              <div className="text-xs text-base-muted text-center py-4">未识别到基金数据</div>
+            ) : (
+              <div className="space-y-2">
+                {ocrResults.map((r, i) => (
+                  <div
+                    key={i}
+                    className={`rounded-xl border p-3 ${
+                      r.matchedId ? 'border-[#A3D9A5] bg-base-bg' : 'border-base-line bg-base-bg opacity-60'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="min-w-0 flex-1">
+                        <div className="text-xs font-medium text-base-text truncate">{r.fund_name}</div>
+                        <div className="mt-0.5 flex items-center gap-2 text-[10px] text-base-muted">
+                          {r.holding_cents !== null && (
+                            <span>持仓 ¥{(r.holding_cents / 100).toFixed(2)}</span>
+                          )}
+                          {r.profit_rate !== null && (
+                            <span className={r.profit_rate < 0 ? 'text-[#E76F51]' : r.profit_rate > 0 ? 'text-[#A3D9A5]' : ''}>
+                              收益率 {(r.profit_rate * 100).toFixed(2)}%
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                      <span className={`text-[10px] shrink-0 ${r.matchedId ? 'text-[#A3D9A5]' : 'text-base-muted'}`}>
+                        {r.matchedId ? '✓ 已匹配' : '未匹配'}
+                      </span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            <div className="mt-4 flex gap-2">
+              <button
+                onClick={() => setOcrResults(null)}
+                className="flex-1 rounded-xl border border-base-line bg-base-bg py-2 text-xs text-base-muted active:opacity-70"
+              >
+                取消
+              </button>
+              <button
+                onClick={handleOcrApply}
+                disabled={!ocrResults.some((r) => r.matchedId)}
+                className="flex-1 rounded-xl border border-base-line bg-base-bg py-2 text-xs text-base-text active:opacity-70 disabled:opacity-40"
+              >
+                更新已匹配基金
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Toast */}
+      {toastMsg && (
+        <div className="fixed bottom-20 left-1/2 z-[70] -translate-x-1/2 rounded-full border border-base-line bg-base-surface px-4 py-2 text-xs text-base-text shadow-sm">
+          {toastMsg}
+        </div>
+      )}
     </div>
   )
 }

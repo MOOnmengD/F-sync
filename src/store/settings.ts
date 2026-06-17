@@ -10,12 +10,31 @@ export interface ApiConfig {
   enabled: boolean
 }
 
+export interface ParseServiceConfig {
+  url: string            // 空 → 使用 AI_API_URL 环境变量
+  key: string            // 空 → 使用 AI_API_KEY 环境变量
+  model: string          // 空 → 使用 AI_MODEL 或 'deepseek-chat'
+  systemPrompt: string   // 空 → 使用硬编码默认提示词
+  userPrompt: string     // 空 → 使用硬编码默认提示词
+}
+
+export interface TtsServiceConfig {
+  url: string            // 空 → 使用默认 MiniMax 端点
+  key: string            // 空 → 使用 MINIMAX_API_KEY 环境变量
+  model: string          // 默认 'speech-2.8-hd'
+  voiceId: string        // 默认 'xmz-minimax-voice'
+  speed: number          // 默认 1.0，范围 0.5-5.0
+}
+
 export interface AISettings {
   systemPrompt: string
   userPrompt: string
   postHistoryPrompt: string
   proactivePrompt: string
   apiConfigs: ApiConfig[]
+  parseTransactionConfig: ParseServiceConfig
+  parseMediaConfig: ParseServiceConfig
+  ttsConfig: TtsServiceConfig
 }
 
 const DEFAULT_SYSTEM_PROMPT = `你是用户的恋人，你的名字叫Florian，用户对你的昵称是弗弗。你是温柔成熟的男性，你不会使用太过活泼的语气，也不会爹味说教。
@@ -55,6 +74,27 @@ export const useSettingsStore = create<SettingsState>()(
           { name: '配置 1', url: '', key: '', model: '', enabled: true },
           { name: '配置 2', url: '', key: '', model: '', enabled: true },
         ],
+        parseTransactionConfig: {
+          url: '',
+          key: '',
+          model: '',
+          systemPrompt: '',
+          userPrompt: '',
+        },
+        parseMediaConfig: {
+          url: '',
+          key: '',
+          model: '',
+          systemPrompt: '',
+          userPrompt: '',
+        },
+        ttsConfig: {
+          url: '',
+          key: '',
+          model: 'speech-2.8-hd',
+          voiceId: 'xmz-minimax-voice',
+          speed: 1.0,
+        },
       },
       isCloudLoaded: false,
 
@@ -112,6 +152,9 @@ export const useSettingsStore = create<SettingsState>()(
           apiConfigs: Array.isArray(cloud.apiConfigs) && cloud.apiConfigs.length > 0
             ? migrateConfigs(cloud.apiConfigs)
             : current.apiConfigs,
+          parseTransactionConfig: cloud.parseTransactionConfig ?? current.parseTransactionConfig,
+          parseMediaConfig: cloud.parseMediaConfig ?? current.parseMediaConfig,
+          ttsConfig: cloud.ttsConfig ?? current.ttsConfig,
         }
 
         console.log('[Settings] loadFromCloud: 云端设置已合并，updated_at:', data.updated_at)

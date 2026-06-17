@@ -2,6 +2,7 @@ import { useState, useCallback, useRef } from 'react'
 import { supabase } from '../supabaseClient'
 import { extractDate } from '../utils/dateUtils'
 import { extractAmount, pickItemNameFallback } from '../utils/amountUtils'
+import { useSettingsStore } from '../store/settings'
 
 function makeClientId() {
   const cryptoAny = crypto as unknown as { randomUUID?: () => string } | undefined
@@ -48,10 +49,18 @@ function removeOutbox(id: string) {
 }
 
 async function parseTransactionByAi(raw: string) {
+  const cfg = useSettingsStore.getState().settings.parseTransactionConfig
   const r = await fetch('/api/parse-transaction', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ text: raw }),
+    body: JSON.stringify({
+      text: raw,
+      url: cfg.url || undefined,
+      key: cfg.key || undefined,
+      model: cfg.model || undefined,
+      systemPrompt: cfg.systemPrompt || undefined,
+      userPrompt: cfg.userPrompt || undefined,
+    }),
   })
   const data = (await r.json().catch(() => null)) as unknown
   if (!r.ok || !data || typeof data !== 'object') {

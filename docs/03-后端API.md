@@ -42,11 +42,11 @@ AI 对话上下文构建模块（详见 [05-AI系统设计](./05-AI系统设计.
 |------|------|
 | `enrichMessages(params)` | **主入口**：构建完整的 AI 对话上下文 |
 | `fetchUserProfiles(supabase, userId)` | 获取用户画像（社交关系 + 个人信息事实） |
-| `fetchTopDailyEvents(supabase)` | 获取最近 3 条每日事件摘要 |
+| `fetchTopDailyEvents(supabase)` | 获取最近 3 条每日事件摘要（仅作内部索引，不注入上下文） |
 | `fetchTimingInfo(supabase)` | 获取当前计时状态 |
 | `resolveLocationInfo({location, amapKey})` | 解析位置信息（校内匹配 + 高德逆地理） |
-| `ragRetrieval(params)` | RAG 三策略检索（向量→全文→时间兜底） |
-| `retrievalJudgeAndFetch(params)` | 检索判断 + 历史对话检索 |
+| `ragRetrieval(params)` | RAG 三策略检索（向量→全文→时间兜底），按需调用 |
+| `retrievalJudgeAndFetch(params)` | 检索判断（记忆 + 生活记录）+ 历史对话检索 |
 
 ### `_weather.ts`
 
@@ -135,7 +135,7 @@ AI 对话上下文构建模块（详见 [05-AI系统设计](./05-AI系统设计.
 
 **处理流程**：
 1. 构建 API 配置（前端传来 > 环境变量 fallback）
-2. 调用 `enrichMessages()` 构建上下文（含 RAG 检索、用户画像、位置、天气、事件）
+2. 调用 `enrichMessages()` 构建上下文（含按需记忆检索、按需生活记录检索、用户画像、位置、天气）
 3. 图片消息转为多模态格式（`image_url` + `text` parts）
 4. 多组 API 轮询（失败自动切换下一组）
 5. 位置信息异步写入 `user_locations` 表
@@ -342,16 +342,19 @@ AI 对话上下文构建模块（详见 [05-AI系统设计](./05-AI系统设计.
 }
 ```
 
-**输入（type: 'update_cr' — 更新持仓价值与收益率）**：
+**输入（type: 'update_cr' — 更新持仓价值/收益率/参数）**：
 ```json
 {
   "type": "update_cr",
   "userId": "uuid",
   "investmentId": "uuid",
   "currentValueCents": 60000,
-  "currentProfitRate": 0.15
+  "currentProfitRate": 0.15,
+  "targetAmountCents": 120000,
+  "stopProfitLine": 0.15
 }
 ```
+> `currentValueCents`、`currentProfitRate`、`targetAmountCents`、`stopProfitLine` 均为可选，只更新提供的字段。`stopProfitLine` 传 `null` 表示清除止盈线。
 
 **输入（type: 'manage' — 创建/更新/停用投资）**：
 ```json
@@ -362,6 +365,36 @@ AI 对话上下文构建模块（详见 [05-AI系统设计](./05-AI系统设计.
   "...": "各 action 对应不同字段"
 }
 ```
+
+---
+
+### `POST /api/investment-ocr`
+
+**用途**：接受支付宝基金持仓截图（base64），调用 Doubao 视觉模型识别基金数据。
+
+**鉴权**：无（依赖 AI API Key 服务端配置）
+
+**输入**：
+```json
+{
+  "imageDataUrl": "data:image/webp;base64,..."
+}
+```
+
+**输出**：
+```json
+{
+  "funds": [
+    {
+      "fund_name": "景顺长城宁景混合A",
+      "holding_cents": 932500,
+      "profit_rate": 0.0431
+    }
+  ]
+}
+```
+
+**配置**：使用 `OCR_AI_*` 环境变量，fallback 到 `CHAT_AI_*` → `AI_*`。模型默认 `doubao-vision-pro-32k`。
 
 ---
 

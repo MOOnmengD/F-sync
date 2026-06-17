@@ -236,7 +236,7 @@ export default function InvestManageModal({ open, onClose, userId, onChanged }: 
 
         <div className="grid grid-cols-2 gap-2">
           <div>
-            <label className="text-[11px] text-base-muted">当前市值 C（元）*</label>
+            <label className="text-[11px] text-base-muted">当前持仓（元）*</label>
             <input
               value={form.current_value_cents}
               onChange={(e) => setForm((f) => ({ ...f, current_value_cents: e.target.value }))}
@@ -246,7 +246,7 @@ export default function InvestManageModal({ open, onClose, userId, onChanged }: 
             />
           </div>
           <div>
-            <label className="text-[11px] text-base-muted">收益率 R（%）*</label>
+            <label className="text-[11px] text-base-muted">当前收益率（%）*</label>
             <input
               value={form.current_profit_rate}
               onChange={(e) => setForm((f) => ({ ...f, current_profit_rate: e.target.value }))}
@@ -259,7 +259,7 @@ export default function InvestManageModal({ open, onClose, userId, onChanged }: 
 
         <div className="grid grid-cols-2 gap-2">
           <div>
-            <label className="text-[11px] text-base-muted">目标上限 M（元）*</label>
+            <label className="text-[11px] text-base-muted">目标持仓（元）*</label>
             <input
               value={form.target_amount_cents}
               onChange={(e) => setForm((f) => ({ ...f, target_amount_cents: e.target.value }))}
@@ -376,8 +376,8 @@ export default function InvestManageModal({ open, onClose, userId, onChanged }: 
                       <div className="min-w-0 flex-1">
                         <div className="text-xs font-medium text-base-text truncate">{f.fund_name}</div>
                         <div className="mt-0.5 flex items-center gap-2 text-[10px] text-base-muted">
-                          <span>C: ¥{(f.current_value_cents / 100).toFixed(2)}</span>
-                          <span>M: ¥{(f.target_amount_cents / 100).toFixed(2)}</span>
+                          <span>持仓: ¥{(f.current_value_cents / 100).toFixed(2)}</span>
+                          <span>目标: ¥{(f.target_amount_cents / 100).toFixed(2)}</span>
                           {f.strategy_tag && <span>· {f.strategy_tag}</span>}
                         </div>
                       </div>

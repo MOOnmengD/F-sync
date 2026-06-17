@@ -64,6 +64,7 @@ export function DrawerNav() {
           <Item to="/timeline" label="时间轴 Timeline" />
           <Item to="/work" label="工作总结 Work" />
           <Item to="/vault" label="知识库 Vault" />
+          <Item to="/settings" label="设置 Settings" />
         </nav>
       </aside>
     </div>

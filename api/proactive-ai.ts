@@ -160,28 +160,6 @@ export default async function handler(req: any, res: any) {
       })
     }
 
-    // 获取近期生活记录（用于画像更新 + 构建 RAG 搜索词）
-    const twelveHoursAgo = new Date(Date.now() - 12 * 60 * 60 * 1000).toISOString()
-    const { data: recentLogs } = await supabase
-      .from('transactions')
-      .select('*')
-      .gte('created_at', twelveHoursAgo)
-      .order('created_at', { ascending: false })
-      .limit(10)
-
-    // 构建 RAG 搜索查询（从最近活动提取关键词）
-    let searchQuery = ''
-    const userChats = (recentChats || []).filter((c: any) => c.role === 'user')
-    if (userChats.length > 0) {
-      searchQuery = userChats.slice(0, 5).map((c: any) => c.content).join(' ')
-    }
-    if (recentLogs && recentLogs.length > 0) {
-      const logText = recentLogs.slice(0, 5).map((l: any) => l.content).filter(Boolean).join(' ')
-      if (logText) {
-        searchQuery = searchQuery ? `${searchQuery} ${logText}` : logText
-      }
-    }
-
     // 将 DB 消息格式转换为 enrichMessages 需要的格式
     const conversationMessages = (recentChats || [])
       .slice()
@@ -201,7 +179,6 @@ export default async function handler(req: any, res: any) {
       apiConfigs,
       settings,
       conversationMessages,
-      searchQuery: searchQuery || undefined,
       location: dbLocation,
       extraWorldLines: [
         `距离你们上次对话已经过去了 ${hoursSinceLastChat} 小时。`,

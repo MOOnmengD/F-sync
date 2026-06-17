@@ -237,10 +237,14 @@ export async function retrievalJudgeAndFetch(params: {
   userId: string
   apiConfigs: Array<{ url: string; key: string; model: string }>
   conversationMessages: Array<{ role: string; content: string; createdAt?: string }>
-}): Promise<any[]> {
+}): Promise<{
+  retrievedChats: any[]
+  lifeLogSearch: { needed: boolean; query: string }
+}> {
   const { supabase, userId, apiConfigs, conversationMessages } = params
 
-  if (apiConfigs.length === 0) return []
+  const emptyResult = { retrievedChats: [], lifeLogSearch: { needed: false, query: '' } }
+  if (apiConfigs.length === 0) return emptyResult
 
   try {
     // 提取最近 6 条消息（3 user + 3 assistant）
@@ -258,7 +262,7 @@ export async function retrievalJudgeAndFetch(params: {
         new Date(b.createdAt || 0).getTime(),
     )
 
-    if (recentMsgs.length < 2) return []
+    if (recentMsgs.length < 2) return emptyResult
 
     const dialogText = recentMsgs
       .map((m) => `${m.role === 'user' ? '用户' : 'AI'}: ${m.content}`)
@@ -278,7 +282,7 @@ export async function retrievalJudgeAndFetch(params: {
           {
             role: 'system',
             content:
-              '你是一个对话分析模块。判断以下对话中，用户的当前消息是否涉及过去讨论过的话题或事件。\n\n如果是，生成用于检索的关键词/短句（使用用户使用的语言）。\n如果否，返回 needs_retrieval: false。\n\n只输出 JSON：\n{"needs_retrieval": true, "keywords": "简短的关键词或短句"}\n或 {"needs_retrieval": false}',
+              '你是一个对话分析模块。分析以下对话，判断两类检索需求：\n\n1. 记忆检索：用户是否提及过去讨论过的话题或事件（需要回顾历史对话）？\n2. 生活记录检索：用户是否在查询记账、消费、碎碎念、计时、工作等生活数据？\n\n如果记忆检索需要，生成用于检索的关键词/短句（使用用户使用的语言）。\n如果生活记录检索需要，生成查询短语。\n两个可以同时为 true。\n\n只输出 JSON（不要输出其他内容）：\n{"memory_search": {"needed": true, "keywords": "检索关键词"}, "life_log_search": {"needed": true, "query": "检索查询"}}\n如果都不需要：\n{"memory_search": {"needed": false}, "life_log_search": {"needed": false}}',
           },
           { role: 'user', content: dialogText },
         ],
@@ -289,7 +293,7 @@ export async function retrievalJudgeAndFetch(params: {
 
     if (!judgeRes.ok) {
       console.warn('[Memory Retrieval] judge API 返回非 200:', judgeRes.status)
-      return []
+      return emptyResult
     }
 
     const judgeData = await judgeRes.json()
@@ -308,13 +312,33 @@ export async function retrievalJudgeAndFetch(params: {
       }
     }
 
-    if (!judgeResult?.needs_retrieval || !judgeResult?.keywords) {
-      if (!judgeResult?.needs_retrieval) {
-        console.log('[Memory Retrieval] AI 判断无需检索')
+    if (!judgeResult) {
+      console.warn('[Memory Retrieval] AI judge 返回无法解析的结果')
+      return emptyResult
+    }
+
+    // 解析新格式（memory_search / life_log_search）
+    const memoryNeeded = judgeResult?.memory_search?.needed || judgeResult?.needs_retrieval || false
+    const memoryKeywords = judgeResult?.memory_search?.keywords || judgeResult?.keywords || ''
+    const lifeLogNeeded = judgeResult?.life_log_search?.needed || false
+    const lifeLogQuery = judgeResult?.life_log_search?.query || ''
+
+    if (!memoryNeeded && !lifeLogNeeded) {
+      console.log('[Memory Retrieval] AI 判断无需检索（记忆 + 生活记录）')
+      return emptyResult
+    }
+
+    const lifeLogSearch = lifeLogNeeded && lifeLogQuery
+      ? { needed: true, query: lifeLogQuery }
+      : { needed: false, query: '' }
+
+    if (!memoryNeeded || !memoryKeywords) {
+      if (!memoryNeeded) {
+        console.log('[Memory Retrieval] AI 判断无需记忆检索')
       } else {
-        console.warn('[Memory Retrieval] AI 判断需检索但未返回 keywords')
+        console.warn('[Memory Retrieval] AI 判断需记忆检索但未返回 keywords，跳过')
       }
-      return []
+      return { retrievedChats: [], lifeLogSearch }
     }
 
     // 向量检索 daily_event_items（优先使用专用 embedding 配置）
@@ -336,7 +360,7 @@ export async function retrievalJudgeAndFetch(params: {
       },
       body: JSON.stringify({
         model: embModel,
-        input: judgeResult.keywords,
+        input: memoryKeywords,
       }),
     })
 
@@ -346,14 +370,14 @@ export async function retrievalJudgeAndFetch(params: {
         embRes.status,
         `(${embEndpoint})`,
       )
-      return []
+      return { retrievedChats: [], lifeLogSearch }
     }
 
     const embData = await embRes.json()
     const queryEmbedding = embData.data?.[0]?.embedding
     if (!queryEmbedding) {
       console.warn('[Memory Retrieval] embedding API 未返回有效 embedding')
-      return []
+      return { retrievedChats: [], lifeLogSearch }
     }
 
     const { data: matchedEvents } = await supabase.rpc(
@@ -365,7 +389,7 @@ export async function retrievalJudgeAndFetch(params: {
       },
     )
 
-    if (!matchedEvents || matchedEvents.length === 0) return []
+    if (!matchedEvents || matchedEvents.length === 0) return { retrievedChats: [], lifeLogSearch }
 
     const retrievedChatMessages: any[] = []
     const chatIds = new Set<string>()
@@ -418,10 +442,10 @@ export async function retrievalJudgeAndFetch(params: {
         new Date(a.created_at).getTime() - new Date(b.created_at).getTime(),
     )
 
-    return retrievedChatMessages
+    return { retrievedChats: retrievedChatMessages, lifeLogSearch }
   } catch (retrievalErr: any) {
     console.warn('[Memory Retrieval] 检索失败:', retrievalErr.message)
-    return []
+    return emptyResult
   }
 }
 
@@ -626,7 +650,6 @@ export async function enrichMessages(params: {
     content: string
     createdAt?: string
   }>
-  searchQuery?: string
   location?: {
     latitude: number
     longitude: number
@@ -646,15 +669,13 @@ export async function enrichMessages(params: {
     apiConfigs,
     settings,
     conversationMessages,
-    searchQuery,
     location,
     extraWorldLines,
     amapKey,
   } = params
 
   // ---- 并行获取基础数据 ----
-  const [dailyEvents, currentTimingInfo, locResult] = await Promise.all([
-    fetchTopDailyEvents(supabase),
+  const [currentTimingInfo, locResult] = await Promise.all([
     fetchTimingInfo(supabase),
     resolveLocationInfo({ location, amapKey }),
   ])
@@ -701,7 +722,7 @@ export async function enrichMessages(params: {
   const worldInfoContent = `## 真实世界信息\n${worldLines.join('\n')}`
 
   // ---- 检索阶段 ----
-  const retrievedChats = await retrievalJudgeAndFetch({
+  const { retrievedChats, lifeLogSearch } = await retrievalJudgeAndFetch({
     supabase,
     userId,
     apiConfigs,
@@ -709,11 +730,11 @@ export async function enrichMessages(params: {
   })
 
   let ragRecords: Array<{ timestamp: Date; content: string }> = []
-  if (searchQuery) {
+  if (lifeLogSearch.needed && lifeLogSearch.query) {
     ragRecords = await ragRetrieval({
       supabase,
       apiConfigs,
-      searchQuery,
+      searchQuery: lifeLogSearch.query,
     })
   }
 
@@ -732,16 +753,7 @@ export async function enrichMessages(params: {
 
   const timeBoundItems: TimeBoundItem[] = []
 
-  // 1) 最近事件（daily_event_items 摘要，轻量 system 标注）
-  for (const event of dailyEvents) {
-    timeBoundItems.push({
-      timestamp: event.timestamp,
-      role: 'system',
-      content: event.content,
-    })
-  }
-
-  // 2) 检索到的历史对话 — 用真实角色融入，以 client_id 去重
+  // 1) 检索到的历史对话 — 用真实角色融入，以 client_id 去重
   for (const chat of retrievedChats) {
     if (chat.client_id && convMsgIds.has(chat.client_id)) continue
     timeBoundItems.push({
@@ -751,7 +763,7 @@ export async function enrichMessages(params: {
     })
   }
 
-  // 3) RAG 检索到的生活记录（用户产生的数据，用 user 角色避免 system 权重过高）
+  // 2) RAG 检索到的生活记录（用户产生的数据，用 user 角色避免 system 权重过高）
   for (const record of ragRecords) {
     timeBoundItems.push({
       timestamp: record.timestamp,
@@ -760,7 +772,7 @@ export async function enrichMessages(params: {
     })
   }
 
-  // 4) 当前会话消息
+  // 3) 当前会话消息
   for (const m of conversationMessages) {
     if (m.role === 'system') continue
     const ts = m.createdAt ? new Date(m.createdAt) : new Date()

@@ -58,13 +58,6 @@ export default async function handler(req: any, res: any) {
       return
     }
 
-    // 用户查询（用于 RAG 检索）
-    const userQuery = messages[messages.length - 1].content
-    let searchQuery = userQuery
-    if (userQuery.length < 10 && messages.length >= 2) {
-      searchQuery = `${messages[messages.length - 2].content} ${userQuery}`
-    }
-
     const supabaseAdmin = createClient(supabaseUrl, supabaseServiceKey)
 
     // 构建上下文（共享模块统一处理：用户画像、时间、天气、位置、事件、RAG 检索）
@@ -76,7 +69,6 @@ export default async function handler(req: any, res: any) {
         apiConfigs,
         settings,
         conversationMessages: messages,
-        searchQuery,
         location: body?.location,
         amapKey,
       })

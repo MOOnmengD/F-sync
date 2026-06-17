@@ -5,6 +5,7 @@ import { supabase } from '../supabaseClient'
 import { useUi } from '../store/ui'
 import type { MediaStatus, MediaType, QuickMode } from '../types/domain'
 import { IconButton } from '../shared/ui/IconButton'
+import { useSettingsStore } from '../store/settings'
 import { PillButton } from '../shared/ui/PillButton'
 import { RepurchaseIndexPill } from '../shared/ui/RepurchaseIndexPill'
 import { useTimeline, TIMELINE_KINDS } from '../hooks/useTimeline'
@@ -62,6 +63,7 @@ export default function Home() {
   const [keyboardOffset, setKeyboardOffset] = useState(0)
   const [toast, setToast] = useState<string | null>(null)
   const [sending, setSending] = useState(false)
+  const settings = useSettingsStore((s) => s.settings)
   const [repurchaseIndex, setRepurchaseIndex] = useState(0)
   const [lastFinanceTx, setLastFinanceTx] = useState<LastFinanceTx | null>(null)
   const [reviewTargetId, setReviewTargetId] = useState<string | null>(null)
@@ -123,10 +125,18 @@ export default function Home() {
   }
 
   const parseTransactionByAi = async (raw: string) => {
+    const cfg = settings.parseTransactionConfig
     const r = await fetch('/api/parse-transaction', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ text: raw }),
+      body: JSON.stringify({
+        text: raw,
+        url: cfg.url || undefined,
+        key: cfg.key || undefined,
+        model: cfg.model || undefined,
+        systemPrompt: cfg.systemPrompt || undefined,
+        userPrompt: cfg.userPrompt || undefined,
+      }),
     })
     const data = (await r.json().catch(() => null)) as unknown
     if (!r.ok || !data || typeof data !== 'object') {
@@ -146,10 +156,18 @@ export default function Home() {
   }
 
   const parseMediaByAi = async (raw: string) => {
+    const cfg = settings.parseMediaConfig
     const r = await fetch('/api/parse-media', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ text: raw }),
+      body: JSON.stringify({
+        text: raw,
+        url: cfg.url || undefined,
+        key: cfg.key || undefined,
+        model: cfg.model || undefined,
+        systemPrompt: cfg.systemPrompt || undefined,
+        userPrompt: cfg.userPrompt || undefined,
+      }),
     })
     const data = (await r.json().catch(() => null)) as unknown
     if (!r.ok || !data || typeof data !== 'object') {
@@ -706,7 +724,7 @@ export default function Home() {
 
   return (
     <div className="mx-auto min-h-dvh max-w-[480px] bg-base-bg px-4 pb-[160px] text-base-text">
-      <header className="sticky top-0 z-10 -mx-4 bg-base-bg/95 px-4 pb-3 pt-4">
+      <header className="sticky top-0 z-30 -mx-4 bg-base-bg px-4 pb-3 pt-4">
         <div className="flex items-center justify-between">
           <IconButton label="打开导航" onClick={toggleDrawer} icon={<Menu size={18} />} />
           <div className="text-sm font-medium text-base-text">主页</div>

@@ -907,13 +907,117 @@ function SocialRelationshipsSection({ relationships, onUpdate, onDelete, onAdd }
   )
 }
 
-function ProfileContent({ socialRelationships, onSocialUpdate, onSocialDelete, onSocialAdd }: {
+function PersonalFactsSection({ facts, onUpdate, onAdd, onDelete }: {
+  facts: string[]
+  onUpdate: (index: number, value: string) => void
+  onAdd: (value: string) => void
+  onDelete: (index: number) => void
+}) {
+  const [adding, setAdding] = useState(false)
+  const [newFact, setNewFact] = useState('')
+  const [editingIdx, setEditingIdx] = useState<number | null>(null)
+  const [editValue, setEditValue] = useState('')
+
+  const handleAdd = () => {
+    if (!newFact.trim()) return
+    onAdd(newFact.trim())
+    setNewFact('')
+    setAdding(false)
+  }
+
+  return (
+    <div className="space-y-2">
+      <div className="flex items-center justify-between">
+        <h3 className="text-xs font-bold text-base-text/40 uppercase tracking-wider">关于你的事实</h3>
+        <button
+          onClick={() => setAdding(!adding)}
+          className="p-0.5 rounded-full text-base-text/30 hover:text-base-text/60 transition-colors"
+        >
+          <Plus size={16} />
+        </button>
+      </div>
+
+      {adding && (
+        <div className="flex items-center gap-2 p-3 bg-[#F7F5F2] border border-base-line rounded-xl">
+          <input
+            className="flex-1 p-1.5 text-sm bg-white border border-base-line rounded-lg text-base-text"
+            value={newFact}
+            onChange={e => setNewFact(e.target.value)}
+            placeholder="添加关于你的事实…"
+            autoFocus
+          />
+          <button onClick={handleAdd} className="p-1.5 rounded-lg text-green-600 hover:bg-green-50 transition-colors shrink-0">
+            <Check size={16} />
+          </button>
+          <button onClick={() => setAdding(false)} className="p-1.5 rounded-lg text-base-text/40 hover:bg-base-line transition-colors shrink-0">
+            <X size={16} />
+          </button>
+        </div>
+      )}
+
+      <div className="flex flex-wrap gap-2">
+        {facts.length === 0 && !adding && (
+          <p className="text-xs text-base-text/30">暂无个人事实</p>
+        )}
+        {facts.map((fact, idx) => {
+          if (editingIdx === idx) {
+            return (
+              <div key={idx} className="flex items-center gap-2 p-2 bg-[#F7F5F2] border border-base-line rounded-xl w-full">
+                <input
+                  className="flex-1 p-1.5 text-sm bg-white border border-base-line rounded-lg text-base-text"
+                  value={editValue}
+                  onChange={e => setEditValue(e.target.value)}
+                  autoFocus
+                />
+                <button
+                  onClick={() => { onUpdate(idx, editValue.trim()); setEditingIdx(null) }}
+                  className="p-1.5 rounded-lg text-green-600 hover:bg-green-50 transition-colors shrink-0"
+                >
+                  <Check size={16} />
+                </button>
+                <button
+                  onClick={() => setEditingIdx(null)}
+                  className="p-1.5 rounded-lg text-base-text/40 hover:bg-base-line transition-colors shrink-0"
+                >
+                  <X size={16} />
+                </button>
+              </div>
+            )
+          }
+          return (
+            <span key={idx} className="inline-flex items-center gap-1 px-3 py-1.5 text-sm bg-[#F7F5F2] border border-base-line rounded-full text-base-text/80 group cursor-default">
+              <span>{fact}</span>
+              <button
+                onClick={() => { setEditValue(fact); setEditingIdx(idx) }}
+                className="ml-0.5 p-0.5 rounded-full opacity-0 group-hover:opacity-100 transition-opacity text-base-text/30 hover:text-base-text/60"
+              >
+                <Pencil size={12} />
+              </button>
+              <button
+                onClick={() => onDelete(idx)}
+                className="p-0.5 rounded-full opacity-0 group-hover:opacity-100 transition-opacity text-base-text/30 hover:text-red-400"
+              >
+                <X size={12} />
+              </button>
+            </span>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
+function ProfileContent({ personalFacts, onFactUpdate, onFactAdd, onFactDelete, socialRelationships, onSocialUpdate, onSocialDelete, onSocialAdd }: {
+  personalFacts: string[]
+  onFactUpdate: (index: number, value: string) => void
+  onFactAdd: (value: string) => void
+  onFactDelete: (index: number) => void
   socialRelationships: SocialRelationship[]
   onSocialUpdate: (id: string, updates: Partial<Pick<SocialRelationship, 'relation' | 'impression'>>) => void
   onSocialDelete: (id: string) => void
   onSocialAdd: (name: string, relation: string, impression: string) => void
 }) {
-  if (socialRelationships.length === 0) {
+  if (personalFacts.length === 0 && socialRelationships.length === 0) {
     return (
       <div className="text-center py-20 space-y-2">
         <p className="text-sm text-base-text/30">暂无画像数据</p>
@@ -924,6 +1028,12 @@ function ProfileContent({ socialRelationships, onSocialUpdate, onSocialDelete, o
 
   return (
     <div className="space-y-6">
+      <PersonalFactsSection
+        facts={personalFacts}
+        onUpdate={onFactUpdate}
+        onAdd={onFactAdd}
+        onDelete={onFactDelete}
+      />
       <SocialRelationshipsSection
         relationships={socialRelationships}
         onUpdate={onSocialUpdate}
@@ -971,22 +1081,32 @@ function ProfileDiaryModal({ isOpen, onClose, initialTab }: {
   const [tab, setTab] = useState<'profile' | 'diary'>(initialTab)
   const [diaryEntries, setDiaryEntries] = useState<any[]>([])
   const [socialRelationships, setSocialRelationships] = useState<SocialRelationship[]>([])
+  const [personalFacts, setPersonalFacts] = useState<string[]>([])
+  const [profileId, setProfileId] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
 
   const loadData = async () => {
     const client = supabase
     if (!client) { setLoading(false); return }
 
-    const [diaryRes, socialRes] = await Promise.all([
+    const [diaryRes, socialRes, profileRes] = await Promise.all([
       client.from('daily_logs').select('*').order('date', { ascending: false }).limit(60),
       (async () => {
         try { return await client.from('social_relationships').select('*').order('updated_at', { ascending: false }) }
         catch { return { data: [], error: null } }
+      })(),
+      (async () => {
+        try { return await client.from('user_profiles').select('id, content').eq('profile_type', 'personal_facts').maybeSingle() }
+        catch { return { data: null, error: null } }
       })()
     ])
 
     if (diaryRes.data) setDiaryEntries(diaryRes.data)
     if (socialRes.data) setSocialRelationships(socialRes.data)
+    if (profileRes.data) {
+      setProfileId(profileRes.data.id)
+      setPersonalFacts(profileRes.data.content?.facts || [])
+    }
     setLoading(false)
   }
 
@@ -1022,6 +1142,41 @@ function ProfileDiaryModal({ isOpen, onClose, initialTab }: {
     if (!error && data) {
       setSocialRelationships(prev => [...prev, data])
     }
+  }
+
+  const savePersonalFacts = async (facts: string[]) => {
+    const client = supabase
+    if (!client) return
+    const content = { facts }
+    if (profileId) {
+      const { error } = await client.from('user_profiles').update({ content }).eq('id', profileId)
+      if (error) console.warn('[Personal Facts] 更新失败:', error.message)
+    } else {
+      const { data, error } = await client.from('user_profiles').insert({ profile_type: 'personal_facts', content }).select('id').single()
+      if (!error && data) {
+        setProfileId(data.id)
+      } else if (error) {
+        console.warn('[Personal Facts] 插入失败:', error.message)
+      }
+    }
+  }
+
+  const handleFactAdd = async (value: string) => {
+    const newFacts = [...personalFacts, value]
+    setPersonalFacts(newFacts)
+    await savePersonalFacts(newFacts)
+  }
+
+  const handleFactUpdate = async (index: number, value: string) => {
+    const newFacts = personalFacts.map((f, i) => i === index ? value : f)
+    setPersonalFacts(newFacts)
+    await savePersonalFacts(newFacts)
+  }
+
+  const handleFactDelete = async (index: number) => {
+    const newFacts = personalFacts.filter((_, i) => i !== index)
+    setPersonalFacts(newFacts)
+    await savePersonalFacts(newFacts)
   }
 
   if (!isOpen) return null
@@ -1060,6 +1215,10 @@ function ProfileDiaryModal({ isOpen, onClose, initialTab }: {
             </div>
           ) : tab === 'profile' ? (
             <ProfileContent
+              personalFacts={personalFacts}
+              onFactUpdate={handleFactUpdate}
+              onFactAdd={handleFactAdd}
+              onFactDelete={handleFactDelete}
               socialRelationships={socialRelationships}
               onSocialUpdate={handleSocialUpdate}
               onSocialDelete={handleSocialDelete}
@@ -1632,10 +1791,18 @@ export default function Chat() {
     if (!messageText.trim()) return
     setReadingMsgId(msgId)
     try {
+      const ttsCfg = useSettingsStore.getState().settings.ttsConfig
       const res = await fetch('/api/text-to-speech', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text: messageText }),
+        body: JSON.stringify({
+          text: messageText,
+          url: ttsCfg.url || undefined,
+          key: ttsCfg.key || undefined,
+          model: ttsCfg.model || undefined,
+          voiceId: ttsCfg.voiceId || undefined,
+          speed: ttsCfg.speed !== undefined ? ttsCfg.speed : undefined,
+        }),
       })
       if (!res.ok) return
       const { audioDataUrl } = await res.json()

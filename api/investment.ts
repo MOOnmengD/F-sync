@@ -85,23 +85,17 @@ async function handleAction(body: any, res: any) {
 }
 
 async function handleUpdateCr(body: any, res: any) {
-  const { userId, investmentId, currentValueCents, currentProfitRate } = body
+  const { userId, investmentId, currentValueCents, currentProfitRate, targetAmountCents, stopProfitLine } = body
 
   if (!userId || !investmentId) {
     return res.status(400).json({ error: 'Missing userId or investmentId' })
-  }
-  if (typeof currentValueCents !== 'number' || !Number.isFinite(currentValueCents)) {
-    return res.status(400).json({ error: 'Invalid currentValueCents' })
-  }
-  if (typeof currentProfitRate !== 'number' || !Number.isFinite(currentProfitRate)) {
-    return res.status(400).json({ error: 'Invalid currentProfitRate' })
   }
 
   const supabase = getSupabase()
 
   const { data: inv, error: invErr } = await supabase
     .from('investments')
-    .select('id, current_value_cents, current_profit_rate')
+    .select('id, current_value_cents, current_profit_rate, target_amount_cents, stop_profit_line')
     .eq('id', investmentId)
     .eq('user_id', userId)
     .maybeSingle()
@@ -112,22 +106,61 @@ async function handleUpdateCr(body: any, res: any) {
 
   const cBefore = Number(inv.current_value_cents)
   const rBefore = Number(inv.current_profit_rate)
+  const mBefore = Number(inv.target_amount_cents)
+  const sBefore = inv.stop_profit_line != null ? Number(inv.stop_profit_line) : null
+
+  // 构建更新对象，仅包含请求中提供的字段
+  const patch: Record<string, any> = {}
+  let hasCrUpdate = false
+  let hasParamUpdate = false
+
+  if (typeof currentValueCents === 'number' && Number.isFinite(currentValueCents)) {
+    patch.current_value_cents = currentValueCents
+    hasCrUpdate = true
+  }
+  if (typeof currentProfitRate === 'number' && Number.isFinite(currentProfitRate)) {
+    patch.current_profit_rate = currentProfitRate
+    hasCrUpdate = true
+  }
+  if (typeof targetAmountCents === 'number' && Number.isFinite(targetAmountCents)) {
+    patch.target_amount_cents = targetAmountCents
+    hasParamUpdate = true
+  }
+  if (stopProfitLine !== undefined) {
+    patch.stop_profit_line = stopProfitLine ?? null
+    hasParamUpdate = true
+  }
+
+  if (Object.keys(patch).length === 0) {
+    return res.status(400).json({ error: 'No valid fields to update' })
+  }
 
   const { error: updateErr } = await supabase
     .from('investments')
-    .update({ current_value_cents: currentValueCents, current_profit_rate: currentProfitRate })
+    .update(patch)
     .eq('id', investmentId)
 
   if (updateErr) return res.status(500).json({ error: updateErr.message })
 
+  // 构建 notes
+  const notesParts: string[] = []
+  if (hasCrUpdate) {
+    notesParts.push(`C: ${cBefore}→${currentValueCents ?? cBefore} (¥${(cBefore / 100).toFixed(2)}→¥${((currentValueCents ?? cBefore) / 100).toFixed(2)})`)
+    notesParts.push(`R: ${(rBefore * 100).toFixed(2)}%→${((currentProfitRate ?? rBefore) * 100).toFixed(2)}%`)
+  }
+  if (hasParamUpdate) {
+    notesParts.push(`M: ¥${(mBefore / 100).toFixed(2)}→¥${((targetAmountCents ?? mBefore) / 100).toFixed(2)}`)
+    notesParts.push(`止盈线: ${sBefore != null ? (sBefore * 100).toFixed(0) + '%' : '无'}→${stopProfitLine !== undefined ? (stopProfitLine != null ? (stopProfitLine * 100).toFixed(0) + '%' : '无') : (sBefore != null ? (sBefore * 100).toFixed(0) + '%' : '无')}`)
+  }
+
   const { error: actionErr } = await supabase.from('investment_actions').insert({
     user_id: userId,
     investment_id: investmentId,
-    action_type: 'update_cr',
+    action_type: hasParamUpdate && !hasCrUpdate ? 'update_params' : 'update_cr',
     amount_cents: null,
     c_before_cents: cBefore,
-    c_after_cents: currentValueCents,
-    notes: `C: ${cBefore}→${currentValueCents} (¥${(cBefore / 100).toFixed(2)}→¥${(currentValueCents / 100).toFixed(2)}), R: ${(rBefore * 100).toFixed(2)}%→${(currentProfitRate * 100).toFixed(2)}%`,
+    c_after_cents: currentValueCents ?? cBefore,
+    notes: notesParts.join(', '),
   })
 
   if (actionErr) {
@@ -137,9 +170,13 @@ async function handleUpdateCr(body: any, res: any) {
   return res.status(200).json({
     success: true,
     cBefore,
-    cAfter: currentValueCents,
+    cAfter: currentValueCents ?? cBefore,
     rBefore,
-    rAfter: currentProfitRate,
+    rAfter: currentProfitRate ?? rBefore,
+    mBefore,
+    mAfter: targetAmountCents ?? mBefore,
+    sBefore,
+    sAfter: stopProfitLine !== undefined ? stopProfitLine : sBefore,
   })
 }
 
