@@ -368,15 +368,16 @@ AI 对话上下文构建模块（详见 [05-AI系统设计](./05-AI系统设计.
 
 ---
 
-### `POST /api/investment-ocr`
+### `POST /api/investment`（type=ocr）
+
+> 已合并至 `/api/investment`，使用 `type: "ocr"` 调用。
 
 **用途**：接受支付宝基金持仓截图（base64），调用 Doubao 视觉模型识别基金数据。
-
-**鉴权**：无（依赖 AI API Key 服务端配置）
 
 **输入**：
 ```json
 {
+  "type": "ocr",
   "imageDataUrl": "data:image/webp;base64,..."
 }
 ```

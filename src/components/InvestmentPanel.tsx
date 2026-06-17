@@ -246,10 +246,10 @@ export default function InvestmentPanel({ userId }: Props) {
 
     try {
       const compressed = await compressImage(file)
-      const res = await fetch('/api/investment-ocr', {
+      const res = await fetch('/api/investment', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ imageDataUrl: compressed.dataUrl }),
+        body: JSON.stringify({ type: 'ocr', imageDataUrl: compressed.dataUrl }),
       })
       const data = await res.json()
       if (!res.ok) throw new Error(data.error || 'OCR 失败')
