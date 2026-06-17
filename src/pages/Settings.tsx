@@ -462,8 +462,9 @@ export default function Settings() {
   const { settings, isCloudLoaded } = useSettingsStore()
   const navigate = useNavigate()
 
-  const enabledCount = settings.apiConfigs.filter((c) => c.enabled).length
-  const modelSummary = settings.apiConfigs
+  const apiConfigs = Array.isArray(settings.apiConfigs) ? settings.apiConfigs : []
+  const enabledCount = apiConfigs.filter((c) => c.enabled).length
+  const modelSummary = apiConfigs
     .map((c) => c.model)
     .filter(Boolean)
     .join(', ') || '（使用默认）'

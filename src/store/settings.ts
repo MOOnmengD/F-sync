@@ -202,6 +202,16 @@ export const useSettingsStore = create<SettingsState>()(
     {
       name: STORAGE_KEY,
       partialize: (state) => ({ settings: state.settings }),
+      // 深度合并 settings 对象，确保新增字段不会因为旧 localStorage 数据
+      // 的浅合并而被置为 undefined（导致 Settings 页面 React 渲染崩溃）
+      merge: (persisted, current) => ({
+        ...current,
+        ...(persisted as Record<string, unknown>),
+        settings: {
+          ...current.settings,
+          ...((persisted as { settings?: Record<string, unknown> })?.settings || {}),
+        },
+      }),
     }
   )
 )
