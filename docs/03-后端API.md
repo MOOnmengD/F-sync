@@ -396,9 +396,14 @@ AI 对话上下文构建模块（详见 [05-AI系统设计](./05-AI系统设计.
 ```json
 {
   "type": "ocr",
-  "imageDataUrl": "data:image/webp;base64,..."
+  "imageDataUrl": "data:image/webp;base64,...",
+  "url": "https://example.com/v1",
+  "key": "sk-...",
+  "model": "doubao-vision-pro-32k",
+  "prompt": "自定义截图解析提示词"
 }
 ```
+> `url` / `key` / `model` / `prompt` 均可选。前端 Settings 的「理财截图解析」卡片会透传这些字段；留空时使用服务端默认配置。
 
 **输出**：
 ```json
@@ -413,7 +418,7 @@ AI 对话上下文构建模块（详见 [05-AI系统设计](./05-AI系统设计.
 }
 ```
 
-**配置**：使用 `OCR_AI_*` 环境变量，fallback 到 `CHAT_AI_*` → `AI_*`。模型默认 `doubao-vision-pro-32k`。
+**配置优先级**：请求体字段 → `OCR_AI_*` 环境变量 → `CHAT_AI_*` → `AI_*`。模型默认 `doubao-vision-pro-32k`。Prompt 留空时使用 `DEFAULT_INVESTMENT_OCR_PROMPT`，默认按养基宝截图的「持有金额」列提取当前持仓、按「持有收益率」列提取收益率，并忽略「关联板块」等无关列。
 
 ---
 

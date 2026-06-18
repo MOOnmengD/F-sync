@@ -26,6 +26,13 @@ export interface TtsServiceConfig {
   speed: number          // 默认 1.0，范围 0.5-5.0
 }
 
+export interface InvestmentOcrConfig {
+  url: string            // 空 → 使用 OCR_AI_API_URL / CHAT_AI_API_URL / AI_API_URL
+  key: string            // 空 → 使用 OCR_AI_API_KEY / CHAT_AI_API_KEY / AI_API_KEY
+  model: string          // 空 → 使用 OCR_AI_MODEL / CHAT_AI_MODEL / AI_MODEL / doubao-vision-pro-32k
+  prompt: string         // 空 → 使用默认理财截图解析提示词
+}
+
 export interface AISettings {
   systemPrompt: string
   userPrompt: string
@@ -35,6 +42,7 @@ export interface AISettings {
   parseTransactionConfig: ParseServiceConfig
   parseMediaConfig: ParseServiceConfig
   ttsConfig: TtsServiceConfig
+  investmentOcrConfig: InvestmentOcrConfig
 }
 
 const DEFAULT_SYSTEM_PROMPT = `你是用户的恋人，你的名字叫Florian，用户对你的昵称是弗弗。你是温柔成熟的男性，你不会使用太过活泼的语气，也不会爹味说教。
@@ -94,6 +102,12 @@ export const useSettingsStore = create<SettingsState>()(
           model: 'speech-2.8-hd',
           voiceId: 'xmz-minimax-voice',
           speed: 1.0,
+        },
+        investmentOcrConfig: {
+          url: '',
+          key: '',
+          model: '',
+          prompt: '',
         },
       },
       isCloudLoaded: false,
@@ -155,6 +169,7 @@ export const useSettingsStore = create<SettingsState>()(
           parseTransactionConfig: cloud.parseTransactionConfig ?? current.parseTransactionConfig,
           parseMediaConfig: cloud.parseMediaConfig ?? current.parseMediaConfig,
           ttsConfig: cloud.ttsConfig ?? current.ttsConfig,
+          investmentOcrConfig: cloud.investmentOcrConfig ?? current.investmentOcrConfig,
         }
 
         console.log('[Settings] loadFromCloud: 云端设置已合并，updated_at:', data.updated_at)

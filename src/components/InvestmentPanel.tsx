@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { ArrowUpDown, Calculator, ImageUp, Save, Settings2 } from 'lucide-react'
 import { supabase } from '../supabaseClient'
+import { useSettingsStore } from '../store/settings'
 import InvestmentCard, { investmentTableGrid, type InvestmentData } from './InvestmentCard'
 import InvestManageModal from './InvestManageModal'
 import {
@@ -27,6 +28,15 @@ type InvestmentUpdateParams = {
 type FormulaDraft = Record<keyof InvestmentFormulaConfig, string>
 
 const formulaStorageKey = 'fsync.investment.formula.v1'
+
+type OcrResult = {
+  fund_name: string
+  holding_cents: number | null
+  profit_rate: number | null
+  matchedId?: string
+  sourceIndex: number
+  sourceName: string
+}
 
 function applyInvestmentUpdate(fund: InvestmentData, params: InvestmentUpdateParams): InvestmentData {
   return {
@@ -63,6 +73,55 @@ function buildPendingUpdate(current: InvestmentData, saved: InvestmentData | und
   }
 
   return Object.keys(patch).length > 0 ? patch : null
+}
+
+function normalizeFundNameForMatch(name: string): string {
+  return name
+    .replace(/\s+/g, '')
+    .replace(/\.{2,}|…|⋯/g, '')
+    .replace(/[，,。]/g, '')
+}
+
+function isFundNameMatch(ocrName: string, dbName: string): boolean {
+  const normalizedOcr = normalizeFundNameForMatch(ocrName)
+  const normalizedDb = normalizeFundNameForMatch(dbName)
+  if (!normalizedOcr || !normalizedDb) return false
+  if (normalizedOcr === normalizedDb) return true
+  return (
+    (normalizedOcr.length >= 4 && normalizedDb.includes(normalizedOcr)) ||
+    (normalizedDb.length >= 4 && normalizedOcr.includes(normalizedDb))
+  )
+}
+
+function getOcrMergeKey(result: OcrResult): string {
+  if (result.matchedId) return `id:${result.matchedId}`
+  const normalizedName = normalizeFundNameForMatch(result.fund_name)
+  return normalizedName ? `name:${normalizedName}` : `raw:${result.sourceIndex}:${result.fund_name}`
+}
+
+function mergeOcrResults(results: OcrResult[]): OcrResult[] {
+  const merged = new Map<string, OcrResult>()
+
+  for (const result of results) {
+    const key = getOcrMergeKey(result)
+    const existing = merged.get(key)
+    if (!existing) {
+      merged.set(key, result)
+      continue
+    }
+
+    merged.set(key, {
+      ...existing,
+      fund_name: result.fund_name.length > existing.fund_name.length ? result.fund_name : existing.fund_name,
+      holding_cents: result.holding_cents ?? existing.holding_cents,
+      profit_rate: result.profit_rate ?? existing.profit_rate,
+      matchedId: existing.matchedId ?? result.matchedId,
+      sourceIndex: existing.sourceIndex,
+      sourceName: existing.sourceName,
+    })
+  }
+
+  return Array.from(merged.values())
 }
 
 function loadFormulaConfig(): InvestmentFormulaConfig {
@@ -161,6 +220,7 @@ const formulaFields: Array<{
 ]
 
 export default function InvestmentPanel({ userId }: Props) {
+  const investmentOcrConfig = useSettingsStore((s) => s.settings.investmentOcrConfig)
   const [funds, setFunds] = useState<InvestmentData[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -179,12 +239,8 @@ export default function InvestmentPanel({ userId }: Props) {
 
   // OCR
   const [ocrLoading, setOcrLoading] = useState(false)
-  const [ocrResults, setOcrResults] = useState<Array<{
-    fund_name: string
-    holding_cents: number | null
-    profit_rate: number | null
-    matchedId?: string  // 匹配到的现有基金 ID
-  }> | null>(null)
+  const [ocrProgress, setOcrProgress] = useState<string | null>(null)
+  const [ocrResults, setOcrResults] = useState<OcrResult[] | null>(null)
   const fileInputRef = useRef<HTMLInputElement | null>(null)
 
   // toast 临时状态
@@ -494,43 +550,91 @@ export default function InvestmentPanel({ userId }: Props) {
   }, [])
 
   const handleOcrUpload = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0]
-    if (!file) return
+    const files = Array.from(e.target.files || [])
+    if (files.length === 0) return
+
     setOcrLoading(true)
+    setOcrProgress(`0/${files.length}`)
     setOcrResults(null)
 
-    try {
-      const compressed = await compressImage(file)
-      const res = await fetch('/api/investment', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ type: 'ocr', imageDataUrl: compressed.dataUrl }),
-      })
-      const data = await res.json()
-      if (!res.ok) throw new Error(data.error || 'OCR 失败')
+    const allResults: OcrResult[] = []
+    let failedCount = 0
+    let successCount = 0
+    let firstError = ''
 
-      // 尝试匹配现有基金（按名称包含匹配）
-      const results = (data.funds || []).map((f: any) => {
-        const match = funds.find((existing) => {
-          const ocrName = f.fund_name.replace(/\s+/g, '')
-          const dbName = existing.fund_name.replace(/\s+/g, '')
-          return ocrName === dbName || ocrName.includes(dbName) || dbName.includes(ocrName)
-        })
-        return {
-          ...f,
-          matchedId: match?.id,
+    try {
+      for (const [idx, file] of files.entries()) {
+        setOcrProgress(`${idx + 1}/${files.length}`)
+        try {
+          const compressed = await compressImage(file)
+          const res = await fetch('/api/investment', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              type: 'ocr',
+              imageDataUrl: compressed.dataUrl,
+              url: investmentOcrConfig.url || undefined,
+              key: investmentOcrConfig.key || undefined,
+              model: investmentOcrConfig.model || undefined,
+              prompt: investmentOcrConfig.prompt || undefined,
+            }),
+          })
+          const data = await res.json()
+          if (!res.ok) throw new Error(data.error || 'OCR 失败')
+          successCount++
+
+          const results: OcrResult[] = Array.isArray(data.funds)
+            ? data.funds
+                .map((f: any) => {
+                  const fundName = typeof f.fund_name === 'string' ? f.fund_name.trim() : ''
+                  if (!fundName) return null
+                  const match = funds.find((existing) => isFundNameMatch(fundName, existing.fund_name))
+                  return {
+                    fund_name: fundName,
+                    holding_cents: typeof f.holding_cents === 'number' && Number.isFinite(f.holding_cents)
+                      ? Math.round(f.holding_cents)
+                      : null,
+                    profit_rate: typeof f.profit_rate === 'number' && Number.isFinite(f.profit_rate)
+                      ? f.profit_rate
+                      : null,
+                    matchedId: match?.id,
+                    sourceIndex: idx,
+                    sourceName: file.name || `截图 ${idx + 1}`,
+                  }
+                })
+                .filter((item: OcrResult | null): item is OcrResult => item !== null)
+            : []
+
+          allResults.push(...results)
+        } catch (e: any) {
+          failedCount++
+          if (!firstError) firstError = e.message || `${file.name || `第 ${idx + 1} 张截图`} 识别失败`
         }
-      })
-      setOcrResults(results)
-    } catch (e: any) {
-      setToast(e.message || 'OCR 识别失败')
+      }
+
+      const mergedResults = mergeOcrResults(allResults)
+      if (mergedResults.length > 0) {
+        setOcrResults(mergedResults)
+        if (failedCount > 0) {
+          setToast(`已识别 ${files.length - failedCount} 张，${failedCount} 张失败`)
+        }
+      } else if (failedCount > 0) {
+        if (successCount > 0) {
+          setOcrResults([])
+          setToast(`已识别 ${successCount} 张，${failedCount} 张失败，未识别到基金数据`)
+        } else {
+          setToast(files.length === 1 ? firstError : `全部 ${files.length} 张截图识别失败：${firstError || '请稍后重试'}`)
+        }
+      } else {
+        setOcrResults([])
+      }
     } finally {
       setOcrLoading(false)
+      setOcrProgress(null)
+      // 重置 input 以允许重新选择同一批文件
+      if (fileInputRef.current) fileInputRef.current.value = ''
     }
-
-    // 重置 input 以允许重新选择同一文件
-    if (fileInputRef.current) fileInputRef.current.value = ''
-  }, [funds, setToast])
+  }, [funds, investmentOcrConfig, setToast])
 
   const handleOcrApply = useCallback(() => {
     if (!ocrResults) return
@@ -611,6 +715,7 @@ export default function InvestmentPanel({ userId }: Props) {
           ref={fileInputRef}
           type="file"
           accept="image/*"
+          multiple
           onChange={handleOcrUpload}
           className="hidden"
         />
@@ -621,7 +726,7 @@ export default function InvestmentPanel({ userId }: Props) {
           className="inline-flex items-center gap-1.5 rounded-xl border border-base-line bg-base-bg px-3 py-2 text-xs text-base-muted active:opacity-70 disabled:opacity-40"
         >
           <ImageUp size={14} />
-          {ocrLoading ? '识别中…' : '上传截图'}
+          {ocrLoading ? `识别 ${ocrProgress || ''}` : '上传截图'}
         </button>
         <div className="relative">
           <button
@@ -823,6 +928,7 @@ export default function InvestmentPanel({ userId }: Props) {
                       <div className="min-w-0 flex-1">
                         <div className="text-xs font-medium text-base-text truncate">{r.fund_name}</div>
                         <div className="mt-0.5 flex items-center gap-2 text-[10px] text-base-muted">
+                          <span className="shrink-0" title={r.sourceName}>第 {r.sourceIndex + 1} 张</span>
                           {r.holding_cents !== null && (
                             <span>持仓 ¥{(r.holding_cents / 100).toFixed(2)}</span>
                           )}

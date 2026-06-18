@@ -4,13 +4,14 @@ import {
   ChevronDown, ChevronUp, Eye, EyeOff, Copy, ClipboardPaste, Check,
   Save, RotateCcw, ArrowRight, ArrowLeft,
 } from 'lucide-react'
-import { useSettingsStore, type ParseServiceConfig, type TtsServiceConfig } from '../store/settings'
+import { useSettingsStore, type InvestmentOcrConfig, type ParseServiceConfig, type TtsServiceConfig } from '../store/settings'
 import { IconButton } from '../shared/ui/IconButton'
 import {
   DEFAULT_PARSE_TRANSACTION_SYSTEM_PROMPT,
   DEFAULT_PARSE_TRANSACTION_USER_PROMPT_TEMPLATE,
   DEFAULT_PARSE_MEDIA_SYSTEM_PROMPT,
   DEFAULT_PARSE_MEDIA_USER_PROMPT_TEMPLATE,
+  DEFAULT_INVESTMENT_OCR_PROMPT,
 } from '../../api/_prompt-defaults'
 
 // ===== 折叠卡片组件 =====
@@ -458,6 +459,96 @@ function TtsServiceSection() {
   )
 }
 
+// ===== 理财截图解析配置区域 =====
+function InvestmentOcrSection() {
+  const { settings, updateSettings, saveToCloud } = useSettingsStore()
+  const [expanded, setExpanded] = useState(false)
+  const [saved, setSaved] = useState(false)
+  const [local, setLocal] = useState<InvestmentOcrConfig>(settings.investmentOcrConfig)
+
+  useEffect(() => {
+    setLocal(settings.investmentOcrConfig)
+  }, [settings.investmentOcrConfig])
+
+  const markSaved = () => {
+    setSaved(true)
+    setTimeout(() => setSaved(false), 2000)
+  }
+
+  const handleSave = () => {
+    updateSettings({ investmentOcrConfig: local })
+    saveToCloud()
+    markSaved()
+  }
+
+  const handleResetPrompt = () => {
+    setLocal({ ...local, prompt: '' })
+  }
+
+  return (
+    <AccordionCard
+      title="理财截图解析"
+      subtitle="investment ocr"
+      expanded={expanded}
+      onToggle={() => setExpanded(!expanded)}
+      saved={saved}
+      onSave={handleSave}
+    >
+      <div>
+        <label className="text-[10px] text-base-muted uppercase tracking-wider mb-1 block">API URL</label>
+        <input
+          className="w-full p-2 text-xs bg-white border border-base-line rounded-lg outline-none focus:border-[#B4AEE8]"
+          placeholder="留空使用环境变量默认值 (OCR_AI_API_URL)"
+          value={local.url}
+          onChange={(e) => setLocal({ ...local, url: e.target.value })}
+          autoComplete="off"
+          inputMode="url"
+        />
+      </div>
+
+      <div>
+        <label className="text-[10px] text-base-muted uppercase tracking-wider mb-1 block">API Key</label>
+        <KeyInput
+          value={local.key}
+          onChange={(v) => setLocal({ ...local, key: v })}
+          placeholder="留空使用环境变量中的密钥 (OCR_AI_API_KEY)"
+        />
+      </div>
+
+      <div>
+        <label className="text-[10px] text-base-muted uppercase tracking-wider mb-1 block">模型</label>
+        <input
+          className="w-full p-2 text-xs bg-white border border-base-line rounded-lg outline-none focus:border-[#B4AEE8]"
+          placeholder="留空使用默认模型 (OCR_AI_MODEL 或 doubao-vision-pro-32k)"
+          value={local.model}
+          onChange={(e) => setLocal({ ...local, model: e.target.value })}
+          autoComplete="off"
+        />
+      </div>
+
+      <div className="pt-2 border-t border-base-line">
+        <div className="flex items-center justify-between mb-2">
+          <span className="text-[10px] text-base-muted uppercase tracking-wider">提示词（留空使用默认）</span>
+          <button
+            onClick={handleResetPrompt}
+            className="flex items-center gap-1 text-xs text-base-muted hover:text-red-400 transition-colors"
+          >
+            <RotateCcw size={11} />
+            重置为默认
+          </button>
+        </div>
+
+        <textarea
+          className="w-full h-48 p-2.5 text-xs font-mono bg-white border border-base-line rounded-xl focus:ring-2 focus:ring-[#B4AEE8]/20 focus:border-[#B4AEE8] transition-all resize-y outline-none leading-relaxed"
+          placeholder={DEFAULT_INVESTMENT_OCR_PROMPT.slice(0, 120) + '…'}
+          value={local.prompt}
+          onChange={(e) => setLocal({ ...local, prompt: e.target.value })}
+        />
+      </div>
+    </AccordionCard>
+  )
+}
+
 // ===== 主页面 =====
 export default function Settings() {
   const { settings, isCloudLoaded } = useSettingsStore()
@@ -510,6 +601,12 @@ export default function Settings() {
           defaultSystemPrompt={DEFAULT_PARSE_MEDIA_SYSTEM_PROMPT}
           defaultUserPrompt={DEFAULT_PARSE_MEDIA_USER_PROMPT_TEMPLATE}
         />
+      </section>
+
+      {/* 图像解析 */}
+      <section className="space-y-3">
+        <h2 className="text-sm font-bold text-base-text/70 uppercase tracking-wider">图像解析</h2>
+        <InvestmentOcrSection />
       </section>
 
       {/* TTS */}

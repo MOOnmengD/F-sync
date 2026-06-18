@@ -1,5 +1,6 @@
 import { createClient } from '@supabase/supabase-js'
 import { resolveChatCompletionsUrl } from './_utils.js'
+import { DEFAULT_INVESTMENT_OCR_PROMPT } from './_prompt-defaults'
 
 /**
  * /api/investment
@@ -433,38 +434,25 @@ async function handleOcr(body: any, res: any) {
     return res.status(400).json({ error: 'imageDataUrl must be a data URL starting with data:image/' })
   }
 
-  // 配置优先级：OCR_AI_* > CHAT_AI_* > AI_*
-  const apiUrl = process.env.OCR_AI_API_URL || process.env.CHAT_AI_API_URL || process.env.AI_API_URL
-  const apiKey = process.env.OCR_AI_API_KEY || process.env.CHAT_AI_API_KEY || process.env.AI_API_KEY
-  const model = process.env.OCR_AI_MODEL || process.env.CHAT_AI_MODEL || process.env.AI_MODEL || 'doubao-vision-pro-32k'
+  // 配置优先级：body > OCR_AI_* > CHAT_AI_* > AI_*
+  const apiUrl = (typeof body?.url === 'string' && body.url.trim())
+    ? body.url.trim()
+    : (process.env.OCR_AI_API_URL || process.env.CHAT_AI_API_URL || process.env.AI_API_URL)
+  const apiKey = (typeof body?.key === 'string' && body.key.trim())
+    ? body.key.trim()
+    : (process.env.OCR_AI_API_KEY || process.env.CHAT_AI_API_KEY || process.env.AI_API_KEY)
+  const model = (typeof body?.model === 'string' && body.model.trim())
+    ? body.model.trim()
+    : (process.env.OCR_AI_MODEL || process.env.CHAT_AI_MODEL || process.env.AI_MODEL || 'doubao-vision-pro-32k')
+  const prompt = (typeof body?.prompt === 'string' && body.prompt.trim())
+    ? body.prompt.trim()
+    : DEFAULT_INVESTMENT_OCR_PROMPT
 
   if (!apiUrl || !apiKey) {
     return res.status(500).json({ error: 'OCR AI not configured (missing API URL/Key)' })
   }
 
   const endpoint = resolveChatCompletionsUrl(apiUrl)
-
-  const prompt = `你是一个基金持仓截图识别助手。请仔细查看这张支付宝基金持仓页面的截图。
-
-请提取截图中所有可见的基金信息，对每一只基金返回：
-- fund_name: 基金完整名称（不要截断）
-- holding_cents: 持仓金额，单位为"分"（例如 ¥9,325.00 → 返回 932500）
-- profit_rate: 持有收益率，小数形式（例如 +4.31% → 返回 0.0431，-11.35% → 返回 -0.1135）
-
-请严格按照以下 JSON 格式返回，不要包含任何其他文字：
-{
-  "funds": [
-    { "fund_name": "景顺长城宁景混合A", "holding_cents": 932500, "profit_rate": 0.0431 },
-    ...
-  ]
-}
-
-注意：
-- 忽略截图中的"累计收益"、"昨日收益"等汇总数据
-- 只提取单个基金的持仓金额和持有收益率
-- 金额中如有逗号分隔请忽略（如 1,234.56 → 1234.56）
-- 如果某个基金的金额或收益率看不清，请将对应字段设为 null，不要编造数值
-- 确保 holding_cents 是整数（分），profit_rate 是小数（非百分比）`
 
   const response = await fetch(endpoint, {
     method: 'POST',
