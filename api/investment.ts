@@ -10,6 +10,7 @@ import { resolveChatCompletionsUrl } from './_utils.js'
  * type 取值：
  * - "action"     — 执行投资操作（确认/覆盖建议、手动调整）
  * - "update_cr"  — 更新持仓的当前价值 C 和收益率 R
+ * - "batch_update" — 批量更新持仓快照和策略参数
  * - "manage"     — 创建/更新/停用投资（通过 body.action 进一步区分 create/update/deactivate）
  * - "ocr"        — OCR 截图识别基金持仓（支付宝截图 → 结构化基金数据）
  */
@@ -180,6 +181,141 @@ async function handleUpdateCr(body: any, res: any) {
     sBefore,
     sAfter: stopProfitLine !== undefined ? stopProfitLine : sBefore,
   })
+}
+
+async function handleBatchUpdate(body: any, res: any) {
+  const { userId, updates } = body
+
+  if (!userId) {
+    return res.status(400).json({ error: 'Missing userId' })
+  }
+  if (!Array.isArray(updates) || updates.length === 0) {
+    return res.status(400).json({ error: 'Missing updates' })
+  }
+
+  const investmentIds = Array.from(new Set(
+    updates
+      .map((item: any) => item?.investmentId)
+      .filter((id: any) => typeof id === 'string' && id.length > 0),
+  ))
+
+  if (investmentIds.length !== updates.length) {
+    return res.status(400).json({ error: 'Invalid investmentId in updates' })
+  }
+
+  const supabase = getSupabase()
+
+  const { data: investments, error: invErr } = await supabase
+    .from('investments')
+    .select('id, current_value_cents, current_profit_rate, target_amount_cents, stop_profit_line')
+    .eq('user_id', userId)
+    .in('id', investmentIds)
+
+  if (invErr) return res.status(500).json({ error: invErr.message })
+  if (!investments || investments.length !== investmentIds.length) {
+    return res.status(404).json({ error: 'One or more investments not found' })
+  }
+
+  const investmentMap = new Map(investments.map((item: any) => [item.id, item]))
+  const actionRows: any[] = []
+  let updatedCount = 0
+
+  for (const item of updates) {
+    const {
+      investmentId,
+      currentValueCents,
+      currentProfitRate,
+      targetAmountCents,
+      stopProfitLine,
+    } = item
+
+    const inv = investmentMap.get(investmentId)
+    if (!inv) {
+      return res.status(404).json({ error: `Investment not found: ${investmentId}` })
+    }
+
+    const patch: Record<string, any> = {}
+    let hasCrUpdate = false
+    let hasParamUpdate = false
+
+    if (currentValueCents !== undefined) {
+      if (typeof currentValueCents !== 'number' || !Number.isFinite(currentValueCents)) {
+        return res.status(400).json({ error: 'Invalid currentValueCents' })
+      }
+      patch.current_value_cents = currentValueCents
+      hasCrUpdate = true
+    }
+    if (currentProfitRate !== undefined) {
+      if (typeof currentProfitRate !== 'number' || !Number.isFinite(currentProfitRate)) {
+        return res.status(400).json({ error: 'Invalid currentProfitRate' })
+      }
+      patch.current_profit_rate = currentProfitRate
+      hasCrUpdate = true
+    }
+    if (targetAmountCents !== undefined) {
+      if (typeof targetAmountCents !== 'number' || !Number.isFinite(targetAmountCents)) {
+        return res.status(400).json({ error: 'Invalid targetAmountCents' })
+      }
+      patch.target_amount_cents = targetAmountCents
+      hasParamUpdate = true
+    }
+    if (stopProfitLine !== undefined) {
+      if (stopProfitLine !== null && (typeof stopProfitLine !== 'number' || !Number.isFinite(stopProfitLine))) {
+        return res.status(400).json({ error: 'Invalid stopProfitLine' })
+      }
+      patch.stop_profit_line = stopProfitLine
+      hasParamUpdate = true
+    }
+
+    if (Object.keys(patch).length === 0) continue
+
+    const { error: updateErr } = await supabase
+      .from('investments')
+      .update(patch)
+      .eq('id', investmentId)
+      .eq('user_id', userId)
+
+    if (updateErr) return res.status(500).json({ error: updateErr.message })
+
+    const cBefore = Number(inv.current_value_cents)
+    const rBefore = Number(inv.current_profit_rate)
+    const mBefore = Number(inv.target_amount_cents)
+    const sBefore = inv.stop_profit_line != null ? Number(inv.stop_profit_line) : null
+    const cAfter = currentValueCents ?? cBefore
+    const rAfter = currentProfitRate ?? rBefore
+    const mAfter = targetAmountCents ?? mBefore
+    const sAfter = stopProfitLine !== undefined ? stopProfitLine : sBefore
+
+    const notesParts: string[] = []
+    if (hasCrUpdate) {
+      notesParts.push(`C: ${cBefore}→${cAfter} (¥${(cBefore / 100).toFixed(2)}→¥${(cAfter / 100).toFixed(2)})`)
+      notesParts.push(`R: ${(rBefore * 100).toFixed(2)}%→${(rAfter * 100).toFixed(2)}%`)
+    }
+    if (hasParamUpdate) {
+      notesParts.push(`M: ¥${(mBefore / 100).toFixed(2)}→¥${(mAfter / 100).toFixed(2)}`)
+      notesParts.push(`止盈线: ${sBefore != null ? (sBefore * 100).toFixed(0) + '%' : '无'}→${sAfter != null ? (sAfter * 100).toFixed(0) + '%' : '无'}`)
+    }
+
+    actionRows.push({
+      user_id: userId,
+      investment_id: investmentId,
+      action_type: hasParamUpdate && !hasCrUpdate ? 'update_params' : 'update_cr',
+      amount_cents: null,
+      c_before_cents: cBefore,
+      c_after_cents: cAfter,
+      notes: notesParts.join(', '),
+    })
+    updatedCount++
+  }
+
+  if (actionRows.length > 0) {
+    const { error: actionErr } = await supabase.from('investment_actions').insert(actionRows)
+    if (actionErr) {
+      console.warn('[investment] batch_update action log failed:', actionErr.message)
+    }
+  }
+
+  return res.status(200).json({ success: true, updatedCount })
 }
 
 async function handleManage(body: any, res: any) {
@@ -417,12 +553,14 @@ export default async function handler(req: any, res: any) {
         return await handleAction(body, res)
       case 'update_cr':
         return await handleUpdateCr(body, res)
+      case 'batch_update':
+        return await handleBatchUpdate(body, res)
       case 'manage':
         return await handleManage(body, res)
       case 'ocr':
         return await handleOcr(body, res)
       default:
-        return res.status(400).json({ error: `Invalid type: "${type}". Must be one of: action, update_cr, manage, ocr` })
+        return res.status(400).json({ error: `Invalid type: "${type}". Must be one of: action, update_cr, batch_update, manage, ocr` })
     }
   } catch (e: any) {
     console.error('[investment]', e)

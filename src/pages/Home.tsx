@@ -724,7 +724,7 @@ export default function Home() {
 
   return (
     <div className="mx-auto min-h-dvh max-w-[480px] bg-base-bg px-4 pb-[160px] text-base-text">
-      <header className="sticky top-0 z-30 -mx-4 bg-base-bg px-4 pb-3 pt-4">
+      <header className="sticky top-0 z-50 -mx-4 bg-base-bg/95 px-4 pb-3 pt-4 backdrop-blur-sm">
         <div className="flex items-center justify-between">
           <IconButton label="打开导航" onClick={toggleDrawer} icon={<Menu size={18} />} />
           <div className="text-sm font-medium text-base-text">主页</div>
@@ -786,6 +786,10 @@ export default function Home() {
             />
           </div>
         </div>
+        <div
+          className="pointer-events-none absolute inset-x-0 -bottom-5 h-5"
+          style={{ background: 'linear-gradient(to bottom, rgba(253,252,251,0.98), rgba(253,252,251,0))' }}
+        />
       </header>
 
       {mode === 'timeline' ? (

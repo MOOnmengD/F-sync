@@ -356,6 +356,24 @@ AI 对话上下文构建模块（详见 [05-AI系统设计](./05-AI系统设计.
 ```
 > `currentValueCents`、`currentProfitRate`、`targetAmountCents`、`stopProfitLine` 均为可选，只更新提供的字段。`stopProfitLine` 传 `null` 表示清除止盈线。
 
+**输入（type: 'batch_update' — 批量更新持仓快照/策略参数）**：
+```json
+{
+  "type": "batch_update",
+  "userId": "uuid",
+  "updates": [
+    {
+      "investmentId": "uuid",
+      "currentValueCents": 60000,
+      "currentProfitRate": 0.15,
+      "targetAmountCents": 120000,
+      "stopProfitLine": 0.15
+    }
+  ]
+}
+```
+> 每个 `updates[]` 项中除 `investmentId` 外字段均可选。前端理财页会先把持仓/收益率/建议持仓/止盈线修改保存在本地草稿，点击总「保存」按钮后一次性调用该类型同步。服务端逐只校验归属并写入 `investment_actions` 操作流水。
+
 **输入（type: 'manage' — 创建/更新/停用投资）**：
 ```json
 {

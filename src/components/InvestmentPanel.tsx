@@ -1,14 +1,164 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { ArrowUpDown, Calculator, ImageUp, Settings2 } from 'lucide-react'
+import { ArrowUpDown, Calculator, ImageUp, Save, Settings2 } from 'lucide-react'
 import { supabase } from '../supabaseClient'
 import InvestmentCard, { investmentTableGrid, type InvestmentData } from './InvestmentCard'
 import InvestManageModal from './InvestManageModal'
-import { calculateSuggestion, getDateLabel, type Suggestion } from '../utils/investmentCalculator'
+import {
+  calculateSuggestion,
+  defaultInvestmentFormulaConfig,
+  getDateLabel,
+  getInvestmentFormulaLines,
+  type InvestmentFormulaConfig,
+  type Suggestion,
+} from '../utils/investmentCalculator'
 import { compressImage } from '../utils/image'
 
 type Props = {
   userId: string
 }
+
+type InvestmentUpdateParams = {
+  c?: number
+  r?: number
+  m?: number
+  stopProfit?: number | null
+}
+
+type FormulaDraft = Record<keyof InvestmentFormulaConfig, string>
+
+const formulaStorageKey = 'fsync.investment.formula.v1'
+
+function applyInvestmentUpdate(fund: InvestmentData, params: InvestmentUpdateParams): InvestmentData {
+  return {
+    ...fund,
+    ...(params.c !== undefined ? { current_value_cents: params.c } : {}),
+    ...(params.r !== undefined ? { current_profit_rate: params.r } : {}),
+    ...(params.m !== undefined ? { target_amount_cents: params.m } : {}),
+    ...(params.stopProfit !== undefined ? { stop_profit_line: params.stopProfit } : {}),
+  }
+}
+
+function buildPendingUpdate(current: InvestmentData, saved: InvestmentData | undefined): InvestmentUpdateParams | null {
+  if (!saved) {
+    return {
+      c: current.current_value_cents,
+      r: current.current_profit_rate,
+      m: current.target_amount_cents,
+      stopProfit: current.stop_profit_line,
+    }
+  }
+
+  const patch: InvestmentUpdateParams = {}
+  if (current.current_value_cents !== saved.current_value_cents) patch.c = current.current_value_cents
+  if (Math.abs(current.current_profit_rate - saved.current_profit_rate) > 0.00000001) patch.r = current.current_profit_rate
+  if (current.target_amount_cents !== saved.target_amount_cents) patch.m = current.target_amount_cents
+
+  const currentStop = current.stop_profit_line ?? null
+  const savedStop = saved.stop_profit_line ?? null
+  if (
+    currentStop !== savedStop &&
+    (currentStop == null || savedStop == null || Math.abs(currentStop - savedStop) > 0.00000001)
+  ) {
+    patch.stopProfit = currentStop
+  }
+
+  return Object.keys(patch).length > 0 ? patch : null
+}
+
+function loadFormulaConfig(): InvestmentFormulaConfig {
+  if (typeof window === 'undefined') return defaultInvestmentFormulaConfig
+  try {
+    const raw = window.localStorage.getItem(formulaStorageKey)
+    if (!raw) return defaultInvestmentFormulaConfig
+    const parsed = JSON.parse(raw) as Partial<InvestmentFormulaConfig>
+    return { ...defaultInvestmentFormulaConfig, ...parsed }
+  } catch {
+    return defaultInvestmentFormulaConfig
+  }
+}
+
+function configToDraft(config: InvestmentFormulaConfig): FormulaDraft {
+  return {
+    buyBelowTargetRatio: (config.buyBelowTargetRatio * 100).toString(),
+    buyProfitRateBelow: (config.buyProfitRateBelow * 100).toString(),
+    buyGapRatio: (config.buyGapRatio * 100).toString(),
+    buyMaxCents: (config.buyMaxCents / 100).toString(),
+    stopSellExcessRatio: (config.stopSellExcessRatio * 100).toString(),
+    strongStopMultiplier: config.strongStopMultiplier.toString(),
+    strongStopBonusCents: (config.strongStopBonusCents / 100).toString(),
+    strongStopMaxCurrentRatio: (config.strongStopMaxCurrentRatio * 100).toString(),
+    rebalanceOverTargetRatio: (config.rebalanceOverTargetRatio * 100).toString(),
+    rebalanceBelowTargetRatio: (config.rebalanceBelowTargetRatio * 100).toString(),
+    rebalanceBuyToTargetRatio: (config.rebalanceBuyToTargetRatio * 100).toString(),
+  }
+}
+
+function draftToConfig(draft: FormulaDraft): InvestmentFormulaConfig | null {
+  const parse = (key: keyof FormulaDraft) => {
+    const value = parseFloat(draft[key])
+    return Number.isFinite(value) ? value : null
+  }
+
+  const buyBelowTargetRatio = parse('buyBelowTargetRatio')
+  const buyProfitRateBelow = parse('buyProfitRateBelow')
+  const buyGapRatio = parse('buyGapRatio')
+  const buyMaxCents = parse('buyMaxCents')
+  const stopSellExcessRatio = parse('stopSellExcessRatio')
+  const strongStopMultiplier = parse('strongStopMultiplier')
+  const strongStopBonusCents = parse('strongStopBonusCents')
+  const strongStopMaxCurrentRatio = parse('strongStopMaxCurrentRatio')
+  const rebalanceOverTargetRatio = parse('rebalanceOverTargetRatio')
+  const rebalanceBelowTargetRatio = parse('rebalanceBelowTargetRatio')
+  const rebalanceBuyToTargetRatio = parse('rebalanceBuyToTargetRatio')
+
+  if (
+    buyBelowTargetRatio == null ||
+    buyProfitRateBelow == null ||
+    buyGapRatio == null ||
+    buyMaxCents == null ||
+    stopSellExcessRatio == null ||
+    strongStopMultiplier == null ||
+    strongStopBonusCents == null ||
+    strongStopMaxCurrentRatio == null ||
+    rebalanceOverTargetRatio == null ||
+    rebalanceBelowTargetRatio == null ||
+    rebalanceBuyToTargetRatio == null
+  ) {
+    return null
+  }
+
+  return {
+    buyBelowTargetRatio: buyBelowTargetRatio / 100,
+    buyProfitRateBelow: buyProfitRateBelow / 100,
+    buyGapRatio: buyGapRatio / 100,
+    buyMaxCents: Math.round(buyMaxCents * 100),
+    stopSellExcessRatio: stopSellExcessRatio / 100,
+    strongStopMultiplier,
+    strongStopBonusCents: Math.round(strongStopBonusCents * 100),
+    strongStopMaxCurrentRatio: strongStopMaxCurrentRatio / 100,
+    rebalanceOverTargetRatio: rebalanceOverTargetRatio / 100,
+    rebalanceBelowTargetRatio: rebalanceBelowTargetRatio / 100,
+    rebalanceBuyToTargetRatio: rebalanceBuyToTargetRatio / 100,
+  }
+}
+
+const formulaFields: Array<{
+  key: keyof InvestmentFormulaConfig
+  label: string
+  suffix: string
+}> = [
+  { key: 'buyBelowTargetRatio', label: '补仓持仓线', suffix: '%' },
+  { key: 'buyProfitRateBelow', label: '补仓收益线', suffix: '%' },
+  { key: 'buyGapRatio', label: '补仓差额比例', suffix: '%' },
+  { key: 'buyMaxCents', label: '补仓上限', suffix: '元' },
+  { key: 'stopSellExcessRatio', label: '止盈卖出比例', suffix: '%' },
+  { key: 'strongStopMultiplier', label: '强止盈倍数', suffix: '倍' },
+  { key: 'strongStopBonusCents', label: '强止盈加额', suffix: '元' },
+  { key: 'strongStopMaxCurrentRatio', label: '强止盈持仓上限', suffix: '%' },
+  { key: 'rebalanceOverTargetRatio', label: '超配线', suffix: '%' },
+  { key: 'rebalanceBelowTargetRatio', label: '低配线', suffix: '%' },
+  { key: 'rebalanceBuyToTargetRatio', label: '低配买到', suffix: '%' },
+]
 
 export default function InvestmentPanel({ userId }: Props) {
   const [funds, setFunds] = useState<InvestmentData[]>([])
@@ -17,8 +167,15 @@ export default function InvestmentPanel({ userId }: Props) {
   const [suggestions, setSuggestions] = useState<Map<string, Suggestion>>(new Map())
   const [manageOpen, setManageOpen] = useState(false)
   const [calculating, setCalculating] = useState(false)
+  const [savingChanges, setSavingChanges] = useState(false)
   const [sortBy, setSortBy] = useState<string>('c-desc')
   const [sortOpen, setSortOpen] = useState(false)
+  const [pendingUpdates, setPendingUpdates] = useState<Map<string, InvestmentUpdateParams>>(new Map())
+  const [formulaConfig, setFormulaConfig] = useState<InvestmentFormulaConfig>(() => loadFormulaConfig())
+  const [formulaDraft, setFormulaDraft] = useState<FormulaDraft>(() => configToDraft(loadFormulaConfig()))
+  const [formulaEditing, setFormulaEditing] = useState(false)
+  const [formulaError, setFormulaError] = useState<string | null>(null)
+  const savedFundsRef = useRef<Map<string, InvestmentData>>(new Map())
 
   // OCR
   const [ocrLoading, setOcrLoading] = useState(false)
@@ -29,6 +186,13 @@ export default function InvestmentPanel({ userId }: Props) {
     matchedId?: string  // 匹配到的现有基金 ID
   }> | null>(null)
   const fileInputRef = useRef<HTMLInputElement | null>(null)
+
+  // toast 临时状态
+  const [toastMsg, setToastMsg] = useState<string | null>(null)
+  const setToast = useCallback((msg: string) => {
+    setToastMsg(msg)
+    setTimeout(() => setToastMsg(null), 2500)
+  }, [])
 
   // 总资产
   const totalAssets = useMemo(() =>
@@ -87,7 +251,10 @@ export default function InvestmentPanel({ userId }: Props) {
       setError(err.message)
       return
     }
-    setFunds((data || []) as InvestmentData[])
+    const list = (data || []) as InvestmentData[]
+    savedFundsRef.current = new Map(list.map((fund) => [fund.id, fund]))
+    setFunds(list)
+    setPendingUpdates(new Map())
   }, [userId])
 
   useEffect(() => {
@@ -100,8 +267,8 @@ export default function InvestmentPanel({ userId }: Props) {
       C: fund.current_value_cents,
       R: fund.current_profit_rate,
       stopProfitLine: fund.stop_profit_line,
-    })
-  }, [])
+    }, formulaConfig)
+  }, [formulaConfig])
 
   const handleCalculate = useCallback(() => {
     setCalculating(true)
@@ -125,48 +292,34 @@ export default function InvestmentPanel({ userId }: Props) {
     })
   }, [funds, calcOne])
 
-  const handleUpdate = useCallback(async (investmentId: string, params: {
-    c?: number
-    r?: number
-    m?: number
-    stopProfit?: number | null
-  }) => {
-    const res = await fetch('/api/investment', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        type: 'update_cr',
-        userId,
-        investmentId,
-        ...(params.c !== undefined ? { currentValueCents: params.c } : {}),
-        ...(params.r !== undefined ? { currentProfitRate: params.r } : {}),
-        ...(params.m !== undefined ? { targetAmountCents: params.m } : {}),
-        ...(params.stopProfit !== undefined ? { stopProfitLine: params.stopProfit } : {}),
-      }),
-    })
-    const data = await res.json()
-    if (!res.ok) throw new Error(data.error || '更新失败')
+  const handleUpdate = useCallback((investmentId: string, params: InvestmentUpdateParams) => {
+    setFunds((prev) => {
+      let changedFund: InvestmentData | null = null
+      const nextFunds = prev.map((fund) => {
+        if (fund.id !== investmentId) return fund
+        changedFund = applyInvestmentUpdate(fund, params)
+        return changedFund
+      })
 
-    // 本地更新状态
-    setFunds((prev) =>
-      prev.map((f) => {
-        if (f.id !== investmentId) return f
-        return {
-          ...f,
-          ...(params.c !== undefined ? { current_value_cents: params.c } : {}),
-          ...(params.r !== undefined ? { current_profit_rate: params.r } : {}),
-          ...(params.m !== undefined ? { target_amount_cents: params.m } : {}),
-          ...(params.stopProfit !== undefined ? { stop_profit_line: params.stopProfit } : {}),
-        }
-      }),
-    )
-    // 清除该基金的旧建议（参数变了，需要重新计算）
+      if (changedFund) {
+        const pending = buildPendingUpdate(changedFund, savedFundsRef.current.get(investmentId))
+        setPendingUpdates((prevPending) => {
+          const next = new Map(prevPending)
+          if (pending) next.set(investmentId, pending)
+          else next.delete(investmentId)
+          return next
+        })
+      }
+
+      return nextFunds
+    })
+
     setSuggestions((prev) => {
       const next = new Map(prev)
       next.delete(investmentId)
       return next
     })
-  }, [userId])
+  }, [])
 
   const handleConfirm = useCallback(async (investmentId: string, actualAmountCents: number) => {
     const fund = funds.find((f) => f.id === investmentId)
@@ -200,6 +353,12 @@ export default function InvestmentPanel({ userId }: Props) {
     const data = await res.json()
     if (!res.ok) throw new Error(data.error || '确认失败')
 
+    const savedFund = savedFundsRef.current.get(investmentId) || fund
+    savedFundsRef.current.set(investmentId, {
+      ...savedFund,
+      current_value_cents: cAfter,
+    })
+
     // 本地更新持仓市值
     setFunds((prev) =>
       prev.map((f) =>
@@ -212,6 +371,16 @@ export default function InvestmentPanel({ userId }: Props) {
     setSuggestions((prev) => {
       const next = new Map(prev)
       next.delete(investmentId)
+      return next
+    })
+    setPendingUpdates((prev) => {
+      const next = new Map(prev)
+      const patch = next.get(investmentId)
+      if (!patch) return next
+      const rest = { ...patch }
+      delete rest.c
+      if (Object.keys(rest).length > 0) next.set(investmentId, rest)
+      else next.delete(investmentId)
       return next
     })
   }, [funds, suggestions, userId])
@@ -232,11 +401,96 @@ export default function InvestmentPanel({ userId }: Props) {
     return { buy, sell, hold, totalBuy, totalSell }
   }, [suggestions])
 
-  // toast 临时状态
-  const [toastMsg, setToastMsg] = useState<string | null>(null)
-  const setToast = useCallback((msg: string) => {
-    setToastMsg(msg)
-    setTimeout(() => setToastMsg(null), 2500)
+  const pendingCount = pendingUpdates.size
+  const formulaLines = useMemo(() => getInvestmentFormulaLines(formulaConfig), [formulaConfig])
+
+  const handleSavePending = useCallback(async () => {
+    if (pendingUpdates.size === 0) return
+
+    const updates = Array.from(pendingUpdates.entries()).map(([investmentId, params]) => ({
+      investmentId,
+      ...(params.c !== undefined ? { currentValueCents: params.c } : {}),
+      ...(params.r !== undefined ? { currentProfitRate: params.r } : {}),
+      ...(params.m !== undefined ? { targetAmountCents: params.m } : {}),
+      ...(params.stopProfit !== undefined ? { stopProfitLine: params.stopProfit } : {}),
+    }))
+
+    setSavingChanges(true)
+    try {
+      const res = await fetch('/api/investment', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          type: 'batch_update',
+          userId,
+          updates,
+        }),
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error || '保存失败')
+
+      const currentFunds = new Map(funds.map((fund) => [fund.id, fund]))
+      const nextSaved = new Map(savedFundsRef.current)
+      for (const investmentId of pendingUpdates.keys()) {
+        const fund = currentFunds.get(investmentId)
+        if (fund) nextSaved.set(investmentId, fund)
+      }
+      savedFundsRef.current = nextSaved
+      setPendingUpdates(new Map())
+      setToast(`已保存 ${updates.length} 只基金`)
+    } catch (e: any) {
+      setToast(e.message || '保存失败')
+    } finally {
+      setSavingChanges(false)
+    }
+  }, [funds, pendingUpdates, setToast, userId])
+
+  const handleFormulaDraftChange = useCallback((key: keyof InvestmentFormulaConfig, value: string) => {
+    setFormulaDraft((prev) => ({ ...prev, [key]: value }))
+  }, [])
+
+  const handleSaveFormula = useCallback(() => {
+    const next = draftToConfig(formulaDraft)
+    if (!next) {
+      setFormulaError('请输入有效数字')
+      return
+    }
+    if (
+      next.buyBelowTargetRatio <= 0 ||
+      next.buyGapRatio < 0 ||
+      next.buyMaxCents < 0 ||
+      next.stopSellExcessRatio < 0 ||
+      next.strongStopMultiplier <= 0 ||
+      next.strongStopBonusCents < 0 ||
+      next.strongStopMaxCurrentRatio < 0 ||
+      next.rebalanceOverTargetRatio <= 0 ||
+      next.rebalanceBelowTargetRatio <= 0 ||
+      next.rebalanceBuyToTargetRatio <= 0
+    ) {
+      setFormulaError('比例和金额不能为负，倍数必须大于 0')
+      return
+    }
+
+    setFormulaConfig(next)
+    try {
+      window.localStorage.setItem(formulaStorageKey, JSON.stringify(next))
+    } catch {
+      // localStorage 不可用时仍允许本次会话使用新公式
+    }
+    setFormulaEditing(false)
+    setFormulaError(null)
+    setSuggestions(new Map())
+    setToast('公式已更新，请重新计算建议')
+  }, [formulaDraft, setToast])
+
+  const handleCancelFormula = useCallback(() => {
+    setFormulaDraft(configToDraft(formulaConfig))
+    setFormulaEditing(false)
+    setFormulaError(null)
+  }, [formulaConfig])
+
+  const handleResetFormula = useCallback(() => {
+    setFormulaDraft(configToDraft(defaultInvestmentFormulaConfig))
   }, [])
 
   const handleOcrUpload = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -278,41 +532,24 @@ export default function InvestmentPanel({ userId }: Props) {
     if (fileInputRef.current) fileInputRef.current.value = ''
   }, [funds, setToast])
 
-  const handleOcrApply = useCallback(async () => {
+  const handleOcrApply = useCallback(() => {
     if (!ocrResults) return
-    // 批量更新匹配到的基金
     let updated = 0
     for (const r of ocrResults) {
       if (!r.matchedId) continue
-      const params: { c?: number; r?: number } = {}
+      const params: InvestmentUpdateParams = {}
       if (r.holding_cents !== null) params.c = r.holding_cents
       if (r.profit_rate !== null) params.r = r.profit_rate
       if (Object.keys(params).length === 0) continue
 
-      try {
-        await fetch('/api/investment', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            type: 'update_cr',
-            userId,
-            investmentId: r.matchedId,
-            ...(params.c !== undefined ? { currentValueCents: params.c } : {}),
-            ...(params.r !== undefined ? { currentProfitRate: params.r } : {}),
-          }),
-        })
-        updated++
-      } catch {
-        // 继续处理下一个
-      }
+      handleUpdate(r.matchedId, params)
+      updated++
     }
-    // 刷新数据
-    await fetchFunds()
     setOcrResults(null)
     if (updated > 0) {
-      setToast(`已更新 ${updated} 只基金`)
+      setToast(`已套入 ${updated} 只基金，点击保存后同步`)
     }
-  }, [ocrResults, userId, fetchFunds])
+  }, [handleUpdate, ocrResults, setToast])
 
   const dateLabel = getDateLabel()
 
@@ -350,6 +587,17 @@ export default function InvestmentPanel({ userId }: Props) {
         >
           <Calculator size={14} />
           {calculating ? '计算中…' : '计算建议'}
+        </button>
+        <button
+          type="button"
+          onClick={handleSavePending}
+          disabled={pendingCount === 0 || savingChanges}
+          className={`inline-flex items-center gap-1.5 rounded-xl border border-base-line px-3 py-2 text-xs active:opacity-70 disabled:opacity-40 ${
+            pendingCount > 0 ? 'bg-pastel-mint text-base-text' : 'bg-base-bg text-base-muted'
+          }`}
+        >
+          <Save size={14} />
+          {savingChanges ? '保存中…' : pendingCount > 0 ? `保存 ${pendingCount}` : '已保存'}
         </button>
         <button
           type="button"
@@ -411,6 +659,77 @@ export default function InvestmentPanel({ userId }: Props) {
         </div>
       </div>
 
+      {/* 计算公式 */}
+      <div className="rounded-2xl border border-base-line bg-base-surface p-3">
+        <div className="flex items-center justify-between gap-2">
+          <div className="text-xs font-medium text-base-text">计算公式</div>
+          <button
+            type="button"
+            onClick={() => {
+              setFormulaEditing((v) => !v)
+              setFormulaDraft(configToDraft(formulaConfig))
+              setFormulaError(null)
+            }}
+            className="rounded-full border border-base-line bg-base-bg px-3 py-1.5 text-[11px] text-base-muted active:opacity-70"
+          >
+            {formulaEditing ? '收起' : '编辑'}
+          </button>
+        </div>
+
+        <div className="mt-2 space-y-1 text-[10px] leading-4 text-base-muted">
+          {formulaLines.map((line) => (
+            <p key={line}>{line}</p>
+          ))}
+        </div>
+
+        {formulaEditing && (
+          <div className="mt-3 border-t border-base-line pt-3">
+            <div className="grid grid-cols-2 gap-2">
+              {formulaFields.map((field) => (
+                <label key={field.key} className="min-w-0">
+                  <span className="block truncate text-[10px] leading-4 text-base-muted">{field.label}</span>
+                  <span className="mt-0.5 flex items-center rounded-lg border border-base-line bg-base-bg px-2">
+                    <input
+                      value={formulaDraft[field.key]}
+                      onChange={(e) => handleFormulaDraftChange(field.key, e.target.value)}
+                      className="h-8 min-w-0 flex-1 bg-transparent text-right text-xs text-base-text focus:outline-none"
+                      inputMode="decimal"
+                    />
+                    <span className="ml-1 shrink-0 text-[10px] text-base-muted">{field.suffix}</span>
+                  </span>
+                </label>
+              ))}
+            </div>
+            {formulaError && (
+              <div className="mt-2 text-right text-[10px] text-[#E76F51]">{formulaError}</div>
+            )}
+            <div className="mt-3 flex items-center justify-end gap-2">
+              <button
+                type="button"
+                onClick={handleResetFormula}
+                className="rounded-full border border-base-line bg-base-bg px-3 py-1.5 text-[11px] text-base-muted active:opacity-70"
+              >
+                默认
+              </button>
+              <button
+                type="button"
+                onClick={handleCancelFormula}
+                className="rounded-full border border-base-line bg-base-bg px-3 py-1.5 text-[11px] text-base-muted active:opacity-70"
+              >
+                取消
+              </button>
+              <button
+                type="button"
+                onClick={handleSaveFormula}
+                className="rounded-full border border-base-line bg-pastel-mint px-3 py-1.5 text-[11px] text-base-text active:opacity-70"
+              >
+                应用
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+
       {/* 计算结果汇总 */}
       {summary && (
         <div className="rounded-xl border border-base-line bg-base-bg p-3">
@@ -437,14 +756,14 @@ export default function InvestmentPanel({ userId }: Props) {
 
       {/* 基金表格 */}
       {funds.length > 0 && (
-        <div className="overflow-x-auto rounded-2xl border border-base-line bg-base-surface">
-          <div className="min-w-96 divide-y divide-base-line">
-            <div className={`${investmentTableGrid} bg-base-bg px-3 py-2 text-[10px] font-medium leading-4 text-base-muted`}>
+        <div className="overflow-hidden rounded-2xl border border-base-line bg-base-surface">
+          <div className="w-full min-w-0 divide-y divide-base-line">
+            <div className={`${investmentTableGrid} bg-base-bg px-2 py-2 text-[10px] font-medium leading-4 text-base-muted`}>
               <div>基金</div>
-              <div className="text-right">当前 C / 建议 M</div>
-              <div className="text-right">收益 R / 止盈</div>
-              <div className="text-right">调仓建议</div>
-              <div className="text-right">操作</div>
+              <div className="text-right">当前/建议</div>
+              <div className="text-right">收益/止盈</div>
+              <div className="text-right">建议</div>
+              <div className="text-right">算</div>
             </div>
             {sortedFunds.map((fund) => (
               <InvestmentCard
