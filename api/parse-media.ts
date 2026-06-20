@@ -1,7 +1,7 @@
 import {
   DEFAULT_PARSE_MEDIA_SYSTEM_PROMPT,
   buildParseMediaUserPrompt,
-} from './_prompt-defaults'
+} from './_prompt-defaults.js'
 
 function resolveChatCompletionsUrl(base: string) {
   const trimmed = base.trim().replace(/\/+$/, '')

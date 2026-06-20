@@ -1,7 +1,7 @@
 import {
   DEFAULT_PARSE_TRANSACTION_SYSTEM_PROMPT,
   buildParseTransactionUserPrompt,
-} from './_prompt-defaults'
+} from './_prompt-defaults.js'
 
 function resolveChatCompletionsUrl(base: string) {
   const trimmed = base.trim().replace(/\/+$/, '')

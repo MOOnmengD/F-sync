@@ -34,6 +34,12 @@
 | `analyzeQueryIntent(query)` | 分析查询意图（时间范围/食物/心情/工作等） |
 | `haversineDistance(lat1,lng1,lat2,lng2)` | 计算两点间距离（米） |
 
+> Vercel 以 Node ESM 运行 `api/` 产物；API 文件导入内部共享模块时，TypeScript 源码中也必须写 `.js` 后缀（例如 `./_utils.js`、`./_prompt-defaults.js`），否则部署后会出现 `ERR_MODULE_NOT_FOUND`。
+
+### `_prompt-defaults.ts`
+
+解析与 OCR 的默认提示词模块，不作为公开 Serverless Function。`parse-transaction`、`parse-media`、`investment(type=ocr)` 会从这里读取默认 Prompt。
+
 ### `_context.ts`
 
 AI 对话上下文构建模块（详见 [05-AI系统设计](./05-AI系统设计.md)），核心导出：

@@ -1,6 +1,6 @@
 import { createClient } from '@supabase/supabase-js'
 import { resolveChatCompletionsUrl } from './_utils.js'
-import { DEFAULT_INVESTMENT_OCR_PROMPT } from './_prompt-defaults'
+import { DEFAULT_INVESTMENT_OCR_PROMPT } from './_prompt-defaults.js'
 
 /**
  * /api/investment
