@@ -64,6 +64,7 @@ export default function Home() {
   const [toast, setToast] = useState<string | null>(null)
   const [sending, setSending] = useState(false)
   const settings = useSettingsStore((s) => s.settings)
+  const loadSettingsFromCloud = useSettingsStore((s) => s.loadFromCloud)
   const [repurchaseIndex, setRepurchaseIndex] = useState(0)
   const [lastFinanceTx, setLastFinanceTx] = useState<LastFinanceTx | null>(null)
   const [reviewTargetId, setReviewTargetId] = useState<string | null>(null)
@@ -124,6 +125,26 @@ export default function Home() {
     saveOutbox(prev.filter((e) => e?.id !== id))
   }
 
+  const readJsonResponse = async (response: Response, fallbackMessage: string) => {
+    const responseText = await response.text()
+    let data: unknown = null
+    if (responseText.trim()) {
+      try {
+        data = JSON.parse(responseText) as unknown
+      } catch {
+        throw new Error(`${fallbackMessage}：接口返回非 JSON（HTTP ${response.status}）`)
+      }
+    }
+    if (!response.ok || !data || typeof data !== 'object') {
+      const msg =
+        typeof (data as any)?.error === 'string'
+          ? (data as any).error
+          : `${fallbackMessage}（HTTP ${response.status}）`
+      throw new Error(msg)
+    }
+    return data
+  }
+
   const parseTransactionByAi = async (raw: string) => {
     const cfg = settings.parseTransactionConfig
     const r = await fetch('/api/parse-transaction', {
@@ -138,14 +159,7 @@ export default function Home() {
         userPrompt: cfg.userPrompt || undefined,
       }),
     })
-    const data = (await r.json().catch(() => null)) as unknown
-    if (!r.ok || !data || typeof data !== 'object') {
-      const msg =
-        typeof (data as any)?.error === 'string'
-          ? (data as any).error
-          : 'AI 解析失败（后端未返回有效 JSON）'
-      throw new Error(msg)
-    }
+    const data = await readJsonResponse(r, 'AI 解析失败')
     return data as {
       amount: number | null
       item_name: string | null
@@ -156,27 +170,21 @@ export default function Home() {
   }
 
   const parseMediaByAi = async (raw: string) => {
-    const cfg = settings.parseMediaConfig
+    const mediaCfg = settings.parseMediaConfig
+    const fallbackCfg = settings.parseTransactionConfig
     const r = await fetch('/api/parse-media', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         text: raw,
-        url: cfg.url || undefined,
-        key: cfg.key || undefined,
-        model: cfg.model || undefined,
-        systemPrompt: cfg.systemPrompt || undefined,
-        userPrompt: cfg.userPrompt || undefined,
+        url: mediaCfg.url || fallbackCfg.url || undefined,
+        key: mediaCfg.key || fallbackCfg.key || undefined,
+        model: mediaCfg.model || fallbackCfg.model || undefined,
+        systemPrompt: mediaCfg.systemPrompt || undefined,
+        userPrompt: mediaCfg.userPrompt || undefined,
       }),
     })
-    const data = (await r.json().catch(() => null)) as unknown
-    if (!r.ok || !data || typeof data !== 'object') {
-      const msg =
-        typeof (data as any)?.error === 'string'
-          ? (data as any).error
-          : 'AI 解析失败（后端未返回有效 JSON）'
-      throw new Error(msg)
-    }
+    const data = await readJsonResponse(r, '书影解析失败')
     return data as {
       title: string | null
       review: string | null
@@ -272,6 +280,10 @@ export default function Home() {
       repurchase_index: txRepurchaseIndex,
     })
   }
+
+  useEffect(() => {
+    void loadSettingsFromCloud()
+  }, [loadSettingsFromCloud])
 
   useEffect(() => {
     const client = supabase
