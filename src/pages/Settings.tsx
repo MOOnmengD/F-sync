@@ -566,8 +566,12 @@ function InvestmentOcrSection() {
 
 // ===== 主页面 =====
 export default function Settings() {
-  const { settings, isCloudLoaded } = useSettingsStore()
+  const { settings, isCloudLoaded, loadFromCloud } = useSettingsStore()
   const navigate = useNavigate()
+
+  useEffect(() => {
+    void loadFromCloud()
+  }, [loadFromCloud])
 
   const apiConfigs = Array.isArray(settings.apiConfigs) ? settings.apiConfigs : []
   const enabledCount = apiConfigs.filter((c) => c.enabled).length

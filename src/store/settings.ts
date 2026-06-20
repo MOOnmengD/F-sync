@@ -119,61 +119,67 @@ export const useSettingsStore = create<SettingsState>()(
       },
 
       loadFromCloud: async () => {
-        if (!supabase) {
-          console.warn('[Settings] loadFromCloud: supabase 客户端未初始化，跳过')
-          return
+        try {
+          if (!supabase) {
+            console.warn('[Settings] loadFromCloud: supabase 客户端未初始化，跳过')
+            return
+          }
+          const { data: { user } } = await supabase.auth.getUser()
+          if (!user) {
+            console.warn('[Settings] loadFromCloud: 无认证用户，跳过')
+            return
+          }
+
+          const { data, error } = await supabase
+            .from('user_settings')
+            .select('settings, updated_at')
+            .eq('user_id', user.id)
+            .maybeSingle()
+
+          if (error) {
+            console.warn('[Settings] loadFromCloud: 查询失败', error)
+            return
+          }
+          if (!data?.settings) {
+            console.log('[Settings] loadFromCloud: 云端无设置数据（user_settings 表无记录或 settings 列为空）')
+            return
+          }
+
+          const cloud = data.settings as Record<string, any>
+          const current = get().settings
+
+          // 迁移旧 apiConfigs（无 name/enabled 字段）→ 新格式
+          const migrateConfigs = (configs: any[]): ApiConfig[] =>
+            configs.map((c: any, i: number) => ({
+              name: c.name || c.model || `配置 ${i + 1}`,
+              url: c.url || '',
+              key: c.key || '',
+              model: c.model || '',
+              enabled: c.enabled !== false,
+            }))
+
+          // 合并云端设置（云端优先；用 ?? 允许远程清空字段）
+          const merged: AISettings = {
+            systemPrompt: cloud.systemPrompt ?? current.systemPrompt,
+            userPrompt: cloud.userPrompt ?? current.userPrompt,
+            postHistoryPrompt: cloud.postHistoryPrompt ?? current.postHistoryPrompt,
+            proactivePrompt: cloud.proactivePrompt ?? current.proactivePrompt,
+            apiConfigs: Array.isArray(cloud.apiConfigs) && cloud.apiConfigs.length > 0
+              ? migrateConfigs(cloud.apiConfigs)
+              : current.apiConfigs,
+            parseTransactionConfig: cloud.parseTransactionConfig ?? current.parseTransactionConfig,
+            parseMediaConfig: cloud.parseMediaConfig ?? current.parseMediaConfig,
+            ttsConfig: cloud.ttsConfig ?? current.ttsConfig,
+            investmentOcrConfig: cloud.investmentOcrConfig ?? current.investmentOcrConfig,
+          }
+
+          console.log('[Settings] loadFromCloud: 云端设置已合并，updated_at:', data.updated_at)
+          set({ settings: merged })
+        } catch (error) {
+          console.warn('[Settings] loadFromCloud: 未预期异常', error)
+        } finally {
+          set({ isCloudLoaded: true })
         }
-        const { data: { user } } = await supabase.auth.getUser()
-        if (!user) {
-          console.warn('[Settings] loadFromCloud: 无认证用户，跳过')
-          return
-        }
-
-        const { data, error } = await supabase
-          .from('user_settings')
-          .select('settings, updated_at')
-          .eq('user_id', user.id)
-          .maybeSingle()
-
-        if (error) {
-          console.warn('[Settings] loadFromCloud: 查询失败', error)
-          return
-        }
-        if (!data?.settings) {
-          console.log('[Settings] loadFromCloud: 云端无设置数据（user_settings 表无记录或 settings 列为空）')
-          return
-        }
-
-        const cloud = data.settings as Record<string, any>
-        const current = get().settings
-
-        // 迁移旧 apiConfigs（无 name/enabled 字段）→ 新格式
-        const migrateConfigs = (configs: any[]): ApiConfig[] =>
-          configs.map((c: any, i: number) => ({
-            name: c.name || c.model || `配置 ${i + 1}`,
-            url: c.url || '',
-            key: c.key || '',
-            model: c.model || '',
-            enabled: c.enabled !== false,
-          }))
-
-        // 合并云端设置（云端优先；用 ?? 允许远程清空字段）
-        const merged: AISettings = {
-          systemPrompt: cloud.systemPrompt ?? current.systemPrompt,
-          userPrompt: cloud.userPrompt ?? current.userPrompt,
-          postHistoryPrompt: cloud.postHistoryPrompt ?? current.postHistoryPrompt,
-          proactivePrompt: cloud.proactivePrompt ?? current.proactivePrompt,
-          apiConfigs: Array.isArray(cloud.apiConfigs) && cloud.apiConfigs.length > 0
-            ? migrateConfigs(cloud.apiConfigs)
-            : current.apiConfigs,
-          parseTransactionConfig: cloud.parseTransactionConfig ?? current.parseTransactionConfig,
-          parseMediaConfig: cloud.parseMediaConfig ?? current.parseMediaConfig,
-          ttsConfig: cloud.ttsConfig ?? current.ttsConfig,
-          investmentOcrConfig: cloud.investmentOcrConfig ?? current.investmentOcrConfig,
-        }
-
-        console.log('[Settings] loadFromCloud: 云端设置已合并，updated_at:', data.updated_at)
-        set({ settings: merged, isCloudLoaded: true })
       },
 
       saveToCloud: async () => {
