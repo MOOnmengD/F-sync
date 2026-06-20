@@ -38,6 +38,21 @@ function normalizeParsed(payload: any) {
   return { title, review }
 }
 
+function parseMaybeJson(text: string) {
+  if (!text.trim()) return null
+  try {
+    return JSON.parse(text)
+  } catch {
+    return text
+  }
+}
+
+function compactDetail(value: unknown) {
+  if (!value) return ''
+  if (typeof value === 'string') return value.slice(0, 500)
+  return JSON.stringify(value).slice(0, 500)
+}
+
 export default async function handler(req: any, res: any) {
   res.setHeader('Content-Type', 'application/json; charset=utf-8')
   res.setHeader('Cache-Control', 'no-store')
@@ -112,10 +127,21 @@ export default async function handler(req: any, res: any) {
       }),
     })
 
-    upstream = await r.json().catch(() => null)
+    const upstreamText = await r.text()
+    upstream = parseMaybeJson(upstreamText)
     if (!r.ok) {
+      console.warn('[parse-media] Upstream AI error', {
+        status: r.status,
+        model,
+        endpoint,
+        detail: compactDetail(upstream),
+      })
       res.statusCode = 502
-      res.end(JSON.stringify({ error: 'Upstream AI error', detail: upstream }))
+      res.end(JSON.stringify({
+        error: 'Upstream AI error',
+        upstreamStatus: r.status,
+        detail: upstream,
+      }))
       return
     }
   } catch (e: any) {

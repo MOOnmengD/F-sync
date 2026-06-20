@@ -115,7 +115,7 @@ AI 对话上下文构建模块（详见 [05-AI系统设计](./05-AI系统设计.
 - 5 个输出字段：`amount`(数字), `item_name`, `brand`, `details`(客观规格), `review`(主观感受)
 - 温度 0.1（低随机性，确保解析一致性）
 
-**错误处理**：非 JSON 响应会尝试正则提取 `{...}` 块
+**错误处理**：非 JSON 响应会尝试正则提取 `{...}` 块；上游 AI 返回非 2xx 时，API 返回 `upstreamStatus/detail`，并在 Vercel 日志记录状态码、模型、endpoint 和截断后的上游响应（不记录 Key）
 
 ---
 
@@ -144,7 +144,7 @@ AI 对话上下文构建模块（详见 [05-AI系统设计](./05-AI系统设计.
 - 2 个输出字段：`title`（书名/影名）, `review`（用户评价，完全保留原文）
 - 温度 0.1（低随机性，确保解析一致性）
 
-**错误处理**：非 JSON 响应会尝试正则提取 `{...}` 块；与 `parse-transaction` 共享 AI 基础设施
+**错误处理**：非 JSON 响应会尝试正则提取 `{...}` 块；与 `parse-transaction` 共享 AI 基础设施。上游 AI 返回非 2xx 时，API 返回 `upstreamStatus/detail`，并在 Vercel 日志记录状态码、模型、endpoint 和截断后的上游响应（不记录 Key）
 
 ---
 

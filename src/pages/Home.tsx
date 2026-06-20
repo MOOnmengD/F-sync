@@ -136,9 +136,24 @@ export default function Home() {
       }
     }
     if (!response.ok || !data || typeof data !== 'object') {
+      const detail = (data as any)?.detail
+      const detailText =
+        typeof detail === 'string'
+          ? detail
+          : typeof detail?.error?.message === 'string'
+            ? detail.error.message
+            : typeof detail?.message === 'string'
+              ? detail.message
+              : detail
+                ? JSON.stringify(detail)
+                : ''
+      const statusText =
+        typeof (data as any)?.upstreamStatus === 'number'
+          ? `（上游 HTTP ${(data as any).upstreamStatus}）`
+          : ''
       const msg =
         typeof (data as any)?.error === 'string'
-          ? (data as any).error
+          ? `${(data as any).error}${statusText}${detailText ? `：${detailText.slice(0, 160)}` : ''}`
           : `${fallbackMessage}（HTTP ${response.status}）`
       throw new Error(msg)
     }
