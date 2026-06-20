@@ -8,6 +8,15 @@ import {
 
 const embeddingModel = process.env.EMBEDDING_MODEL || 'text-embedding-3-small'
 
+export interface AgentContextItem {
+  domain: string
+  sourceTool: string
+  timestamp?: string
+  title?: string
+  content: string
+  metadata?: Record<string, unknown>
+}
+
 // ============================================================
 // 用户画像
 // ============================================================
@@ -636,6 +645,22 @@ async function getTimeSinceLastConversation(
   }
 }
 
+function parseAgentTimestamp(timestamp: string | undefined): Date | null {
+  if (!timestamp) return null
+  const parsed = new Date(timestamp)
+  if (Number.isNaN(parsed.getTime())) return null
+  return parsed
+}
+
+function formatAgentContextItem(item: AgentContextItem): string {
+  const title = item.title ? `：${item.title}` : ''
+  return [
+    `### F-Sync 工具结果 ${item.domain}${title}`,
+    `来源工具：${item.sourceTool}`,
+    item.content,
+  ].join('\n')
+}
+
 // ============================================================
 // 主入口：构建完整的 AI 对话上下文
 // ============================================================
@@ -657,6 +682,7 @@ export async function enrichMessages(params: {
     address?: string
   }
   extraWorldLines?: string[]
+  agentContextItems?: AgentContextItem[]
   amapKey?: string
 }): Promise<{
   enrichedMessages: Array<{ role: string; content: string }>
@@ -671,6 +697,7 @@ export async function enrichMessages(params: {
     conversationMessages,
     location,
     extraWorldLines,
+    agentContextItems,
     amapKey,
   } = params
 
@@ -752,6 +779,14 @@ export async function enrichMessages(params: {
   }
 
   const timeBoundItems: TimeBoundItem[] = []
+  const agentSummaryLines: string[] = []
+
+  const currentUserMsg = [...conversationMessages]
+    .reverse()
+    .find((m) => m.role === 'user')
+  const currentUserTimestamp = currentUserMsg?.createdAt
+    ? new Date(currentUserMsg.createdAt)
+    : new Date()
 
   // 1) 检索到的历史对话 — 用真实角色融入，以 client_id 去重
   for (const chat of retrievedChats) {
@@ -781,6 +816,27 @@ export async function enrichMessages(params: {
       role: m.role,
       content: m.content,
     })
+  }
+
+  // 4) Agent 工具查询结果
+  // 有时间戳的记录进入统一时间线；没有时间戳的目录/说明类结果
+  // 会在稍后插入到 postHistoryPrompt 和真实世界信息之前。
+  for (const item of agentContextItems || []) {
+    const content = formatAgentContextItem(item)
+    const timestamp = parseAgentTimestamp(item.timestamp)
+    if (timestamp) {
+      const safeTimestamp =
+        timestamp.getTime() >= currentUserTimestamp.getTime()
+          ? new Date(currentUserTimestamp.getTime() - 1)
+          : timestamp
+      timeBoundItems.push({
+        timestamp: safeTimestamp,
+        role: 'system',
+        content,
+      })
+    } else {
+      agentSummaryLines.push(content)
+    }
   }
 
   // 按时间升序排列
@@ -834,8 +890,14 @@ export async function enrichMessages(params: {
     insertIdx--
   }
 
-  // 收集需注入的内容（顺序：提示词 → 真实世界信息，倒数第3、第2条）
+  // 收集需注入的内容（顺序：工具摘要 → 提示词 → 真实世界信息）
   const preUserItems: Array<{ role: string; content: string }> = []
+  if (agentSummaryLines.length > 0) {
+    preUserItems.push({
+      role: 'system',
+      content: `## 本轮工具查询摘要\n${agentSummaryLines.join('\n\n')}`,
+    })
+  }
   const postHistoryPrompt = settings?.postHistoryPrompt?.trim()
   if (postHistoryPrompt) {
     preUserItems.push({

@@ -1,485 +1,441 @@
 # F-Sync Agent 工具调用系统设计
 
-> 状态：方案设计阶段，待用户确认后实施  
-> 日期：2026-06-12  
+> 状态：Phase 1 已实现（只读 Agent + Agent Lab），等待真实数据测试与后续优化  
+> 初稿日期：2026-06-12  
+> 修订日期：2026-06-20  
 > 基于：[2026-06-11-Agentic-RAG-混合检索架构方案](./2026-06-11-Agentic-RAG-混合检索架构方案.md)  
-> 说明：本方案聚焦 Agent 工具调用（Function Calling）与 MCP 数据摄取，是对 Agentic RAG 方案第十二章的扩展和独立设计。检索相关的 tool-calling（search_memories / search_life_logs）已在 Agentic RAG 方案中详细定义，本文不再重复。
+> 说明：本修订稿覆盖初稿中关于写入工具、主动消息、固定工具枚举和 daily_logs 读取的设计。第一版只实现只读 Agent 能力与 Agent Lab 测试入口，不实现写入、修改、删除、MCP 摄取和 proactive-ai 整合。
 
 ---
 
 ## 一、功能名称
 
-F-Sync Agent 工具调用系统：赋予 Florian 在 F-Sync 数据空间内的读写能力，并通过 MCP 协议摄取外部数据。
+F-Sync Agent 只读工具调用系统：赋予 Florian 在 F-Sync 数据空间内按需发现数据域、查询数据、整合上下文的能力。
 
 ---
 
-## 二、背景与动机
+## 二、已确认决策
 
-### 2.1 当前状态
-
-F-Sync 的 AI 对话目前是一个"纯聊天"系统：Florian 可以基于 RAG 检索到的上下文生成回复，但**不能主动查询数据库、不能修改数据、不能执行任何操作**。
-
-用户提出"记账"时，实际流程是：
-
-```
-用户输入文本 → /api/parse-transaction → AI 解析 → 写入 Supabase → 返回结构化结果 → 前端展示表单 → 用户确认
-```
-
-这个流程中 AI 只做文本解析，真正的"写操作"由前端代码完成。Florian 在对话中无法直接帮用户查账、改记录、搜索历史。
-
-### 2.2 核心洞察
-
-用户明确 F-Sync Agent 的定位是**局部 Agent**，而非 Operit 式的全能 Agent：
-
-> "F-Sync内部是一个独立的空间，F-Sync外部是另一个空间。F-Sync的AI只需要做好F-Sync内部的工作就可以了，是一个局部的AI Agent。"
-
-这个定位决定了设计方向：
-
-- ✅ Agent 的领域 = Supabase 中的所有数据表
-- ✅ Agent 可以读、写、修改这些数据
-- ✅ 外部数据通过 MCP **单向流入** F-Sync
-- ❌ Agent 不需要操作手机、不需要查天气/快递、不需要控制外部 App
-
-### 2.3 数据流边界
-
-```
-F-Sync 外部                          F-Sync 内部（Agent 的领地）
-┌──────────────┐                    ┌─────────────────────────┐
-│ 滴答清单      │──MCP (只读导入)──→  │                         │
-│ 其他服务      │──MCP (只读导入)──→  │  Supabase               │
-│              │                    │  ├── transactions        │
-│              │                    │  ├── chat_messages       │
-│              │                    │  ├── daily_logs          │
-│              │                    │  ├── daily_event_items   │
-│              │                    │  ├── user_profiles       │
-│              │                    │  ├── social_relationships│
-│              │                    │  ├── items               │
-│              │                    │  └── user_settings       │
-│              │                    │       ↕ 读写             │
-│              │                    │  ┌─────────────────┐    │
-│              │                    │  │ Florian Agent   │    │
-│              │                    │  │ (Function Call) │    │
-│              │                    │  └─────────────────┘    │
-└──────────────┘                    └─────────────────────────┘
-```
-
-**核心原则**：MCP 是数据进入 F-Sync 的**单向管道**；进入后的数据由 Florian 自由读写。
+1. 第一版只做读能力；写入、修改、删除以后单独设计并确认。
+2. 允许读取理财数据，但禁止读取 API Key、Push Token、Settings 等敏感配置。
+3. 主动消息功能已关闭，第一版不接入 `proactive-ai`。
+4. 不再为每个功能硬编码一组固定工具，改为“能力目录 + 通用只读查询工具”。
+5. 前端增加一个小型 Agent Lab，用于测试工具调用效果与显示简要 tool trace。
+6. 工具结果不直接作为最终模型调用的最后几条消息，而是在最终回复前重新整合进上下文，尽量按真实时间线排列。
+7. 用户画像和社交关系不再每轮固定注入，改为 Florian 认为需要时按需查询。
 
 ---
 
-## 三、设计目标
+## 三、背景与动机
 
-- [ ] Florian 在对话中能够查询 Supabase 中的数据（查账、查记录、查日记、查画像）
-- [ ] Florian 在对话中能够创建和修改 Supabase 中的数据（记账、改记录、更新画像）
-- [ ] 工具调用循环在 Vercel Serverless Function 内完成，前端无需改动
-- [ ] 不支持 Function Calling 的模型自动降级为普通对话
-- [ ] 工具调用失败不阻断正常回复
-- [ ] MCP Client 能够连接外部 MCP Server，读取数据并写入 Supabase
-- [ ] 整个 Agent 系统保持在 F-Sync 的数据边界内
+当前 F-Sync 的 AI 对话主要依赖程序化上下文构建：`enrichMessages()` 根据当前对话、RAG 检索、真实世界信息组织上下文，Florian 本身不能主动查询 Supabase。
+
+用户希望 Florian 具备局部 Agent 能力：
+
+- 只在 F-Sync 内部数据空间活动；
+- 能像 PC 端 Agent 浏览文件夹一样，先了解有哪些数据域，再决定查什么；
+- 不需要编程、写文档、操作手机或控制外部 App；
+- 暂不开放写入、修改、删除能力。
+
+因此，第一版 Agent 的目标不是“全能自动化”，而是“安全、灵活、可观察的数据读取能力”。
 
 ---
 
-## 四、涉及范围
+## 四、设计目标
+
+- [x] Florian 可以按需查询 F-Sync 中的生活记录、历史聊天、书影、物品、社交关系、用户画像、理财数据。
+- [x] 查询能力不依赖写死分类枚举；新增数据域后通过能力目录扩展。
+- [x] 工具结果在最终回复前重新排入上下文，不占据倒数第一/第二条消息位置。
+- [x] 用户画像和社交关系改为按需查询，不每轮固定注入。
+- [x] `user_settings`、`push_tokens`、API Key、Push Token 等敏感数据不开放给 Agent。
+- [x] 增加 Agent Lab 测试入口，显示简要工具调用过程和最终回复。
+- [x] 不支持 tool calling 的模型自动降级为普通对话。
+
+---
+
+## 五、涉及范围
 
 | 层级 | 影响文件/模块 | 变更类型 |
 |------|--------------|----------|
-| API | `api/chat-completion.ts` | 修改：加入 Function Calling 循环 |
-| API | `api/_tools.ts` | **新增**：工具定义与执行器 |
-| API | `api/_mcp-client.ts` | **新增**：MCP Client（Phase 2） |
-| 数据库 | — | 第一版无需变更；Phase 2 新增 `mcp_integrations` 表 |
-| 前端页面 | — | 第一版原则上不改 |
-| 状态管理 | — | 第一版不改 |
-| 定时任务 | `api/proactive-ai.ts` | 后续可选：Agent 自主性 |
-| 文档 | `03-后端API.md`、`05-AI系统设计.md` | 实现后同步更新 |
+| API | `api/chat-completion.ts` | 修改：加入只读 Agent 循环与最终上下文重排 |
+| API | `api/_tools.ts` | 新增：能力目录、工具 schema、只读执行器 |
+| API | `api/_context.ts` | 修改：支持按需画像/社交关系，不固定注入；接收 Agent 查询结果 |
+| 前端页面 | `src/pages/Debug.tsx` | 修改：增加 Agent Lab 测试面板 |
+| 数据库 | — | 第一版不新增表；可后续按检索性能补索引 |
+| 文档 | `02-前端页面.md`、`03-后端API.md`、`05-AI系统设计.md`、`07-状态管理与数据流.md` | 实现后同步更新 |
+| 定时任务 | `api/proactive-ai.ts` | 不修改 |
+
+> Vercel Hobby 当前 Function 名额已满，第一版不新增公开 API 文件；`_tools.ts` 为内部模块，不计入 Serverless Function 数量。
 
 ---
 
-## 五、设计方案
+## 六、总体架构
 
-### 5.1 Agent 工具调用循环
-
-在 `chat-completion.ts` 中增加 Function Calling 循环，流程如下：
+### 6.1 Agent 调用流程
 
 ```text
 用户消息
-  │
-  ▼
-现有 enrichMessages()（RAG + 画像 + 上下文构建）
-  │
-  ▼
-构造 messages + tools → 调用 AI API
-  │
-  ▼
-AI 返回？
-  │
-  ├── final reply（无 tool_calls）
-  │     └─→ 流式返回给前端 → 结束
-  │
-  └── tool_calls[]
-        │
-        ▼
-      并行执行工具（最多 5 个独立工具同时执行）
-        │
-        ▼
-      工具结果追加到 messages
-        │
-        ▼
-      是否达到最大轮数（3 轮）？
-        │
-        ├── YES → 强制要求 AI 生成最终回复 → 结束
-        │
-        └── NO  → 回到「调用 AI API」
+  |
+  v
+enrichMessages() 构建基础上下文
+  |
+  v
+第一次模型调用：messages + tools
+  |
+  +-- 无 tool_calls
+  |     -> 直接生成回复
+  |
+  +-- 有 tool_calls
+        |
+        v
+      后端执行只读工具
+        |
+        v
+      内部工具协议消息用于继续循环
+        |
+        v
+      将工具结果转换为 AgentContextItem
+        |
+        v
+      重新构建最终上下文（按时间线/摘要位置插入）
+        |
+        v
+      最终模型调用生成回复
 ```
 
-**关键设计决策**：
+标准 tool calling 协议通常要求 `tool` 消息跟在 `assistant.tool_calls` 之后。为避免最终模型过度关注最后几条 tool result，F-Sync 采用两层表示：
 
-| 决策 | 选择 | 理由 |
-|------|------|------|
-| 循环在哪里执行？ | Vercel 后端（函数内完成） | 前端无需改动，逻辑集中 |
-| 最大工具调用轮数 | 3 轮 | 避免延迟累积；大部分任务 1-2 轮即可完成 |
-| 工具并行执行？ | 是（无依赖的并行） | 减少延迟 |
-| 流式输出策略 | 工具调用期间不流式，最终回复流式返回 | 避免前端处理复杂状态 |
+1. **内部协议层**：遵守 tool calling 消息顺序，用于让模型完成工具调用循环。
+2. **最终上下文层**：工具调用完成后，将工具结果转换为上下文条目，重新排入最终 `messages`，再生成面向用户的回复。
 
-### 5.2 工具定义体系
+### 6.2 工具结果在上下文中的位置
 
-#### 5.2.1 数据查询工具（READ）
+工具结果统一转换为：
 
 ```typescript
-// 查询生活记录
-const queryTransactionsTool = {
-  name: "query_transactions",
-  description: "查询生活记录（记账/碎碎念/计时等）。可按类型、日期范围、分类、关键词筛选。",
-  parameters: {
-    type: "object",
-    properties: {
-      type: { type: "string", enum: ["记账", "whisper", "timing", "收藏"], description: "记录类型" },
-      finance_category: { type: "string", enum: ["衣", "食", "住", "行", "娱乐"], description: "记账分类（仅 type=记账 时有效）" },
-      date_from: { type: "string", description: "开始日期，YYYY-MM-DD" },
-      date_to: { type: "string", description: "结束日期，YYYY-MM-DD" },
-      keyword: { type: "string", description: "在 content 字段中搜索关键词" },
-      limit: { type: "number", description: "返回条数上限，默认 10，最大 50" }
-    }
-  }
-}
-
-// 搜索聊天历史
-const queryChatHistoryTool = {
-  name: "query_chat_history",
-  description: "搜索历史聊天记录。按关键词和日期范围查找。",
-  parameters: {
-    type: "object",
-    properties: {
-      keyword: { type: "string", description: "搜索关键词" },
-      date_from: { type: "string", description: "开始日期，YYYY-MM-DD" },
-      date_to: { type: "string", description: "结束日期，YYYY-MM-DD" },
-      limit: { type: "number", description: "返回条数上限，默认 10" }
-    }
-  }
-}
-
-// 读日记
-const queryDailyLogsTool = {
-  name: "query_daily_logs",
-  description: "读取 AI 日记（daily_logs）。Florian 每天写的日记。",
-  parameters: {
-    type: "object",
-    properties: {
-      date_from: { type: "string", description: "开始日期，YYYY-MM-DD" },
-      date_to: { type: "string", description: "结束日期，YYYY-MM-DD" },
-      limit: { type: "number", description: "返回条数上限，默认 5" }
-    }
-  }
-}
-
-// 读用户画像
-const queryUserProfilesTool = {
-  name: "query_user_profiles",
-  description: "读取用户画像和长期记忆。",
-  parameters: {
-    type: "object",
-    properties: {
-      profile_type: { type: "string", enum: ["personal_facts"], description: "画像类型" }
-    }
-  }
-}
-
-// 读社交关系
-const querySocialRelationshipsTool = {
-  name: "query_social_relationships",
-  description: "读取社交关系记录。",
-  parameters: {
-    type: "object",
-    properties: {
-      name: { type: "string", description: "按名称搜索（可选）" }
-    }
-  }
-}
-
-// 读物品档案
-const queryItemsTool = {
-  name: "query_items",
-  description: "查询物品/品牌档案。",
-  parameters: {
-    type: "object",
-    properties: {
-      keyword: { type: "string", description: "搜索物品名称或品牌关键词" },
-      category: { type: "string", description: "分类过滤" },
-      limit: { type: "number", description: "返回条数上限，默认 10" }
-    }
-  }
+interface AgentContextItem {
+  domain: string
+  sourceTool: string
+  timestamp?: string
+  title?: string
+  content: string
+  metadata?: Record<string, unknown>
 }
 ```
 
-#### 5.2.2 数据写入工具（WRITE）
-
-```typescript
-// 创建生活记录
-const createTransactionTool = {
-  name: "create_transaction",
-  description: "创建一条生活记录（记账/碎碎念/计时等）。用户说'帮我记一笔'时使用。",
-  parameters: {
-    type: "object",
-    properties: {
-      type: { type: "string", enum: ["记账", "whisper", "timing", "收藏"], description: "记录类型" },
-      content: { type: "string", description: "记录内容" },
-      amount: { type: "number", description: "金额（记账专用）" },
-      finance_category: { type: "string", enum: ["衣", "食", "住", "行", "娱乐"], description: "分类（记账专用）" },
-      necessity: { type: "boolean", description: "是否必需（记账专用）" },
-      mood: { type: "string", description: "心情 emoji（碎碎念专用）" },
-      review: { type: "string", description: "点评/感受" },
-      details: { type: "string", description: "客观规格信息" },
-      repurchase_index: { type: "number", description: "复购指数 1-5" },
-      created_at: { type: "string", description: "记录时间，YYYY-MM-DD HH:mm:ss。默认当前时间。" }
-    }
-  }
-}
-
-// 修改生活记录
-const updateTransactionTool = {
-  name: "update_transaction",
-  description: "修改已有的生活记录。用户说'把那条改成...'时使用。",
-  parameters: {
-    type: "object",
-    properties: {
-      id: { type: "string", description: "记录 ID（从 query_transactions 结果中获取）" },
-      content: { type: "string", description: "新的内容" },
-      amount: { type: "number", description: "新的金额" },
-      finance_category: { type: "string", description: "新的分类" },
-      review: { type: "string", description: "新的点评" },
-      mood: { type: "string", description: "新的心情 emoji" }
-    }
-  }
-}
-
-// 删除生活记录
-const deleteTransactionTool = {
-  name: "delete_transaction",
-  description: "删除一条生活记录。需要用户明确确认后才能执行。",
-  parameters: {
-    type: "object",
-    properties: {
-      id: { type: "string", description: "记录 ID" },
-      confirm: { type: "boolean", description: "必须为 true，表示用户已确认删除" }
-    },
-    required: ["id", "confirm"]
-  }
-}
-```
-
-#### 5.2.3 工具调用安全策略
-
-| 操作类型 | 权限策略 |
-|----------|----------|
-| READ 类 | 无限制，正常查询（Supabase admin client，自动 RLS） |
-| CREATE | 无限制，但单次调用限制 1 条（避免批量误创建） |
-| UPDATE | 需要先查询到记录 ID，只能改 content/review/mood 等非关键字段 |
-| DELETE | **必须用户明确确认**，且 `confirm` 参数必须为 `true` |
-
-### 5.3 与 Agentic RAG 检索工具的关系
-
-Agentic RAG 方案（2026-06-11）第十二章定义了两个检索工具：
-
-| 工具 | 用途 | 在本方案中的定位 |
-|------|------|-----------------|
-| `search_memories` | 搜索历史记忆（事件 + 聊天原文回捞） | 归入 READ 类，实现时复用 `_retrieval.ts` |
-| `search_life_logs` | 搜索生活记录（记账/碎碎念/计时） | 归入 READ 类，实现时与本方案的 `query_transactions` 合并或互斥 |
-
-实现建议：
-- 如果 Agentic RAG 方案的 Phase 3 先实现，本方案的 Supabase 工具作为其扩展
-- 如果本方案先实现，则将 `search_memories` / `search_life_logs` 作为第一批工具一起上线
-- **不重复定义**：本方案的 `query_transactions` 与 Agentic RAG 的 `search_life_logs` 功能重叠，选择其一实现即可（建议保留 `query_transactions`，名称更直观）
-
-### 5.4 MCP 数据摄取（Phase 2）
-
-MCP（Model Context Protocol）是一个基于 JSON-RPC 的标准化协议，用于 AI 模型与外部工具/数据源的交互。
-
-#### 5.4.1 MCP Client 架构
+最终上下文顺序：
 
 ```text
-F-Sync Vercel Backend
-  ┌──────────────────────────────┐
-  │  api/_mcp-client.ts          │
-  │                              │
-  │  MCPClient 类                │
-  │  ├── connect(serverUrl)      │  ← HTTP/SSE 传输
-  │  ├── listTools()             │  ← 获取 MCP Server 的工具列表
-  │  ├── callTool(name, args)    │  ← 调用工具
-  │  └── disconnect()            │
-  │         │                    │
-  │         ▼                    │
-  │  MCP Server (外部)           │
-  │  ├── 滴答清单 MCP            │  ← 读取任务列表
-  │  ├── 日历 MCP               │  ← 读取日程
-  │  └── ...                     │
-  └──────────────────────────────┘
+1. system prompt
+2. 历史聊天原文 / 程序 RAG 记录 / 有时间戳的工具结果 / 当前会话历史
+3. 无明确时间戳的工具查询摘要
+4. postHistoryPrompt（如有）
+5. 真实世界信息
+6. 当前用户消息
 ```
 
-#### 5.4.2 数据摄取流程
+约束：
 
-```
-用户: "帮我同步滴答清单的任务"
-  │
-  ▼
-Florian 判断需要调用 mcp_import 工具
-  │
-  ▼
-Agent 调用 mcp_import(service: "ticktick")
-  │
-  ▼
-MCP Client 连接滴答清单 MCP Server
-  ├── 认证（API Key / OAuth，由用户提前在 Settings 中配置）
-  ├── 调用 list_tasks 获取任务列表
-  └── 返回数据
-  │
-  ▼
-Agent 处理返回数据
-  ├── 匹配已有记录（去重）
-  ├── 写入 Supabase
-  └── 生成回复: "已同步 12 个任务，其中 3 个今天到期"
-```
-
-#### 5.4.3 MCP 配置存储
-
-Phase 2 需要新建 `mcp_integrations` 表：
-
-```sql
-CREATE TABLE mcp_integrations (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  user_id UUID REFERENCES auth.users(id),
-  service_name TEXT NOT NULL,        -- 'ticktick', 'google_calendar', ...
-  server_url TEXT NOT NULL,          -- MCP Server URL
-  auth_config JSONB,                 -- API Key / Token（加密存储）
-  enabled BOOLEAN DEFAULT true,
-  created_at TIMESTAMPTZ DEFAULT NOW(),
-  updated_at TIMESTAMPTZ DEFAULT NOW(),
-  UNIQUE(user_id, service_name)
-);
-```
-
-#### 5.4.4 导入数据存储
-
-导入的外部数据统一存储在 Supabase 中。两种策略：
-
-| 策略 | 方案 | 适用场景 |
-|------|------|----------|
-| **A. 统一导入表** | 一张 `mcp_imported_data` 表，`source` 字段区分来源 | 简单、统一查询，但结构不灵活 |
-| **B. 映射到现有表** | 滴答清单任务 → `transactions`（type='todo'），日程 → `transactions`（type='schedule'） | 与现有数据融合，Agent 可统一操作 |
-
-**建议**：Phase 2 先采用策略 B，将外部数据映射到现有 `transactions` 表（新增 `type` 枚举值 `todo`、`schedule`），并添加 `source` 字段标记来源。这样 Agent 不需要学习新表结构。
-
-### 5.5 Agent 自主性（Phase 3，探索）
-
-在工具调用系统成熟后，Agent 可以具备一定的自主性：
-
-- **定时主动检查**：每天固定时间检查待办、账单，主动发起对话
-- **数据异常提醒**：检测到异常消费模式时主动提示
-- **与 proactive-ai 整合**：主动消息中嵌入 Agent 工具调用能力
-
-这些属于远期探索，不作为第一版范围。
+- 有 `created_at`、`date`、`start_time` 的工具结果按真实时间进入统一时间线。
+- 没有明确时间戳的聚合结果放在 `## 本轮工具查询摘要`，位置在真实世界信息之前。
+- 工具结果不得成为最终模型调用的倒数第一条或倒数第二条消息。
+- 工具结果默认不写入 `chat_messages`；下一轮需要时由 Florian 重新查询。
 
 ---
 
-## 六、边缘情况与降级策略
+## 七、RAG 与 Agent 的关系
 
-| 情况 | 处理方式 |
-|------|----------|
-| AI 不支持 Function Calling | 检测 `/v1/models` 返回，不支持 tools 的模型跳过工具注入，作为普通对话处理 |
-| 工具执行失败 | 返回简短错误信息给 AI（如 `"查询失败: timeout"`），让其基于现有上下文回复。不阻断对话 |
-| 超过最大轮数 | 强制调用 AI（不带 tools），要求基于已有工具结果生成最终回复 |
-| 工具返回数据过大 | 限制返回条数（最多 50 条），超过时截断并告知 AI |
-| 用户中途取消 | 前端不处理取消；后端循环完成或超时 |
-| MCP Server 连接失败 | 返回错误给 Agent，Agent 告知用户"暂时无法连接 XX 服务" |
-| DELETE 工具未确认 | `confirm !== true` 时返回错误 `"需要用户确认后才能删除"` |
-| DELETE 记录不存在 | 返回 `"未找到该记录"` |
-| 多个 API Config 轮询 | 当前已有轮询容错，工具调用时同样适用 |
+Agent 能力上线后，RAG 仍然保留，但定位调整为：
+
+| 能力 | 作用 |
+|------|------|
+| 程序化 RAG / 检索预处理 | 对明确“还记得吗”“我上周花了多少”等场景做稳定召回 |
+| Agent 工具调用 | 允许 Florian 主动发现数据域、换关键词、跨表补查 |
+
+原则：
+
+- RAG 不再每轮固定注入大量生活记录；
+- 明确回忆或生活数据查询仍可由程序层先做兜底检索；
+- 工具调用结果和 RAG 结果进入同一个最终上下文组织流程；
+- 不支持 tools 的模型仍使用程序化 RAG 生成普通回复。
 
 ---
 
-## 七、与现有功能的交互
+## 八、工具设计
+
+### 8.1 能力目录工具
+
+#### `list_fsync_domains`
+
+用途：列出 Florian 可以读取的数据域。返回的是业务语义域，不直接暴露任意表名。
+
+示例返回：
+
+```json
+[
+  {
+    "domain": "life_logs",
+    "label": "生活记录",
+    "description": "记账、碎碎念、时间轴、工作、收藏等记录"
+  },
+  {
+    "domain": "media_library",
+    "label": "书影清单",
+    "description": "书籍和影片的想看、正在看、看过状态与评价"
+  }
+]
+```
+
+#### `describe_fsync_domain`
+
+用途：说明某个数据域可查询的字段、过滤项、排序方式和注意事项。
+
+输入：
+
+```json
+{
+  "domain": "media_library"
+}
+```
+
+### 8.2 通用查询工具
+
+#### `query_fsync_records`
+
+用途：在指定数据域中查询记录。后端只接受能力目录白名单内的 domain 和字段。
+
+输入：
+
+```typescript
+interface QueryFsyncRecordsArgs {
+  domain: string
+  keyword?: string
+  date_from?: string
+  date_to?: string
+  filters?: Record<string, string | number | boolean | string[]>
+  sort?: 'created_at_desc' | 'created_at_asc' | 'updated_at_desc'
+  limit?: number
+}
+```
+
+限制：
+
+- `limit` 默认 10，最大 50。
+- 所有查询必须绑定当前 `userId`。
+- 不允许模型传 SQL。
+- 不允许模型传任意表名或任意字段。
+- 返回字段按 domain 白名单脱敏。
+
+### 8.3 专用检索工具
+
+#### `search_memories`
+
+用途：搜索历史共同记忆。内部复用 Agentic RAG 方案中的“事件索引 -> 回捞聊天原文 -> 聊天关键词回退”链路。
+
+#### `search_life_logs`
+
+用途：语义搜索生活记录。可作为 `query_fsync_records(domain='life_logs')` 的语义检索补充。
+
+---
+
+## 九、第一版数据域目录
+
+Agent 面向模型暴露的是业务数据域，不是裸表。下面是第一版目录。
+
+### 9.1 开放读取
+
+| domain | 数据来源 | 说明 | 主要可读字段 |
+|--------|----------|------|--------------|
+| `life_logs` | `transactions` | 记账、碎碎念、时间轴、工作、收藏等生活记录 | `id`, `created_at`, `type`, `content`, `amount`, `finance_category`, `necessity`, `mood`, `review`, `details`, `repurchase_index`, `timing_type`, `start_time`, `end_time`, `duration`, `item_name_snapshot`, `brand_snapshot` |
+| `chat_history` | `chat_messages` | 历史聊天原文，仅 `user` / `assistant` | `id`, `role`, `content`, `created_at` |
+| `media_library` | `media_items` | 书影清单 | `id`, `title`, `media_type`, `status`, `review`, `created_at`, `updated_at` |
+| `items` | `items` | 物品/品牌档案 | `id`, `item_name`, `brand`, `category`, `last_review` |
+| `social_relationships` | `social_relationships` | 社交关系和印象，按需读取 | `id`, `name`, `relation`, `impression`, `history`, `updated_at` |
+| `user_profile_facts` | `user_profiles` | 用户长期事实，当前结构较粗，按需读取 | `id`, `profile_type`, `content`, `updated_at` |
+| `investment_portfolio` | `investments` | 当前持仓快照和策略参数 | `id`, `fund_code`, `fund_name`, `current_value_cents`, `current_profit_rate`, `target_amount_cents`, `stop_profit_line`, `trading_cycle`, `strategy_tag`, `is_active`, `notes`, `updated_at` |
+| `investment_suggestions` | `investment_suggestions` | 历史调仓建议 | `id`, `investment_id`, `suggestion_type`, `suggestion_amount_cents`, `suggestion_reason`, `triggered_rules`, `action_status`, `actual_amount_cents`, `action_time`, `created_at` |
+| `investment_actions` | `investment_actions` | 投资操作流水 | `id`, `investment_id`, `suggestion_id`, `action_type`, `amount_cents`, `c_before_cents`, `c_after_cents`, `notes`, `created_at` |
+
+### 9.2 不开放直接读取
+
+| 数据来源 | 原因 |
+|----------|------|
+| `user_settings` | 可能包含 API Key、模型配置、Prompt 等敏感信息 |
+| `push_tokens` | 推送 Token 敏感 |
+| `daily_logs` | AI 写给用户的日记，不作为 Florian 自查资料；如未来用户明确要求“回看日记”，再单独设计 |
+| `weather_cache` | 天气已通过真实世界信息注入，不需要 Agent 直接查缓存 |
+| `user_locations` | 位置已通过真实世界信息注入，不需要 Agent 直接查位置表 |
+| `daily_event_items` | 作为记忆检索内部索引，不直接暴露给模型 |
+| `embedding` / `search_vector` / 内部向量字段 | 技术字段，不对模型展示 |
+
+### 9.3 关于数据域说明
+
+每个 domain 必须给模型提供业务说明，避免表名误导。例如：
+
+- `transactions` 不叫“交易表”，而叫 `life_logs`，因为它包含记账、碎碎念、时间轴、工作、收藏等。
+- `daily_event_items` 不叫“每日事件资料库”，而作为 `search_memories` 内部索引，不直接查询。
+- `user_profiles.content` 当前是 JSONB 聚合事实，精确度有限；工具说明必须提示“这是 AI 历史提取的长期事实，可能需要结合原始聊天或生活记录确认”。
+
+---
+
+## 十、用户画像与社交关系
+
+Agent 上线后，用户画像和社交关系不再每轮固定注入上下文，改为按需查询。
+
+理由：
+
+- 固定注入会增加上下文噪音；
+- 画像可能有过时或错误信息；
+- 社交关系只有在用户提到具体人、关系、过去互动时才有必要读取；
+- Florian 可以先通过 `list_fsync_domains` / `describe_fsync_domain` 知道有这类资料，再决定是否查。
+
+实现要求：
+
+- `user_profile_facts` 和 `social_relationships` 默认不进入每轮上下文。
+- 当模型查询这两个 domain 时，结果必须标明“AI 提取资料，可能不完整或过时”。
+- 建议在实现前由用户手动粗查一遍，删除明显错误或过时内容；不要求一次性修到完美。
+
+---
+
+## 十一、安全策略
+
+| 风险 | 策略 |
+|------|------|
+| service role 绕过 RLS | 工具执行器必须强制使用当前 `userId` 过滤 |
+| 模型查询任意表 | 只接受 domain 白名单，不接受裸表名 |
+| 模型查询敏感字段 | 每个 domain 固定返回字段白名单 |
+| 结果过大 | 默认 10 条，最大 50 条，字段摘要化 |
+| 理财数据敏感 | 允许读，但只读持仓、建议、流水等业务字段，不读配置密钥 |
+| 用户画像错误 | 标注来源和不确定性，支持后续人工修正 |
+| 删除/修改风险 | 第一版完全不提供写工具 |
+
+---
+
+## 十二、Agent Lab 测试入口
+
+### 12.1 目的
+
+在正式接入日常 Chat 体验前，先通过一个小型测试页面观察：
+
+- 模型是否能正确选择工具；
+- 能否根据能力目录找到正确数据域；
+- 工具结果是否按预期进入最终上下文；
+- 最终回复是否自然、不过度依赖最后一次工具结果。
+
+### 12.2 前端设计
+
+在 `src/pages/Debug.tsx` 增加 Agent Lab 面板，不新增公开 API 端点。
+
+显示内容：
+
+- 输入框：测试用户问题；
+- 运行按钮；
+- 简要工具调用列表，例如 `list_fsync_domains -> query_fsync_records(media_library, 5条)`；
+- 最终回复；
+- 可选折叠区：后端返回的 `agentTrace` 简要 JSON。
+
+不显示：
+
+- API Key；
+- Push Token；
+- 完整 Supabase 原始响应；
+- 过长隐私数据。
+
+### 12.3 API 返回调试信息
+
+`/api/chat-completion` 在 Agent Lab 模式下可额外返回：
+
+```typescript
+interface AgentTraceItem {
+  tool: string
+  domain?: string
+  status: 'ok' | 'error' | 'skipped'
+  count?: number
+  message?: string
+}
+```
+
+普通 Chat 模式可以不展示 trace；后续可考虑只显示“正在查询生活记录”等轻提示。
+
+---
+
+## 十三、与现有功能的交互
 
 | 现有功能 | 影响 |
 |----------|------|
-| `chat-completion.ts` | 核心改动：加入 tools 参数 + Agent 循环 |
-| `enrichMessages()` | 不变：RAG + 上下文构建照常运行，在 Agent 循环之前完成 |
-| `parse-transaction` | **不替代**：仍然作为记账的快速入口。Agent 的 `create_transaction` 是对话中的辅助路径 |
-| `proactive-ai` | 第一版不改；Phase 3 整合 |
-| `daily-summary` | 不改 |
-| 前端 Chat 页 | 原则上不改；后续可增加工具调用状态展示（如"正在查询..."） |
-| Settings 面板 | Phase 2 需增加 MCP 配置 UI |
+| `chat-completion.ts` | 加入只读 tools、Agent 循环、最终上下文重排 |
+| `enrichMessages()` | 保留基础上下文构建；增加 Agent 结果插入点 |
+| `retrievalJudgeAndFetch()` | 继续作为程序化 RAG 兜底；后续可与 `search_memories` 复用 |
+| `parse-transaction` | 不替代，仍作为主页记账快速解析入口 |
+| `parse-media` | 不替代，仍作为主页书影快速解析入口 |
+| `proactive-ai` | 不修改 |
+| `daily-summary` | 不修改 |
+| Chat 页 | 第一版可不改；日常 Chat 是否显示 tool trace 后续再定 |
+| Debug 页 | 新增 Agent Lab 面板 |
 
 ---
 
-## 八、实现步骤
+## 十四、边缘情况与降级策略
 
-### Phase 1：Agent 核心 + Supabase 数据查询（1-2 周）
-
-1. 新建 `api/_tools.ts`：定义所有工具的 JSON Schema + 执行函数
-2. 修改 `api/chat-completion.ts`：加入 Agent 循环（最多 3 轮）
-3. 首批工具：`query_transactions`、`query_chat_history`、`query_daily_logs`、`query_user_profiles`
-4. 不支持 Function Calling 的模型降级为普通对话
-5. 测试：在 Chat 中让 Florian 查账、查日记
-
-### Phase 2：数据写入工具（1 周）
-
-1. 新增 `create_transaction`、`update_transaction`、`delete_transaction`
-2. 写入工具的权限控制
-3. 测试：在对话中让 Florian 创建/修改记录
-
-### Phase 3：MCP 数据摄取（2-3 周）
-
-1. 新建 `api/_mcp-client.ts`：实现 MCP Client（HTTP/SSE 传输）
-2. 新建数据库迁移：`mcp_integrations` 表
-3. 新增 `mcp_import` 工具
-4. 滴答清单作为第一个接入的 MCP Server
-5. 前端 Settings 面板增加 MCP 配置 UI
-
-### Phase 4：优化与扩展（持续）
-
-1. 根据实际使用调整工具定义
-2. 增加更多 Supabase 表工具
-3. 探索 Agent 自主性（proactive + tools）
-4. 接入更多 MCP Server
+| 情况 | 处理方式 |
+|------|----------|
+| 模型不支持 tools | 不注入 tools，走普通对话 + 程序化 RAG |
+| 工具执行失败 | 返回简短错误给模型，并在 trace 中记录 |
+| 超过最大工具轮数 | 停止工具调用，基于已有结果生成最终回复 |
+| 工具结果无时间戳 | 放入“本轮工具查询摘要”，位于真实世界信息之前 |
+| 工具结果过多 | 截断并说明“仅展示前 N 条” |
+| 模型请求不开放 domain | 返回 domain 不可用，并提示可用 domain |
+| 缺少 `userId` | 禁用 Agent 工具 |
+| 缺少 service role | 禁用 Agent 工具，不使用 anon key 兜底读取 |
 
 ---
 
-## 九、验收标准
+## 十五、实现步骤
 
-- [ ] Florian 在对话中能查询 transactions 表数据并正确回复
-- [ ] Florian 能查询 daily_logs 和 user_profiles
-- [ ] Florian 能创建/修改/删除记录（DELETE 需用户确认）
-- [ ] 不支持 Function Calling 的模型自动降级，不影响正常对话
-- [ ] 工具调用失败不阻断对话
-- [ ] 3 轮工具调用后强制生成回复
-- [ ] MCP Client 能成功连接外部 MCP Server 并获取数据
-- [ ] MCP 导入的数据正确写入 Supabase
-- [ ] Agent 不会查询/修改 Supabase 表之外的数据
-- [ ] 实现完成后同步更新 03-后端API.md、05-AI系统设计.md
+### Phase 1：只读 Agent + Agent Lab
+
+1. [x] 新建 `api/_tools.ts`：实现 domain catalog、工具 schema、只读查询执行器。
+2. [x] 修改 `api/chat-completion.ts`：加入最多 2 轮的只读 Agent 循环。
+3. [x] 修改 `api/_context.ts`：支持接收 `AgentContextItem[]` 并按时间线/摘要位置插入最终上下文。
+4. [x] 移除或避免每轮固定注入用户画像与社交关系。
+5. [x] 修改 `src/pages/Debug.tsx`：新增 Agent Lab 测试面板，显示简要 trace。
+6. [x] 执行 `npm run build` 验证。
+7. [x] 更新 `02-前端页面.md`、`03-后端API.md`、`05-AI系统设计.md`、`07-状态管理与数据流.md`。
+
+### Phase 2：根据测试结果优化
+
+1. 调整 domain 描述和字段白名单。
+2. 优化工具结果摘要格式。
+3. 判断是否需要为聊天/书影/理财增加索引。
+4. 决定是否在正式 Chat 页显示轻量工具调用状态。
+
+### 暂不实施
+
+- 写入、修改、删除工具；
+- MCP 数据摄取；
+- 主动消息 Agent 化；
+- 读取 `daily_logs`；
+- 读取 `user_settings`、`push_tokens` 等敏感表。
 
 ---
 
-## 十、相关文档
+## 十六、验收标准
 
-- [Agentic RAG 混合检索架构方案](./2026-06-11-Agentic-RAG-混合检索架构方案.md) — 检索 tool-calling 定义
+- [x] Agent Lab 中，Florian 可以列出可用数据域并选择合适 domain 查询。
+- [ ] 查询书影、生活记录、历史聊天、理财数据时能得到正确结果。（需在 `/debug` 使用真实登录态逐项测试）
+- [x] 工具结果不会出现在最终模型调用的倒数第一或倒数第二条消息。
+- [x] 用户画像和社交关系不再每轮固定注入，只在工具调用时读取。
+- [x] `user_settings`、`push_tokens`、`daily_logs` 不会被工具读取。
+- [x] 缺少 `userId` 或 service role 时，Agent 工具安全降级。
+- [x] 不支持 tools 的模型仍能普通对话。
+- [x] `npm run build` 通过。
+- [x] 实现完成后同步更新相关说明文档。
+
+---
+
+## 十七、相关文档
+
+- [Agentic RAG 混合检索架构方案](./2026-06-11-Agentic-RAG-混合检索架构方案.md)
 - [03-后端API](../03-后端API.md)
 - [04-数据库](../04-数据库.md)
 - [05-AI系统设计](../05-AI系统设计.md)
@@ -487,4 +443,4 @@ CREATE TABLE mcp_integrations (
 
 ---
 
-> 下一步：请用户审阅并明确确认本方案。按照项目文档优先流程，在获得确认前不开始编码。
+> 下一步：在 `/debug` 的 Agent Lab 使用真实登录态和真实数据测试书影、生活记录、历史聊天和理财查询，根据 trace 调整 domain 描述与字段摘要格式。

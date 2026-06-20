@@ -1,6 +1,7 @@
-import { useState } from 'react'
-import { Search, Loader2, AlertTriangle } from 'lucide-react'
+import { useEffect, useState } from 'react'
+import { AlertTriangle, Bot, Loader2, Search, Send, Wrench } from 'lucide-react'
 import { supabase } from '../supabaseClient'
+import { useSettingsStore } from '../store/settings'
 
 interface VectorResult {
   id: string
@@ -37,13 +38,88 @@ interface SearchResult {
   params: { threshold: number; limit: number }
 }
 
+interface AgentTraceItem {
+  tool: string
+  domain?: string
+  status: 'ok' | 'error' | 'skipped'
+  count?: number
+  message?: string
+}
+
+interface AgentLabResult {
+  answer: string
+  trace: AgentTraceItem[]
+}
+
 export default function Debug() {
+  const settings = useSettingsStore((s) => s.settings)
+  const loadFromCloud = useSettingsStore((s) => s.loadFromCloud)
   const [query, setQuery] = useState('')
   const [threshold, setThreshold] = useState(0.3)
   const [limit, setLimit] = useState(10)
   const [loading, setLoading] = useState(false)
   const [result, setResult] = useState<SearchResult | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [agentPrompt, setAgentPrompt] = useState('我最近在看什么书或电影？')
+  const [agentLoading, setAgentLoading] = useState(false)
+  const [agentResult, setAgentResult] = useState<AgentLabResult | null>(null)
+  const [agentError, setAgentError] = useState<string | null>(null)
+
+  useEffect(() => {
+    void loadFromCloud()
+  }, [loadFromCloud])
+
+  async function runAgentLab() {
+    const prompt = agentPrompt.trim()
+    if (!prompt) return
+    setAgentLoading(true)
+    setAgentError(null)
+    setAgentResult(null)
+
+    try {
+      if (!supabase) throw new Error('Supabase 客户端未初始化')
+      const { data: { user } } = await supabase.auth.getUser()
+      if (!user) throw new Error('请先登录后再测试 Agent')
+
+      const response = await fetch('/api/chat-completion', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          messages: [
+            {
+              role: 'user',
+              content: prompt,
+              createdAt: Date.now(),
+            },
+          ],
+          settings: {
+            systemPrompt: settings.systemPrompt,
+            userPrompt: settings.userPrompt,
+            postHistoryPrompt: settings.postHistoryPrompt,
+            apiConfigs: settings.apiConfigs,
+          },
+          userId: user.id,
+          agentLab: true,
+          debugAgent: true,
+          enableAgent: true,
+        }),
+      })
+
+      const data = await response.json().catch(() => null)
+      if (!response.ok) {
+        throw new Error(data?.error || `请求失败：${response.status}`)
+      }
+
+      setAgentResult({
+        answer: data?.choices?.[0]?.message?.content || 'AI 未返回文本回复。',
+        trace: Array.isArray(data?.agentTrace) ? data.agentTrace : [],
+      })
+    } catch (e: any) {
+      setAgentError(e.message || 'Agent Lab 请求失败')
+    } finally {
+      setAgentLoading(false)
+    }
+  }
 
   async function search() {
     if (!query.trim()) return
@@ -166,9 +242,119 @@ export default function Debug() {
     '花了多少钱',
   ]
 
+  const agentPresetQueries = [
+    '我最近在看什么书或电影？',
+    '查一下我的理财持仓概况',
+    '我最近记了哪些吃饭消费？',
+    '你能读取哪些 F-Sync 数据？',
+  ]
+
   return (
     <div className="mx-auto max-w-[640px] px-4 py-6 pb-24 text-base-text">
-      <h1 className="text-lg font-semibold mb-4">向量检索调试</h1>
+      <h1 className="text-lg font-semibold mb-4">AI 调试</h1>
+
+      <section className="mb-8 rounded-2xl border border-base-line bg-base-surface p-4">
+        <div className="mb-3 flex items-center justify-between gap-3">
+          <div className="flex items-center gap-2">
+            <Bot className="h-4 w-4 text-base-muted" />
+            <h2 className="text-sm font-medium">Agent Lab</h2>
+          </div>
+          <span className="rounded-full border border-base-line bg-base-bg px-2 py-1 text-[10px] text-base-muted">
+            read-only
+          </span>
+        </div>
+
+        <div className="space-y-3">
+          <textarea
+            value={agentPrompt}
+            onChange={e => setAgentPrompt(e.target.value)}
+            onKeyDown={e => {
+              if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) void runAgentLab()
+            }}
+            placeholder="输入要让 Florian 查询的问题…"
+            className="min-h-[86px] w-full resize-none rounded-2xl border border-base-line bg-base-bg px-4 py-3 text-sm outline-none focus:border-lavender"
+          />
+
+          <div className="flex flex-wrap gap-1.5">
+            {agentPresetQueries.map(q => (
+              <button
+                key={q}
+                type="button"
+                onClick={() => setAgentPrompt(q)}
+                className="rounded-full border border-base-line bg-base-bg px-3 py-1 text-xs text-base-muted active:opacity-70"
+              >
+                {q}
+              </button>
+            ))}
+          </div>
+
+          <button
+            type="button"
+            onClick={runAgentLab}
+            disabled={agentLoading || !agentPrompt.trim()}
+            className="inline-flex items-center gap-1.5 rounded-2xl bg-lavender px-4 py-2.5 text-sm text-white disabled:opacity-50"
+          >
+            {agentLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+            运行
+          </button>
+        </div>
+
+        {agentError && (
+          <div className="mt-4 rounded-2xl border border-red-200 bg-red-50 p-3">
+            <div className="mb-1 flex items-center gap-2 text-sm text-red-600">
+              <AlertTriangle className="h-4 w-4" /> 错误
+            </div>
+            <pre className="whitespace-pre-wrap text-xs text-red-700">{agentError}</pre>
+          </div>
+        )}
+
+        {agentResult && (
+          <div className="mt-4 space-y-3">
+            <div>
+              <div className="mb-2 flex items-center gap-2 text-xs font-medium text-base-muted">
+                <Wrench className="h-3.5 w-3.5" />
+                Tool Trace
+              </div>
+              {agentResult.trace.length > 0 ? (
+                <div className="space-y-1.5">
+                  {agentResult.trace.map((item, index) => (
+                    <div
+                      key={`${item.tool}-${index}`}
+                      className="flex flex-wrap items-center gap-2 rounded-xl border border-base-line bg-base-bg px-3 py-2 text-xs"
+                    >
+                      <span className="font-medium text-base-text">{item.tool}</span>
+                      {item.domain && <span className="text-base-muted">{item.domain}</span>}
+                      <span className={item.status === 'error' ? 'text-red-500' : item.status === 'skipped' ? 'text-amber-600' : 'text-green-600'}>
+                        {item.status}
+                      </span>
+                      {typeof item.count === 'number' && <span className="text-base-muted">{item.count} 条</span>}
+                      {item.message && <span className="min-w-0 flex-1 text-base-muted">{item.message}</span>}
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="rounded-xl border border-base-line bg-base-bg px-3 py-2 text-xs text-base-muted">
+                  本轮没有工具调用
+                </div>
+              )}
+            </div>
+
+            <div className="rounded-2xl border border-base-line bg-base-bg p-3">
+              <div className="mb-2 text-xs font-medium text-base-muted">回复</div>
+              <div className="whitespace-pre-wrap text-sm leading-6">{agentResult.answer}</div>
+            </div>
+
+            <details className="rounded-2xl border border-base-line bg-base-bg p-3 text-xs">
+              <summary className="cursor-pointer text-base-muted">JSON trace</summary>
+              <pre className="mt-2 max-h-72 overflow-auto whitespace-pre-wrap text-[11px] text-base-muted">
+                {JSON.stringify(agentResult.trace, null, 2)}
+              </pre>
+            </details>
+          </div>
+        )}
+      </section>
+
+      <h2 className="text-sm font-medium mb-4">向量检索调试</h2>
 
       <div className="space-y-3 mb-5">
         <div className="flex gap-2">

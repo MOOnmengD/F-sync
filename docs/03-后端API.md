@@ -8,7 +8,7 @@
 |------|------|------|------|
 | `/api/parse-transaction` | POST | 无 | AI 解析记账文本 |
 | `/api/parse-media` | POST | 无 | AI 解析书影文本（标题+评价） |
-| `/api/chat-completion` | POST | 无（由 Supabase RLS 保护） | AI 对话（含 RAG） |
+| `/api/chat-completion` | POST | 无（工具读取要求 `userId` + service role） | AI 对话（含 RAG + 只读 Agent） |
 | `/api/vectorize` | POST | 无 | 生成 embedding |
 | `/api/proactive-ai` | POST | `CRON_SECRET` | 主动消息 + 推送 |
 | `/api/daily-summary` | POST | `CRON_SECRET` | 每日日记 + 画像更新 |
@@ -41,12 +41,37 @@ AI 对话上下文构建模块（详见 [05-AI系统设计](./05-AI系统设计.
 | 函数 | 用途 |
 |------|------|
 | `enrichMessages(params)` | **主入口**：构建完整的 AI 对话上下文 |
-| `fetchUserProfiles(supabase, userId)` | 获取用户画像（社交关系 + 个人信息事实） |
+| `fetchUserProfiles(supabase, userId)` | 获取用户画像（社交关系 + 个人信息事实；Chat 主流程不再每轮固定注入） |
 | `fetchTopDailyEvents(supabase)` | 获取最近 3 条每日事件摘要（仅作内部索引，不注入上下文） |
 | `fetchTimingInfo(supabase)` | 获取当前计时状态 |
 | `resolveLocationInfo({location, amapKey})` | 解析位置信息（校内匹配 + 高德逆地理） |
 | `ragRetrieval(params)` | RAG 三策略检索（向量→全文→时间兜底），按需调用 |
 | `retrievalJudgeAndFetch(params)` | 检索判断（记忆 + 生活记录）+ 历史对话检索 |
+| `AgentContextItem` | Agent 工具结果的最终上下文条目；有时间戳则进入统一时间线，无时间戳则进入本轮工具摘要 |
+
+### `_tools.ts`
+
+只读 Agent 工具模块，作为 `chat-completion` 的内部依赖，不新增公开 Vercel Function。
+
+| 导出 | 用途 |
+|------|------|
+| `getFsyncToolDefinitions()` | 返回 OpenAI-compatible tools schema |
+| `getAgentSystemInstruction()` | 给支持工具调用的模型追加只读工具说明 |
+| `executeFsyncTool(toolCall, context)` | 执行工具调用，返回 protocol tool message 内容、`AgentContextItem[]` 和简要 trace |
+
+第一版开放工具：
+
+| 工具 | 用途 |
+|------|------|
+| `list_fsync_domains` | 列出可读取业务数据域 |
+| `describe_fsync_domain` | 描述某个数据域的字段、过滤项、排序和注意事项 |
+| `query_fsync_records` | 按白名单 domain/字段查询记录，不接受 SQL 或裸表名 |
+| `search_memories` | 语义搜索历史共同记忆，内部使用事件索引回捞聊天原文 |
+| `search_life_logs` | 语义搜索生活记录，失败时回退关键词查询 |
+
+开放读取的数据域包括：`life_logs`、`chat_history`、`media_library`、`items`、`social_relationships`、`user_profile_facts`、`investment_portfolio`、`investment_suggestions`、`investment_actions`。
+
+不开放直接读取：`user_settings`、`push_tokens`、`daily_logs`、`weather_cache`、`user_locations`、`daily_event_items`、embedding/search_vector 等技术字段。
 
 ### `_weather.ts`
 
@@ -119,7 +144,7 @@ AI 对话上下文构建模块（详见 [05-AI系统设计](./05-AI系统设计.
 
 ### `POST /api/chat-completion`
 
-**用途**：AI 对话，包含完整的 RAG 检索和上下文构建。
+**用途**：AI 对话，包含 RAG 检索、上下文构建和只读 Agent 工具调用。
 
 **输入**：
 ```json
@@ -127,18 +152,25 @@ AI 对话上下文构建模块（详见 [05-AI系统设计](./05-AI系统设计.
   "messages": [{ "role": "user", "content": "我今天花了多少钱" }],
   "settings": { /* AISettings */ },
   "userId": "uuid",
-  "location": { "latitude": 45.77, "longitude": 126.67, "accuracy": 10, "address": "..." }
+  "location": { "latitude": 45.77, "longitude": 126.67, "accuracy": 10, "address": "..." },
+  "enableAgent": true,
+  "debugAgent": false,
+  "agentLab": false
 }
 ```
 
-**输出**：透传 AI API 的原始响应，附加 `fullMessages`（发送给 AI 的完整消息列表）
+**输出**：透传 AI API 的原始响应，附加 `fullMessages`（最终发送给 AI 的完整消息列表）。`debugAgent/agentLab` 为 true 时额外附加简要 `agentTrace`。
 
 **处理流程**：
 1. 构建 API 配置（前端传来 > 环境变量 fallback）
-2. 调用 `enrichMessages()` 构建上下文（含按需记忆检索、按需生活记录检索、用户画像、位置、天气）
+2. 调用 `enrichMessages()` 构建基础上下文（含按需记忆检索、按需生活记录检索、位置、天气、计时状态）
 3. 图片消息转为多模态格式（`image_url` + `text` parts）
-4. 多组 API 轮询（失败自动切换下一组）
-5. 位置信息异步写入 `user_locations` 表
+4. 若存在 `userId` 且配置了 `SUPABASE_SERVICE_ROLE_KEY`，先发起最多 2 轮只读 tool-calling
+5. 后端执行 `_tools.ts` 白名单工具，生成内部 tool protocol 消息和 `AgentContextItem[]`
+6. 一旦有工具结果，重新调用 `enrichMessages(agentContextItems)` 构建最终上下文：有时间戳的工具结果进入时间线，无时间戳的工具结果进入「本轮工具查询摘要」，均位于真实世界信息和当前用户消息之前
+7. 最终模型调用不再携带 raw tool messages，避免工具结果占据倒数第一/第二条消息
+8. 不支持 tools 或工具模式失败时，自动降级为普通对话
+9. 位置信息异步写入 `user_locations` 表
 
 **环境变量**：`CHAT_AI_*`（优先）> `AI_*`（fallback），`SUPABASE_SERVICE_ROLE_KEY`，`AMAP_API_KEY`（可选）
 
@@ -146,6 +178,7 @@ AI 对话上下文构建模块（详见 [05-AI系统设计](./05-AI系统设计.
 - 多 AI 配置轮询容错
 - 位置信息自动旁路写入 DB
 - 支持用户通过设置自定义 system prompt / user prompt / post-history prompt
+- 只读 Agent 不提供写入、修改、删除工具
 
 ---
 
@@ -428,8 +461,9 @@ AI 对话上下文构建模块（详见 [05-AI系统设计](./05-AI系统设计.
 parse-transaction ─── 独立（仅依赖 AI_API_*）
 
 chat-completion ─── _context ─── _weather ─── 高德天气 API
+                 ├── _tools ─── Supabase（只读业务域查询）
                  ├── _utils
-                 └── Supabase (RAG / 画像 / 位置）
+                 └── Supabase (RAG / 位置 / Agent 查询）
 
 proactive-ai ─── _context（与 chat-completion 共享管线）
              ├── 华为 Push Kit
