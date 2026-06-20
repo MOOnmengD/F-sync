@@ -172,7 +172,16 @@ export default function Library() {
         return
       }
     } else {
+      const { data: authData } = await client.auth.getUser()
+      const userId = authData.user?.id
+      if (!userId) {
+        setErrorText('登录状态失效，请重新登录')
+        setSaving(false)
+        return
+      }
+
       const { error } = await client.from('media_items').insert({
+        user_id: userId,
         title: draft.title.trim(),
         media_type: draft.mediaType,
         status: draft.status,

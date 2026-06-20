@@ -125,6 +125,15 @@ export default function Home() {
     saveOutbox(prev.filter((e) => e?.id !== id))
   }
 
+  const getCurrentUserId = async () => {
+    if (userId) return userId
+    if (!supabase) return null
+    const { data } = await supabase.auth.getUser()
+    const nextUserId = data.user?.id ?? null
+    if (nextUserId) setUserId(nextUserId)
+    return nextUserId
+  }
+
   const readJsonResponse = async (response: Response, fallbackMessage: string) => {
     const responseText = await response.text()
     let data: unknown = null
@@ -658,8 +667,14 @@ export default function Home() {
 
       const finalType: MediaType = mediaType ?? 'book'
       const finalStatus: MediaStatus = mediaStatus ?? 'want_to_consume'
+      const currentUserId = await getCurrentUserId()
+      if (!currentUserId) {
+        setToast('登录状态失效，请重新登录')
+        return
+      }
 
       const { error } = await supabase.from('media_items').insert({
+        user_id: currentUserId,
         title,
         media_type: finalType,
         status: finalStatus,
