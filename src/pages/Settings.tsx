@@ -87,6 +87,13 @@ function KeyInput({
   placeholder?: string
 }) {
   const [show, setShow] = useState(false)
+  const [editing, setEditing] = useState(false)
+  const isPlainText = show || editing
+  const displayValue = isPlainText
+    ? value
+    : value
+      ? '•'.repeat(Math.min(value.length, 24))
+      : ''
 
   const handlePaste = async () => {
     try {
@@ -106,11 +113,19 @@ function KeyInput({
     <div className="relative group/key">
       <input
         className="w-full p-2 pr-20 text-xs bg-white border border-base-line rounded-lg outline-none focus:border-[#B4AEE8]"
-        type={show ? 'text' : 'password'}
+        type="text"
         placeholder={placeholder}
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
+        value={displayValue}
+        onFocus={() => setEditing(true)}
+        onBlur={() => setEditing(false)}
+        onChange={(e) => {
+          if (isPlainText) onChange(e.target.value)
+        }}
+        inputMode="text"
         autoComplete="off"
+        autoCapitalize="none"
+        autoCorrect="off"
+        spellCheck={false}
       />
       <div className="absolute right-1 top-1/2 -translate-y-1/2 flex items-center gap-0.5">
         <button
