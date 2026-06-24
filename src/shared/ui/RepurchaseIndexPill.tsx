@@ -43,7 +43,7 @@ export function RepurchaseIndexPill({
 
   return (
     <div
-      className="flex select-none items-center gap-2 rounded-full border border-base-line bg-base-bg px-3 py-2 text-xs text-base-muted"
+      className="flex select-none items-center gap-2 rounded-full border border-base-line bg-base-bg px-3 py-1 text-xs text-base-muted"
       role="group"
       aria-label="回购指数"
     >

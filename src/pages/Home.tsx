@@ -11,14 +11,23 @@ import { RepurchaseIndexPill } from '../shared/ui/RepurchaseIndexPill'
 import { useTimeline, TIMELINE_KINDS } from '../hooks/useTimeline'
 import { WeeklyTimeline } from '../components/WeeklyTimeline'
 import InvestmentPanel from '../components/InvestmentPanel'
-import { extractDate, formatCompactDateTime } from '../utils/dateUtils'
+import { extractDate } from '../utils/dateUtils'
 import { extractAmount, pickItemNameFallback, formatAmount } from '../utils/amountUtils'
+import { FinanceDashboard } from '../components/FinanceDashboard'
+import { useFinanceDashboard } from '../hooks/useFinanceDashboard'
+import {
+  datePartsToDayKey,
+  dayKeyToNoonIso,
+  formatFinanceMonthLabel,
+  formatSelectedFinanceDate,
+  getLocalDayKey,
+} from '../utils/financeDashboard'
 
 const modeMeta: Record<
   QuickMode,
   { label: string; accent: 'peach' | 'mint' | 'baby' | 'butter' | 'lavender' | 'timeline' | 'rose'; hint: string }
 > = {
-  finance: { label: '记账', accent: 'mint', hint: '今天花了多少？一句话记下来' },
+  finance: { label: '记账', accent: 'mint', hint: '' },
   review: { label: '点评', accent: 'peach', hint: '对一个物品/服务写一句感受' },
   note: { label: '碎碎念', accent: 'baby', hint: '写点当下的想法，不用完整' },
   work: { label: '工作', accent: 'butter', hint: '记录推进点 / blockers / 下一步' },
@@ -68,12 +77,31 @@ export default function Home() {
   const [repurchaseIndex, setRepurchaseIndex] = useState(0)
   const [lastFinanceTx, setLastFinanceTx] = useState<LastFinanceTx | null>(null)
   const [reviewTargetId, setReviewTargetId] = useState<string | null>(null)
+  const [reviewTargetTx, setReviewTargetTx] = useState<LastFinanceTx | null>(null)
+  const [financeTodayKey, setFinanceTodayKey] = useState(() => getLocalDayKey())
+  const [selectedFinanceDate, setSelectedFinanceDate] = useState(() => getLocalDayKey())
+  const financeTodayKeyRef = useRef(financeTodayKey)
   const [activeMediaItems, setActiveMediaItems] = useState<ActiveMediaItem[]>([])
   const [activeMediaLoading, setActiveMediaLoading] = useState(false)
   const [selectedMediaItemId, setSelectedMediaItemId] = useState<string | null>(null)
 
   const [refreshKey, setRefreshKey] = useState(0)
   const [userId, setUserId] = useState<string | null>(null)
+  const {
+    summary: financeSummary,
+    calendarDays: financeCalendarDays,
+    selectedDayRecords: financeSelectedDayRecords,
+    quickRecords: financeQuickRecords,
+    loading: financeDashboardLoading,
+    quickSending: financeQuickSending,
+    errorText: financeDashboardError,
+    refresh: refreshFinanceDashboard,
+    sendQuickRecord,
+  } = useFinanceDashboard({
+    enabled: mode === 'finance',
+    selectedDayKey: selectedFinanceDate,
+    onToast: setToast,
+  })
 
   const {
     kind: timelineKind,
@@ -346,6 +374,53 @@ export default function Home() {
   }, [loadSettingsFromCloud])
 
   useEffect(() => {
+    let midnightTimer: number | null = null
+
+    const scheduleMidnightSync = () => {
+      if (midnightTimer !== null) window.clearTimeout(midnightTimer)
+      const now = new Date()
+      const nextMidnight = new Date(
+        now.getFullYear(),
+        now.getMonth(),
+        now.getDate() + 1,
+        0,
+        0,
+        1,
+        0,
+      )
+      midnightTimer = window.setTimeout(() => {
+        syncCurrentDay()
+        scheduleMidnightSync()
+      }, Math.max(1000, nextMidnight.getTime() - now.getTime()))
+    }
+
+    const syncCurrentDay = () => {
+      const nextTodayKey = getLocalDayKey()
+      const previousTodayKey = financeTodayKeyRef.current
+      financeTodayKeyRef.current = nextTodayKey
+      setFinanceTodayKey(nextTodayKey)
+      setSelectedFinanceDate((current) => {
+        const sameMonth = current.slice(0, 7) === nextTodayKey.slice(0, 7)
+        const wasDefaultToday = current === previousTodayKey
+        return sameMonth && current <= nextTodayKey && !wasDefaultToday ? current : nextTodayKey
+      })
+    }
+
+    const handleVisibility = () => {
+      if (document.visibilityState === 'visible') syncCurrentDay()
+    }
+
+    window.addEventListener('focus', syncCurrentDay)
+    document.addEventListener('visibilitychange', handleVisibility)
+    scheduleMidnightSync()
+    return () => {
+      window.removeEventListener('focus', syncCurrentDay)
+      document.removeEventListener('visibilitychange', handleVisibility)
+      if (midnightTimer !== null) window.clearTimeout(midnightTimer)
+    }
+  }, [])
+
+  useEffect(() => {
     const client = supabase
     if (!client) return
     client.auth.getUser().then(({ data }) => {
@@ -395,6 +470,11 @@ export default function Home() {
         const next = payload.new as any
         if (!next?.id || !next?.created_at) return
         if (next.type !== '记账') return
+        void safeFetch()
+      })
+      .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'transactions' }, (payload) => {
+        const previous = payload.old as any
+        if (previous?.type && previous.type !== '记账') return
         void safeFetch()
       })
       .subscribe()
@@ -502,6 +582,11 @@ export default function Home() {
     return lastFinanceTx
   }, [lastFinanceTx, mode])
 
+  const activeReviewTx = useMemo(() => {
+    if (!reviewTargetId || !reviewTargetTx) return null
+    return reviewTargetTx.id === reviewTargetId ? reviewTargetTx : null
+  }, [reviewTargetId, reviewTargetTx])
+
   const selectedMediaItem = useMemo(
     () => activeMediaItems.find((item) => item.id === selectedMediaItemId) ?? null,
     [activeMediaItems, selectedMediaItemId],
@@ -514,11 +599,6 @@ export default function Home() {
     setMediaType(null)
     setMediaStatus(null)
   }, [selectedMediaItem, selectedMediaItemId, setMediaStatus, setMediaType])
-
-  useEffect(() => {
-    if (!reviewTargetId) return
-    if (!pendingReviewTx || pendingReviewTx.id !== reviewTargetId) setReviewTargetId(null)
-  }, [pendingReviewTx, reviewTargetId])
 
   const sendReviewSupplement = async (transactionId: string) => {
     const reviewText = text.trim()
@@ -577,11 +657,13 @@ export default function Home() {
       }
 
       setReviewTargetId(null)
+      setReviewTargetTx(null)
       setText('')
       setCategory(null)
       setNecessity(null)
       setRepurchaseIndex(0)
       await fetchLastFinanceTx()
+      void refreshFinanceDashboard()
       setToast('已补点评')
     } finally {
       setSending(false)
@@ -692,12 +774,12 @@ export default function Home() {
         payload.finance_category = category ?? null
       }
       if (dateResult.date) {
-        payload.created_at = new Date(
-          dateResult.date.year,
-          dateResult.date.month - 1,
-          dateResult.date.day,
-          12, 0, 0, 0,
-        ).toISOString()
+        const explicitDayKey = datePartsToDayKey(dateResult.date)
+        const createdAt = dayKeyToNoonIso(explicitDayKey)
+        if (createdAt) payload.created_at = createdAt
+      } else if (mode === 'finance' && selectedFinanceDate !== financeTodayKey) {
+        const createdAt = dayKeyToNoonIso(selectedFinanceDate)
+        if (createdAt) payload.created_at = createdAt
       }
 
       const { data: inserted, error } = await supabase.from('transactions').insert(payload).select('id').single()
@@ -719,6 +801,7 @@ export default function Home() {
       setNecessity(null)
       setRepurchaseIndex(0)
       void fetchLastFinanceTx()
+      void refreshFinanceDashboard()
       setToast('已记录')
     } catch (e: any) {
       const msg = String(e?.message ?? e) || 'AI 解析失败'
@@ -839,8 +922,8 @@ export default function Home() {
       return
     }
 
-    if (mode === 'finance' && pendingReviewTx && reviewTargetId === pendingReviewTx.id) {
-      void sendReviewSupplement(pendingReviewTx.id)
+    if (mode === 'finance' && activeReviewTx) {
+      void sendReviewSupplement(activeReviewTx.id)
       return
     }
 
@@ -858,8 +941,40 @@ export default function Home() {
     setToast('已发送')
   }
 
+  const toggleReviewSupplement = () => {
+    if (activeReviewTx) {
+      setReviewTargetId(null)
+      setReviewTargetTx(null)
+      setCategory(null)
+      setNecessity(null)
+      setRepurchaseIndex(0)
+      return
+    }
+    if (!pendingReviewTx) return
+    setReviewTargetId(pendingReviewTx.id)
+    setReviewTargetTx(pendingReviewTx)
+    setCategory(pendingReviewTx.finance_category as any)
+    setNecessity(
+      pendingReviewTx.necessity === null
+        ? null
+        : pendingReviewTx.necessity
+          ? 'need'
+          : 'want',
+    )
+    setRepurchaseIndex(pendingReviewTx.repurchase_index || 0)
+  }
+
+  const handleQuickRecord = async (record: (typeof financeQuickRecords)[number]) => {
+    await sendQuickRecord(record)
+    await fetchLastFinanceTx()
+  }
+
   return (
-    <div className="mx-auto min-h-dvh max-w-[480px] bg-base-bg px-4 pb-[160px] text-base-text">
+    <div
+      className={`mx-auto min-h-dvh max-w-[480px] bg-base-bg px-4 text-base-text ${
+        mode === 'finance' ? 'pb-[280px]' : 'pb-[160px]'
+      }`}
+    >
       <header className="sticky top-0 z-50 -mx-4 bg-base-bg/95 px-4 pb-3 pt-4 backdrop-blur-sm">
         <div className="flex items-center justify-between">
           <IconButton label="打开导航" onClick={toggleDrawer} icon={<Menu size={18} />} />
@@ -936,6 +1051,17 @@ export default function Home() {
         userId ? <InvestmentPanel userId={userId} /> : (
           <div className="mt-4 text-center text-sm text-base-muted py-8">加载中…</div>
         )
+      ) : mode === 'finance' ? (
+        <FinanceDashboard
+          monthLabel={formatFinanceMonthLabel(financeTodayKey)}
+          summary={financeSummary}
+          calendarDays={financeCalendarDays}
+          selectedDayKey={selectedFinanceDate}
+          selectedDayRecords={financeSelectedDayRecords}
+          loading={financeDashboardLoading}
+          errorText={financeDashboardError}
+          onSelectDay={setSelectedFinanceDate}
+        />
       ) : (
         <div className="mt-4 text-sm text-base-muted">{meta.hint}</div>
       )}
@@ -1040,7 +1166,7 @@ export default function Home() {
             )}
             {mode === 'finance' && (
               <div className="mb-2 rounded-2xl bg-base-surface p-3">
-                <div className="flex flex-wrap items-center gap-2">
+                <div className="flex flex-wrap items-center gap-1.5">
                   {financeCategories.map((c) => {
                     const active = category === c
                     return (
@@ -1057,6 +1183,20 @@ export default function Home() {
                       </button>
                     )
                   })}
+                  {(pendingReviewTx || activeReviewTx) && (
+                    <button
+                      type="button"
+                      onClick={toggleReviewSupplement}
+                      className={`rounded-full border border-base-line px-3 py-1 text-xs active:opacity-70 ${
+                        activeReviewTx ? 'text-base-text' : 'bg-transparent text-base-muted'
+                      }`}
+                      style={activeReviewTx ? chipActiveStyle : undefined}
+                      aria-pressed={Boolean(activeReviewTx)}
+                      aria-label="为上一条记账补点评"
+                    >
+                      {activeReviewTx ? '补充中' : '补点评'}
+                    </button>
+                  )}
                 </div>
 
                 <div className="mt-2 flex items-center gap-2">
@@ -1073,7 +1213,7 @@ export default function Home() {
                           key={o.key}
                           type="button"
                           onClick={() => setNecessity(active ? null : o.key)}
-                          className={`w-14 whitespace-nowrap py-2 text-xs font-medium active:opacity-70 ${
+                          className={`w-14 whitespace-nowrap py-1 text-xs font-medium active:opacity-70 ${
                             active ? 'text-base-text' : 'bg-transparent text-base-muted'
                           }`}
                           style={active ? chipActiveStyle : undefined}
@@ -1085,6 +1225,26 @@ export default function Home() {
                   </div>
                   <RepurchaseIndexPill value={repurchaseIndex} onChange={setRepurchaseIndex} />
                 </div>
+
+                {financeQuickRecords.length > 0 && (
+                  <div className="mt-2 flex flex-wrap items-center gap-1.5" aria-label="快捷记录">
+                    {financeQuickRecords.map((record) => (
+                      <button
+                        key={record.key}
+                        type="button"
+                        onClick={() => void handleQuickRecord(record)}
+                        disabled={financeQuickSending || sending}
+                        className="inline-flex max-w-full items-center gap-1 rounded-full border border-[#BFE8DA] bg-[#E9F8F2] px-3 py-1 text-xs text-base-text active:opacity-70 disabled:opacity-50"
+                        title={`${record.itemName} ${formatAmount(record.amountCents / 100)}`}
+                      >
+                        <span className="max-w-[120px] truncate">{record.itemName}</span>
+                        <span className="shrink-0 text-base-muted">
+                          {formatAmount(record.amountCents / 100)}
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+                )}
               </div>
             )}
             {mode === 'media' && (
@@ -1180,61 +1340,24 @@ export default function Home() {
                 </div>
               </div>
             )}
-            {mode === 'finance' && pendingReviewTx && (
-              <button
-                type="button"
-                onClick={() => {
-                  if (reviewTargetId === pendingReviewTx.id) {
-                    setReviewTargetId(null)
-                    setCategory(null)
-                    setNecessity(null)
-                    setRepurchaseIndex(0)
-                  } else {
-                    setReviewTargetId(pendingReviewTx.id)
-                    setCategory(pendingReviewTx.finance_category as any)
-                    setNecessity(
-                      pendingReviewTx.necessity === null
-                        ? null
-                        : pendingReviewTx.necessity
-                          ? 'need'
-                          : 'want',
-                    )
-                    setRepurchaseIndex(pendingReviewTx.repurchase_index || 0)
-                  }
-                }}
-                className={`mb-2 w-full rounded-2xl border bg-base-surface p-3 text-left active:opacity-70 ${
-                  reviewTargetId === pendingReviewTx.id ? 'border-base-text' : 'border-base-line'
-                }`}
-                aria-label="上一条记账待补点评"
-              >
-                <div className="flex items-center justify-between gap-2">
-                  <div className="text-sm font-medium text-base-text">上一条记账待补点评</div>
-                  <div className="text-xs text-base-muted">
-                    {reviewTargetId === pendingReviewTx.id ? '正在补点评' : '点一下补'}
-                  </div>
-                </div>
-                <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-base-muted">
-                  <span>{pendingReviewTx.item_name_snapshot || pendingReviewTx.item_name || '（未识别 item）'}</span>
-                  <span>·</span>
-                  <span>{formatAmount(pendingReviewTx.amount)}</span>
-                  <span>·</span>
-                  <span>{formatCompactDateTime(pendingReviewTx.created_at)}</span>
-                </div>
-              </button>
-            )}
             <section
               className="rounded-2xl border bg-base-surface p-3"
               style={composerBorder}
               aria-label="快速输入"
             >
+              {mode === 'finance' && selectedFinanceDate !== financeTodayKey && !activeReviewTx && (
+                <div className="mb-1 px-1 text-[11px] font-medium text-[#4F9F86]">
+                  记录到 {formatSelectedFinanceDate(selectedFinanceDate)}
+                </div>
+              )}
               <div className="relative">
                 <textarea
                   rows={2}
                   value={text}
                   onChange={(e) => setText(e.target.value)}
                   placeholder={
-                    mode === 'finance' && pendingReviewTx && reviewTargetId === pendingReviewTx.id
-                      ? '给上一条记账补充点评…'
+                    mode === 'finance' && activeReviewTx
+                      ? `给「${activeReviewTx.item_name_snapshot || activeReviewTx.item_name || '上一条记账'}」补点评…`
                       : mode === 'media' && selectedMediaItem
                         ? `给《${selectedMediaItem.title}》写一条新点评…`
                       : `在「${meta.label}」里输入…`
