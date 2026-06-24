@@ -75,7 +75,7 @@ AI 对话上下文构建模块（详见 [05-AI系统设计](./05-AI系统设计.
 | `search_memories` | 语义搜索历史共同记忆，内部使用事件索引回捞聊天原文 |
 | `search_life_logs` | 语义搜索生活记录，失败时回退关键词查询 |
 
-开放读取的数据域包括：`life_logs`、`chat_history`、`media_library`、`items`、`social_relationships`、`user_profile_facts`、`investment_portfolio`、`investment_suggestions`、`investment_actions`。
+开放读取的数据域包括：`life_logs`、`chat_history`、`media_library`（书影当前状态/最近点评）、`media_history`（书影多条点评/状态事件）、`items`、`social_relationships`、`user_profile_facts`、`investment_portfolio`、`investment_suggestions`、`investment_actions`。
 
 不开放直接读取：`user_settings`、`push_tokens`、`daily_logs`、`weather_cache`、`user_locations`、`daily_event_items`、embedding/search_vector 等技术字段。
 

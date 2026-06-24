@@ -74,14 +74,12 @@ type FormDraft = {
   title: string
   mediaType: MediaType
   status: MediaStatus
-  review: string
 }
 
 const EMPTY_DRAFT: FormDraft = {
   title: '',
   mediaType: 'book',
   status: 'want_to_consume',
-  review: '',
 }
 
 export default function Library() {
@@ -137,7 +135,6 @@ export default function Library() {
       title: item.title,
       mediaType: item.mediaType,
       status: item.status,
-      review: item.review ?? '',
     })
     setModalOpen(true)
   }
@@ -155,44 +152,24 @@ export default function Library() {
 
     setSaving(true)
 
-    if (editingId) {
-      const { error } = await client
-        .from('media_items')
-        .update({
-          title: draft.title.trim(),
-          media_type: draft.mediaType,
-          status: draft.status,
-          review: draft.review.trim() || null,
-        })
-        .eq('id', editingId)
+    if (!editingId) {
+      setSaving(false)
+      return
+    }
 
-      if (error) {
-        setErrorText('保存失败，请重试')
-        setSaving(false)
-        return
-      }
-    } else {
-      const { data: authData } = await client.auth.getUser()
-      const userId = authData.user?.id
-      if (!userId) {
-        setErrorText('登录状态失效，请重新登录')
-        setSaving(false)
-        return
-      }
+    const { error } = await client.rpc('save_media_record', {
+      p_media_item_id: editingId,
+      p_title: draft.title.trim(),
+      p_media_type: draft.mediaType,
+      p_status: draft.status,
+      p_review: null,
+      p_occurred_at: new Date().toISOString(),
+    })
 
-      const { error } = await client.from('media_items').insert({
-        user_id: userId,
-        title: draft.title.trim(),
-        media_type: draft.mediaType,
-        status: draft.status,
-        review: draft.review.trim() || null,
-      })
-
-      if (error) {
-        setErrorText('添加失败，请重试')
-        setSaving(false)
-        return
-      }
+    if (error) {
+      setErrorText('保存失败，请重试')
+      setSaving(false)
+      return
     }
 
     setSaving(false)
@@ -478,18 +455,6 @@ export default function Library() {
                   </button>
                 ))}
               </div>
-            </div>
-
-            {/* Review textarea */}
-            <div className="mt-4">
-              <p className="mb-2 text-xs text-base-muted">点评（可选）</p>
-              <textarea
-                value={draft.review}
-                onChange={(e) => setDraft((d) => ({ ...d, review: e.target.value }))}
-                placeholder="自由记录感受…"
-                rows={3}
-                className="w-full resize-none rounded-2xl border border-base-line bg-base-surface px-4 py-2.5 text-sm text-base-text placeholder:text-base-muted outline-none"
-              />
             </div>
 
             {/* Save button */}

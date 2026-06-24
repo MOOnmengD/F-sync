@@ -72,6 +72,27 @@ export type MediaItem = {
   updatedAt: string
 }
 
+export type ActiveMediaItem = {
+  id: string
+  title: string
+  mediaType: MediaType
+  status: 'consuming'
+  updatedAt: string
+}
+
+export type MediaItemEvent = {
+  id: string
+  userId: string
+  mediaItemId: string
+  mediaTitleSnapshot: string
+  mediaTypeSnapshot: MediaType
+  review: string | null
+  statusFrom: MediaStatus | null
+  statusTo: MediaStatus | null
+  occurredAt: string
+  createdAt: string
+}
+
 export type MockDb = {
   itemsById: Record<ItemId, Item>
   itemReviewsByItemId: Record<ItemId, ItemReview>

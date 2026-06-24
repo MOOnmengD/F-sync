@@ -3,7 +3,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { supabase } from '../supabaseClient'
 import { useUi } from '../store/ui'
-import type { MediaStatus, MediaType, QuickMode } from '../types/domain'
+import type { ActiveMediaItem, MediaStatus, MediaType, QuickMode } from '../types/domain'
 import { IconButton } from '../shared/ui/IconButton'
 import { useSettingsStore } from '../store/settings'
 import { PillButton } from '../shared/ui/PillButton'
@@ -68,6 +68,9 @@ export default function Home() {
   const [repurchaseIndex, setRepurchaseIndex] = useState(0)
   const [lastFinanceTx, setLastFinanceTx] = useState<LastFinanceTx | null>(null)
   const [reviewTargetId, setReviewTargetId] = useState<string | null>(null)
+  const [activeMediaItems, setActiveMediaItems] = useState<ActiveMediaItem[]>([])
+  const [activeMediaLoading, setActiveMediaLoading] = useState(false)
+  const [selectedMediaItemId, setSelectedMediaItemId] = useState<string | null>(null)
 
   const [refreshKey, setRefreshKey] = useState(0)
   const [userId, setUserId] = useState<string | null>(null)
@@ -123,15 +126,6 @@ export default function Home() {
   const removeOutbox = (id: string) => {
     const prev = loadOutbox()
     saveOutbox(prev.filter((e) => e?.id !== id))
-  }
-
-  const getCurrentUserId = async () => {
-    if (userId) return userId
-    if (!supabase) return null
-    const { data } = await supabase.auth.getUser()
-    const nextUserId = data.user?.id ?? null
-    if (nextUserId) setUserId(nextUserId)
-    return nextUserId
   }
 
   const readJsonResponse = async (response: Response, fallbackMessage: string) => {
@@ -213,6 +207,48 @@ export default function Home() {
       title: string | null
       review: string | null
     }
+  }
+
+  const fetchActiveMediaItems = async () => {
+    const client = supabase
+    if (!client || !userId) return
+
+    setActiveMediaLoading(true)
+    const { data, error } = await client
+      .from('media_items')
+      .select('id, title, media_type, status, updated_at')
+      .eq('user_id', userId)
+      .eq('status', 'consuming')
+      .order('updated_at', { ascending: false })
+
+    setActiveMediaLoading(false)
+
+    if (error) {
+      setToast('正在看的书影加载失败')
+      return
+    }
+
+    const next = (data ?? []).flatMap((row: any): ActiveMediaItem[] => {
+      if (
+        typeof row?.id !== 'string' ||
+        typeof row?.title !== 'string' ||
+        (row?.media_type !== 'book' && row?.media_type !== 'movie') ||
+        row?.status !== 'consuming' ||
+        typeof row?.updated_at !== 'string'
+      ) {
+        return []
+      }
+
+      return [{
+        id: row.id,
+        title: row.title,
+        mediaType: row.media_type,
+        status: 'consuming',
+        updatedAt: row.updated_at,
+      }]
+    })
+
+    setActiveMediaItems(next)
   }
 
   const fetchLastFinanceTx = async () => {
@@ -369,6 +405,47 @@ export default function Home() {
     }
   }, [])
 
+  useEffect(() => {
+    if (mode !== 'media' || !userId) return
+    void fetchActiveMediaItems()
+  }, [mode, userId])
+
+  useEffect(() => {
+    const client = supabase
+    if (!client || !userId) return
+
+    const channel = client
+      .channel(`home-active-media-${userId}`)
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'media_items',
+          filter: `user_id=eq.${userId}`,
+        },
+        () => {
+          void fetchActiveMediaItems()
+        },
+      )
+      .subscribe()
+
+    return () => {
+      void client.removeChannel(channel)
+    }
+  }, [userId])
+
+  useEffect(() => {
+    if (mode !== 'media' || !userId) return
+
+    const handleFocus = () => {
+      void fetchActiveMediaItems()
+    }
+
+    window.addEventListener('focus', handleFocus)
+    return () => window.removeEventListener('focus', handleFocus)
+  }, [mode, userId])
+
   const composerBorder = useMemo(() => ({ borderColor: accentHex[meta.accent] }), [meta.accent])
   const sendStyle = useMemo(
     () => ({ backgroundColor: accentHex[meta.accent], borderColor: accentHex[meta.accent] }),
@@ -424,6 +501,19 @@ export default function Home() {
     if (metaReview.trim()) return null
     return lastFinanceTx
   }, [lastFinanceTx, mode])
+
+  const selectedMediaItem = useMemo(
+    () => activeMediaItems.find((item) => item.id === selectedMediaItemId) ?? null,
+    [activeMediaItems, selectedMediaItemId],
+  )
+
+  useEffect(() => {
+    if (!selectedMediaItemId) return
+    if (selectedMediaItem) return
+    setSelectedMediaItemId(null)
+    setMediaType(null)
+    setMediaStatus(null)
+  }, [selectedMediaItem, selectedMediaItemId, setMediaStatus, setMediaType])
 
   useEffect(() => {
     if (!reviewTargetId) return
@@ -657,39 +747,43 @@ export default function Home() {
 
     setSending(true)
     try {
-      const parsed = await parseMediaByAi(raw)
-      const title = parsed.title?.trim() || null
-      if (!title) {
-        setToast('AI 未解析出标题')
-        return
-      }
-      const review = parsed.review?.trim() || null
+      const target = selectedMediaItem
+      let title: string
+      let review: string | null
+      let finalType: MediaType
+      let finalStatus: MediaStatus
 
-      const finalType: MediaType = mediaType ?? 'book'
-      const finalStatus: MediaStatus = mediaStatus ?? 'want_to_consume'
-      const currentUserId = await getCurrentUserId()
-      if (!currentUserId) {
-        setToast('登录状态失效，请重新登录')
-        return
+      if (target) {
+        title = target.title
+        review = raw
+        finalType = target.mediaType
+        finalStatus = mediaStatus ?? target.status
+      } else {
+        const parsed = await parseMediaByAi(raw)
+        title = parsed.title?.trim() || ''
+        if (!title) throw new Error('AI 未解析出标题')
+        review = parsed.review?.trim() || null
+        finalType = mediaType ?? 'book'
+        finalStatus = mediaStatus ?? 'want_to_consume'
       }
 
-      const { error } = await supabase.from('media_items').insert({
-        user_id: currentUserId,
-        title,
-        media_type: finalType,
-        status: finalStatus,
-        review,
+      const { error } = await supabase.rpc('save_media_record', {
+        p_media_item_id: target?.id ?? null,
+        p_title: title,
+        p_media_type: finalType,
+        p_status: finalStatus,
+        p_review: review,
+        p_occurred_at: new Date().toISOString(),
       })
 
-      if (error) {
-        setToast(error.message || '写入失败')
-        return
-      }
+      if (error) throw error
 
       removeOutbox(outboxId)
+      setSelectedMediaItemId(null)
       setMediaType(null)
       setMediaStatus(null)
-      setToast('已记录')
+      await fetchActiveMediaItems()
+      setToast(target ? '已新增点评' : '已记录')
     } catch (e: any) {
       const msg = String(e?.message ?? e) || 'AI 解析失败'
       setToast(`${msg}（已保存在本地草稿）`)
@@ -995,6 +1089,42 @@ export default function Home() {
             )}
             {mode === 'media' && (
               <div className="mb-2 rounded-2xl bg-base-surface p-3">
+                {activeMediaItems.length > 0 && (
+                  <div className="mb-2 flex flex-wrap items-center gap-2">
+                    {activeMediaItems.map((item) => {
+                      const active = selectedMediaItemId === item.id
+                      return (
+                        <button
+                          key={item.id}
+                          type="button"
+                          onClick={() => {
+                            if (active) {
+                              setSelectedMediaItemId(null)
+                              setMediaType(null)
+                              setMediaStatus(null)
+                              return
+                            }
+                            setSelectedMediaItemId(item.id)
+                            setMediaType(item.mediaType)
+                            setMediaStatus(item.status)
+                          }}
+                          className={`inline-flex max-w-full items-center rounded-full border border-base-line px-3 py-1 text-xs active:opacity-70 ${
+                            active ? 'text-base-text' : 'bg-base-bg text-base-muted'
+                          }`}
+                          style={active ? { backgroundColor: accentHex.baby } : undefined}
+                          aria-pressed={active}
+                          title={item.title}
+                        >
+                          <span className="max-w-[260px] truncate">《{item.title}》</span>
+                        </button>
+                      )
+                    })}
+                  </div>
+                )}
+                {activeMediaLoading && activeMediaItems.length === 0 && (
+                  <div className="mb-2 text-xs text-base-muted">正在加载正在看的书影…</div>
+                )}
+
                 <div className="flex flex-wrap items-center gap-2">
                   {(['book', 'movie'] as MediaType[]).map((t) => {
                     const active = mediaType === t
@@ -1003,7 +1133,13 @@ export default function Home() {
                       <button
                         key={t}
                         type="button"
-                        onClick={() => setMediaType(active ? null : t)}
+                        onClick={() => {
+                          if (selectedMediaItemId) {
+                            setSelectedMediaItemId(null)
+                            setMediaStatus(null)
+                          }
+                          setMediaType(active ? null : t)
+                        }}
                         className={`rounded-full border border-base-line px-3 py-1 text-xs active:opacity-70 ${
                           active ? 'text-base-text' : 'bg-transparent text-base-muted'
                         }`}
@@ -1028,7 +1164,10 @@ export default function Home() {
                       <button
                         key={s}
                         type="button"
-                        onClick={() => setMediaStatus(active ? null : s)}
+                        onClick={() => {
+                          if (selectedMediaItemId && active) return
+                          setMediaStatus(active ? null : s)
+                        }}
                         className={`rounded-full border border-base-line px-3 py-1 text-xs active:opacity-70 ${
                           active ? 'text-base-text' : 'bg-transparent text-base-muted'
                         }`}
@@ -1096,6 +1235,8 @@ export default function Home() {
                   placeholder={
                     mode === 'finance' && pendingReviewTx && reviewTargetId === pendingReviewTx.id
                       ? '给上一条记账补充点评…'
+                      : mode === 'media' && selectedMediaItem
+                        ? `给《${selectedMediaItem.title}》写一条新点评…`
                       : `在「${meta.label}」里输入…`
                   }
                   className="min-h-[52px] w-full resize-none bg-transparent px-1 py-2 pr-14 text-base-text placeholder:text-base-muted focus:outline-none"

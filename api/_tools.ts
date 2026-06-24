@@ -118,7 +118,7 @@ const DOMAIN_DEFINITIONS: DomainDefinition[] = [
   {
     domain: 'media_library',
     label: '书影清单',
-    description: '书籍和影片的想看、正在看、看过状态与用户评价。',
+    description: '书籍和影片的当前想看、正在看、看过状态与最近一次用户评价。',
     table: 'media_items',
     fields: ['id', 'title', 'media_type', 'status', 'review', 'created_at', 'updated_at'],
     keywordFields: ['title', 'review', 'media_type', 'status'],
@@ -127,7 +127,32 @@ const DOMAIN_DEFINITIONS: DomainDefinition[] = [
     updatedField: 'updated_at',
     userIdField: 'user_id',
     defaultSort: 'updated_at_desc',
-    notes: ['media_type: book/movie；status: want_to_consume/consuming/consumed。'],
+    notes: ['media_type: book/movie；status: want_to_consume/consuming/consumed；review 是最近一次点评。'],
+  },
+  {
+    domain: 'media_history',
+    label: '书影历史',
+    description: '书籍和影片的多条点评及想看、正在看、看过状态变化事件。',
+    table: 'media_item_events',
+    fields: [
+      'id',
+      'media_item_id',
+      'media_title_snapshot',
+      'media_type_snapshot',
+      'review',
+      'status_from',
+      'status_to',
+      'occurred_at',
+      'created_at',
+    ],
+    keywordFields: ['media_title_snapshot', 'review', 'media_type_snapshot', 'status_from', 'status_to'],
+    filterFields: ['media_item_id', 'media_type_snapshot', 'status_from', 'status_to'],
+    dateField: 'occurred_at',
+    userIdField: 'user_id',
+    defaultSort: 'created_at_desc',
+    notes: [
+      'status_from/status_to 记录状态变化；仅有 review 时表示追加点评；occurred_at 是事件实际发生时间。',
+    ],
   },
   {
     domain: 'items',
@@ -790,7 +815,7 @@ function getRecordTimestamp(definition: DomainDefinition, record: Record<string,
 }
 
 function getRecordTitle(definition: DomainDefinition, record: Record<string, unknown>) {
-  const titleFields = ['title', 'fund_name', 'item_name', 'name', 'content']
+  const titleFields = ['title', 'media_title_snapshot', 'fund_name', 'item_name', 'name', 'content']
   for (const field of titleFields) {
     const value = record[field]
     if (typeof value === 'string' && value.trim()) {
