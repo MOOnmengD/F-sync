@@ -395,7 +395,7 @@ AI 对话上下文构建模块（详见 [05-AI系统设计](./05-AI系统设计.
 ```
 > `currentValueCents`、`currentProfitRate`、`targetAmountCents`、`stopProfitLine` 均为可选，只更新提供的字段。`stopProfitLine` 传 `null` 表示清除止盈线。
 
-**输入（type: 'batch_update' — 批量更新持仓快照/策略参数）**：
+**输入（type: 'batch_update' — 批量更新现有基金并创建截图新增基金）**：
 ```json
 {
   "type": "batch_update",
@@ -408,10 +408,23 @@ AI 对话上下文构建模块（详见 [05-AI系统设计](./05-AI系统设计.
       "targetAmountCents": 120000,
       "stopProfitLine": 0.15
     }
+  ],
+  "creates": [
+    {
+      "clientId": "ocr:temporary-id",
+      "fundName": "某某增强债券",
+      "currentValueCents": 200000,
+      "currentProfitRate": 0,
+      "targetAmountCents": 200000,
+      "stopProfitLine": null,
+      "tradingCycle": "none",
+      "strategyTag": "待配置",
+      "notes": "由截图识别新增；已合并份额：某某增强债券A、某某增强债券C"
+    }
   ]
 }
 ```
-> 每个 `updates[]` 项中除 `investmentId` 外字段均可选。前端理财页会先把持仓/收益率/建议持仓/止盈线修改保存在本地草稿，点击总「保存」按钮后一次性调用该类型同步。服务端逐只校验归属并写入 `investment_actions` 操作流水。
+> `updates`、`creates` 至少一个为非空数组。每个 `updates[]` 项中除 `investmentId` 外字段均可选；服务端逐只校验归属并写入 `investment_actions` 操作流水。`creates[]` 用于截图识别产生的本地新增草稿，服务端校验名称、数值、周期及同用户名称冲突后批量写入 `investments`，并在响应的 `createdInvestments` 中返回 `clientId` 与正式数据库记录。前端保存成功后重新读取持仓，以正式 UUID 替换临时 ID。
 
 **输入（type: 'manage' — 创建/更新/停用投资）**：
 ```json

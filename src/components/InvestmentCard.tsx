@@ -26,6 +26,8 @@ type Props = {
   }) => void
   onConfirm: (id: string, actualAmountCents: number) => Promise<void>
   onCalculateSingle: (id: string) => void
+  pendingCreate?: boolean
+  onCancelPendingCreate?: (id: string) => void
 }
 
 const cycleLabel: Record<string, string> = {
@@ -35,7 +37,7 @@ const cycleLabel: Record<string, string> = {
 }
 
 export const investmentTableGrid =
-  'grid grid-cols-[minmax(70px,1.18fr)_minmax(74px,1fr)_minmax(62px,0.82fr)_minmax(54px,0.78fr)_30px] gap-x-1'
+  'grid grid-cols-[minmax(68px,1.05fr)_minmax(76px,1fr)_minmax(62px,0.82fr)_minmax(88px,1.12fr)] gap-x-1'
 
 function fmtYuan(cents: number): string {
   return (cents / 100).toFixed(2)
@@ -55,12 +57,21 @@ function truncateName(name: string, max: number = 6): string {
   return name.slice(0, max) + '...'
 }
 
-export default function InvestmentCard({ fund, suggestion, onUpdate, onConfirm, onCalculateSingle }: Props) {
-  const [editingField, setEditingField] = useState<'c' | 'r' | 'm' | 'stop' | null>(null)
+export default function InvestmentCard({
+  fund,
+  suggestion,
+  onUpdate,
+  onConfirm,
+  onCalculateSingle,
+  pendingCreate = false,
+  onCancelPendingCreate,
+}: Props) {
+  const [editingField, setEditingField] = useState<'c' | 'r' | 'm' | 'stop' | 'action' | null>(null)
   const [cDraft, setCDraft] = useState('')
   const [rDraft, setRDraft] = useState('')
   const [mDraft, setMDraft] = useState('')
   const [stopDraft, setStopDraft] = useState('')
+  const [actionDraft, setActionDraft] = useState('')
   const [acting, setActing] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const editRef = useRef<HTMLDivElement | null>(null)
@@ -71,6 +82,9 @@ export default function InvestmentCard({ fund, suggestion, onUpdate, onConfirm, 
   useEffect(() => {
     setStopDraft(fund.stop_profit_line != null ? (fund.stop_profit_line * 100).toFixed(0) : '')
   }, [fund.stop_profit_line])
+  useEffect(() => {
+    setActionDraft(suggestion && suggestion.type !== 'hold' ? fmtYuan(suggestion.amountCents) : '')
+  }, [suggestion])
 
   const cancelEditing = () => {
     setEditingField(null)
@@ -79,6 +93,7 @@ export default function InvestmentCard({ fund, suggestion, onUpdate, onConfirm, 
     setRDraft(fmtPct(fund.current_profit_rate))
     setMDraft(fmtYuan(fund.target_amount_cents))
     setStopDraft(fund.stop_profit_line != null ? (fund.stop_profit_line * 100).toFixed(0) : '')
+    setActionDraft(suggestion && suggestion.type !== 'hold' ? fmtYuan(suggestion.amountCents) : '')
   }
 
   useEffect(() => {
@@ -93,10 +108,47 @@ export default function InvestmentCard({ fund, suggestion, onUpdate, onConfirm, 
 
     document.addEventListener('pointerdown', handlePointerDown, true)
     return () => document.removeEventListener('pointerdown', handlePointerDown, true)
-  }, [editingField, fund.current_profit_rate, fund.current_value_cents, fund.stop_profit_line, fund.target_amount_cents])
+  }, [editingField, fund.current_profit_rate, fund.current_value_cents, fund.stop_profit_line, fund.target_amount_cents, suggestion])
+
+  const handleConfirmAmount = async (amountCents: number): Promise<boolean> => {
+    if (!Number.isFinite(amountCents) || amountCents <= 0) {
+      setError('请输入有效金额')
+      return false
+    }
+
+    setActing(true)
+    setError(null)
+    try {
+      await onConfirm(fund.id, amountCents)
+      return true
+    } catch {
+      setError('确认失败')
+      return false
+    } finally {
+      setActing(false)
+    }
+  }
 
   const handleSave = () => {
     setError(null)
+
+    if (editingField === 'action') {
+      if (!suggestion || suggestion.type === 'hold') {
+        cancelEditing()
+        return
+      }
+
+      const value = parseFloat(actionDraft)
+      if (isNaN(value) || value <= 0) {
+        setError('请输入有效金额')
+        return
+      }
+
+      void handleConfirmAmount(Math.round(value * 100)).then((confirmed) => {
+        if (confirmed) setEditingField(null)
+      })
+      return
+    }
 
     const params: { c?: number; r?: number; m?: number; stopProfit?: number | null } = {}
 
@@ -130,54 +182,16 @@ export default function InvestmentCard({ fund, suggestion, onUpdate, onConfirm, 
     setEditingField(null)
   }
 
-  const handleConfirmAmount = async (amountCents: number) => {
-    if (!Number.isFinite(amountCents) || amountCents <= 0) {
-      setError('请输入有效金额')
-      return
-    }
-
-    setActing(true)
-    setError(null)
-    try {
-      await onConfirm(fund.id, amountCents)
-    } catch {
-      setError('确认失败')
-    } finally {
-      setActing(false)
-    }
-  }
-
-  const confirmSuggested = () => {
-    if (!suggestion || suggestion.type === 'hold') return
-    void handleConfirmAmount(suggestion.amountCents)
-  }
-
-  const confirmCustomAmount = () => {
-    if (!suggestion || suggestion.type === 'hold') return
-    const value = window.prompt('请输入实际调仓金额（元）', fmtYuan(suggestion.amountCents))
-    if (value === null) return
-
-    const amount = parseFloat(value)
-    if (isNaN(amount) || amount <= 0) {
-      setError('请输入有效金额')
-      return
-    }
-    void handleConfirmAmount(Math.round(amount * 100))
-  }
-
   const renderEditActions = () => (
-    <span className="inline-flex items-center">
-      <button
-        type="button"
-        onClick={handleSave}
-        disabled={acting}
-        title="保存"
-        aria-label="保存"
-        className="grid size-7 shrink-0 place-items-center rounded-full border border-base-line bg-base-bg text-base-text active:opacity-70 disabled:opacity-40"
-      >
-        <Check size={14} />
-      </button>
-    </span>
+    <button
+      type="button"
+      onClick={handleSave}
+      disabled={acting}
+      className="flex h-7 w-full items-center justify-center gap-1 rounded-lg border border-base-line bg-base-bg text-[10px] text-base-text active:opacity-70 disabled:opacity-40"
+    >
+      <Check size={13} />
+      确定
+    </button>
   )
 
   const displayName = truncateName(fund.fund_name)
@@ -190,6 +204,21 @@ export default function InvestmentCard({ fund, suggestion, onUpdate, onConfirm, 
   const subInfo = subInfoParts.join(' · ')
 
   const renderSuggestion = () => {
+    if (pendingCreate) {
+      return (
+        <div className="text-right">
+          <div className="text-[11px] font-medium leading-5 text-[#D97757]">待保存</div>
+          <button
+            type="button"
+            onClick={() => onCancelPendingCreate?.(fund.id)}
+            className="truncate text-[10px] leading-4 text-base-muted active:opacity-70"
+          >
+            取消新增
+          </button>
+        </div>
+      )
+    }
+
     if (!suggestion) {
       return (
         <div className="text-right text-[11px] leading-5 text-base-muted">
@@ -209,30 +238,41 @@ export default function InvestmentCard({ fund, suggestion, onUpdate, onConfirm, 
 
     const tone = suggestion.type === 'buy' ? 'text-[#2F9E7E]' : 'text-[#D97757]'
 
+    if (editingField === 'action') {
+      return (
+        <div ref={editRef} className="min-w-0 space-y-1">
+          <input
+            value={actionDraft}
+            onChange={(e) => setActionDraft(e.target.value)}
+            onKeyDown={(e) => { if (e.key === 'Enter') handleSave(); if (e.key === 'Escape') cancelEditing() }}
+            className="w-full rounded-lg border border-base-line bg-base-bg px-1 py-0.5 text-right text-[11px] tabular-nums text-base-text focus:outline-none"
+            inputMode="decimal"
+            aria-label="实际调仓金额（元）"
+            autoFocus
+          />
+          {renderEditActions()}
+          <div className={`mt-0.5 text-right text-[9px] leading-3 ${tone}`}>实际金额（元）</div>
+        </div>
+      )
+    }
+
     return (
-      <div className="text-right" title={suggestion.reason}>
-        <div className={`truncate text-[12px] font-semibold leading-5 ${tone}`}>
+      <button
+        type="button"
+        onClick={() => {
+          setActionDraft(fmtYuan(suggestion.amountCents))
+          setEditingField('action')
+          setError(null)
+        }}
+        disabled={acting}
+        className="block w-full text-right active:opacity-70 disabled:opacity-40"
+        title={`${suggestion.reason}；点击确认或修改实际金额`}
+      >
+        <div className={`whitespace-nowrap text-[12px] font-semibold leading-5 tabular-nums ${tone}`}>
           {suggestion.type === 'buy' ? '补' : '卖'} ¥{fmtYuanCompact(suggestion.amountCents)}
         </div>
-        <div className="mt-0.5 flex justify-end gap-1 text-[10px] leading-4">
-          <button
-            type="button"
-            onClick={confirmSuggested}
-            disabled={acting}
-            className="text-base-text active:opacity-70 disabled:opacity-40"
-          >
-            确认
-          </button>
-          <button
-            type="button"
-            onClick={confirmCustomAmount}
-            disabled={acting}
-            className="text-base-muted active:opacity-70 disabled:opacity-40"
-          >
-            改额
-          </button>
-        </div>
-      </div>
+        <div className="text-[10px] leading-4 text-base-muted">点击编辑</div>
+      </button>
     )
   }
 
@@ -246,12 +286,12 @@ export default function InvestmentCard({ fund, suggestion, onUpdate, onConfirm, 
 
         <div className="min-w-0 text-right">
           {editingField === 'c' ? (
-            <div ref={editRef} className="flex items-center justify-end gap-0.5">
+            <div ref={editRef} className="w-full space-y-1">
               <input
                 value={cDraft}
                 onChange={(e) => setCDraft(e.target.value)}
                 onKeyDown={(e) => { if (e.key === 'Enter') handleSave(); if (e.key === 'Escape') cancelEditing() }}
-                className="w-[46px] rounded-lg border border-base-line bg-base-bg px-1 py-0.5 text-right text-[12px] text-base-text focus:outline-none"
+                className="w-full rounded-lg border border-base-line bg-base-bg px-1 py-0.5 text-right text-[12px] tabular-nums text-base-text focus:outline-none"
                 inputMode="decimal"
                 autoFocus
               />
@@ -271,12 +311,12 @@ export default function InvestmentCard({ fund, suggestion, onUpdate, onConfirm, 
 
         <div className="min-w-0 text-right">
           {editingField === 'r' ? (
-            <div ref={editRef} className="flex items-center justify-end gap-0.5">
+            <div ref={editRef} className="w-full space-y-1">
               <input
                 value={rDraft}
                 onChange={(e) => setRDraft(e.target.value)}
                 onKeyDown={(e) => { if (e.key === 'Enter') handleSave(); if (e.key === 'Escape') cancelEditing() }}
-                className="w-[34px] rounded-lg border border-base-line bg-base-bg px-1 py-0.5 text-right text-[12px] text-base-text focus:outline-none"
+                className="w-full rounded-lg border border-base-line bg-base-bg px-1 py-0.5 text-right text-[11px] tabular-nums text-base-text focus:outline-none"
                 inputMode="decimal"
                 autoFocus
               />
@@ -301,30 +341,19 @@ export default function InvestmentCard({ fund, suggestion, onUpdate, onConfirm, 
         <div className="min-w-0">
           {renderSuggestion()}
         </div>
-
-        <div className="text-right">
-          <button
-            type="button"
-            onClick={() => onCalculateSingle(fund.id)}
-            disabled={acting}
-            className="h-8 w-[30px] rounded-lg border border-base-line bg-base-bg text-[10px] text-base-muted active:opacity-70 disabled:opacity-40"
-          >
-            计算
-          </button>
-        </div>
       </div>
 
-      <div className={`${investmentTableGrid} mt-0.5 items-start`}>
+      <div className={`${investmentTableGrid} mt-1 items-center`}>
         <div />
 
         <div className="min-w-0 text-right">
           {editingField === 'm' ? (
-            <div ref={editRef} className="flex items-center justify-end gap-0.5">
+            <div ref={editRef} className="w-full space-y-1">
               <input
                 value={mDraft}
                 onChange={(e) => setMDraft(e.target.value)}
                 onKeyDown={(e) => { if (e.key === 'Enter') handleSave(); if (e.key === 'Escape') cancelEditing() }}
-                className="w-[46px] rounded-lg border border-base-line bg-base-bg px-1 py-0.5 text-right text-[10px] text-base-text focus:outline-none"
+                className="w-full rounded-lg border border-base-line bg-base-bg px-1 py-0.5 text-right text-[10px] tabular-nums text-base-text focus:outline-none"
                 inputMode="decimal"
                 autoFocus
               />
@@ -344,12 +373,12 @@ export default function InvestmentCard({ fund, suggestion, onUpdate, onConfirm, 
 
         <div className="min-w-0 text-right">
           {editingField === 'stop' ? (
-            <div ref={editRef} className="flex items-center justify-end gap-0.5">
+            <div ref={editRef} className="w-full space-y-1">
               <input
                 value={stopDraft}
                 onChange={(e) => setStopDraft(e.target.value)}
                 onKeyDown={(e) => { if (e.key === 'Enter') handleSave(); if (e.key === 'Escape') cancelEditing() }}
-                className="w-[32px] rounded-lg border border-base-line bg-base-bg px-1 py-0.5 text-right text-[10px] text-base-text focus:outline-none"
+                className="w-full rounded-lg border border-base-line bg-base-bg px-1 py-0.5 text-right text-[10px] tabular-nums text-base-text focus:outline-none"
                 inputMode="decimal"
                 placeholder="15"
                 autoFocus
@@ -368,8 +397,17 @@ export default function InvestmentCard({ fund, suggestion, onUpdate, onConfirm, 
           )}
         </div>
 
-        <div />
-        <div />
+        <div className="min-w-0">
+          <button
+            type="button"
+            onClick={() => onCalculateSingle(fund.id)}
+            disabled={acting || pendingCreate}
+            className="h-7 w-full rounded-lg border border-base-line bg-base-bg text-[10px] text-base-muted active:opacity-70 disabled:opacity-40"
+            aria-label={`计算${fund.fund_name}的调仓建议`}
+          >
+            单独计算
+          </button>
+        </div>
       </div>
 
       {error && (

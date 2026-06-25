@@ -185,13 +185,15 @@ async function handleUpdateCr(body: any, res: any) {
 }
 
 async function handleBatchUpdate(body: any, res: any) {
-  const { userId, updates } = body
+  const { userId } = body
+  const updates = Array.isArray(body?.updates) ? body.updates : []
+  const creates = Array.isArray(body?.creates) ? body.creates : []
 
   if (!userId) {
     return res.status(400).json({ error: 'Missing userId' })
   }
-  if (!Array.isArray(updates) || updates.length === 0) {
-    return res.status(400).json({ error: 'Missing updates' })
+  if (updates.length === 0 && creates.length === 0) {
+    return res.status(400).json({ error: 'Missing updates or creates' })
   }
 
   const investmentIds = Array.from(new Set(
@@ -200,21 +202,119 @@ async function handleBatchUpdate(body: any, res: any) {
       .filter((id: any) => typeof id === 'string' && id.length > 0),
   ))
 
-  if (investmentIds.length !== updates.length) {
+  if (updates.length > 0 && investmentIds.length !== updates.length) {
     return res.status(400).json({ error: 'Invalid investmentId in updates' })
   }
 
   const supabase = getSupabase()
+  const normalizeNameKey = (name: string) => name
+    .trim()
+    .replace(/\s+/g, '')
+    .replace(/[()（）]/g, '')
+    .replace(/\.{2,}|…|⋯/g, '')
+    .replace(/[，,。]/g, '')
+    .toLocaleLowerCase()
 
-  const { data: investments, error: invErr } = await supabase
-    .from('investments')
-    .select('id, current_value_cents, current_profit_rate, target_amount_cents, stop_profit_line')
-    .eq('user_id', userId)
-    .in('id', investmentIds)
+  const preparedCreates: Array<{
+    clientId: string
+    nameKey: string
+    insert: Record<string, any>
+  }> = []
+  const createNameKeys = new Set<string>()
+  const createClientIds = new Set<string>()
 
-  if (invErr) return res.status(500).json({ error: invErr.message })
-  if (!investments || investments.length !== investmentIds.length) {
-    return res.status(404).json({ error: 'One or more investments not found' })
+  for (const item of creates) {
+    const {
+      clientId,
+      fundCode,
+      fundName,
+      currentValueCents,
+      currentProfitRate,
+      targetAmountCents,
+      stopProfitLine,
+      tradingCycle,
+      strategyTag,
+      notes,
+    } = item || {}
+
+    if (typeof clientId !== 'string' || !clientId || createClientIds.has(clientId)) {
+      return res.status(400).json({ error: 'Invalid clientId in creates' })
+    }
+    createClientIds.add(clientId)
+    if (typeof fundName !== 'string' || !fundName.trim()) {
+      return res.status(400).json({ error: 'Invalid fundName in creates' })
+    }
+    if (typeof currentValueCents !== 'number' || !Number.isFinite(currentValueCents) || currentValueCents < 0) {
+      return res.status(400).json({ error: `Invalid currentValueCents for ${fundName}` })
+    }
+    if (typeof currentProfitRate !== 'number' || !Number.isFinite(currentProfitRate)) {
+      return res.status(400).json({ error: `Invalid currentProfitRate for ${fundName}` })
+    }
+    if (typeof targetAmountCents !== 'number' || !Number.isFinite(targetAmountCents) || targetAmountCents < 0) {
+      return res.status(400).json({ error: `Invalid targetAmountCents for ${fundName}` })
+    }
+    if (stopProfitLine !== null && stopProfitLine !== undefined && (
+      typeof stopProfitLine !== 'number' || !Number.isFinite(stopProfitLine)
+    )) {
+      return res.status(400).json({ error: `Invalid stopProfitLine for ${fundName}` })
+    }
+    if (!['weekly', 'monthly', 'none'].includes(tradingCycle)) {
+      return res.status(400).json({ error: `Invalid tradingCycle for ${fundName}` })
+    }
+
+    const nameKey = normalizeNameKey(fundName)
+    if (!nameKey || createNameKeys.has(nameKey)) {
+      return res.status(409).json({ error: `待新增基金名称重复：${fundName.trim()}` })
+    }
+    createNameKeys.add(nameKey)
+    preparedCreates.push({
+      clientId,
+      nameKey,
+      insert: {
+        user_id: userId,
+        fund_code: typeof fundCode === 'string' && fundCode.trim() ? fundCode.trim() : null,
+        fund_name: fundName.trim(),
+        current_value_cents: Math.round(currentValueCents),
+        current_profit_rate: currentProfitRate,
+        target_amount_cents: Math.round(targetAmountCents),
+        stop_profit_line: stopProfitLine ?? null,
+        trading_cycle: tradingCycle,
+        strategy_tag: typeof strategyTag === 'string' && strategyTag.trim() ? strategyTag.trim() : null,
+        notes: typeof notes === 'string' && notes.trim() ? notes.trim() : null,
+      },
+    })
+  }
+
+  if (preparedCreates.length > 0) {
+    const { data: existingNames, error: existingErr } = await supabase
+      .from('investments')
+      .select('fund_name')
+      .eq('user_id', userId)
+
+    if (existingErr) return res.status(500).json({ error: existingErr.message })
+
+    const existingNameKeys = new Set(
+      (existingNames || []).map((item: any) => normalizeNameKey(String(item.fund_name || ''))),
+    )
+    const duplicate = preparedCreates.find((item) => existingNameKeys.has(item.nameKey))
+    if (duplicate) {
+      return res.status(409).json({ error: `该基金名称已存在：${duplicate.insert.fund_name}` })
+    }
+  }
+
+  let investments: any[] = []
+  if (investmentIds.length > 0) {
+    const { data, error: invErr } = await supabase
+      .from('investments')
+      .select('id, current_value_cents, current_profit_rate, target_amount_cents, stop_profit_line')
+      .eq('user_id', userId)
+      .in('id', investmentIds)
+
+    if (invErr) return res.status(500).json({ error: invErr.message })
+    investments = data || []
+    if (investments.length !== investmentIds.length) {
+      return res.status(404).json({ error: 'One or more investments not found' })
+    }
   }
 
   const investmentMap = new Map(investments.map((item: any) => [item.id, item]))
@@ -316,7 +416,28 @@ async function handleBatchUpdate(body: any, res: any) {
     }
   }
 
-  return res.status(200).json({ success: true, updatedCount })
+  let createdInvestments: Array<{ clientId: string; investment: any }> = []
+  if (preparedCreates.length > 0) {
+    const { data: created, error: createErr } = await supabase
+      .from('investments')
+      .insert(preparedCreates.map((item) => item.insert))
+      .select('*')
+
+    if (createErr) {
+      if (createErr.message?.includes('duplicate') || createErr.code === '23505') {
+        return res.status(409).json({ error: '一个或多个待新增基金名称已存在' })
+      }
+      return res.status(500).json({ error: createErr.message })
+    }
+
+    const inputByNameKey = new Map(preparedCreates.map((item) => [item.nameKey, item]))
+    createdInvestments = (created || []).map((investment: any) => ({
+      clientId: inputByNameKey.get(normalizeNameKey(investment.fund_name))?.clientId || '',
+      investment,
+    }))
+  }
+
+  return res.status(200).json({ success: true, updatedCount, createdInvestments })
 }
 
 async function handleManage(body: any, res: any) {

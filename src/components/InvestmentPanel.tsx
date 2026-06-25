@@ -28,14 +28,51 @@ type InvestmentUpdateParams = {
 type FormulaDraft = Record<keyof InvestmentFormulaConfig, string>
 
 const formulaStorageKey = 'fsync.investment.formula.v1'
+const temporaryInvestmentIdPrefix = 'ocr:'
 
-type OcrResult = {
+type RawOcrResult = {
   fund_name: string
   holding_cents: number | null
   profit_rate: number | null
-  matchedId?: string
   sourceIndex: number
   sourceName: string
+}
+
+type OcrResult = RawOcrResult & {
+  resultId: string
+  matchedIds: string[]
+  matchedId?: string
+  mergedFundNames: string[]
+  shareClasses: string[]
+  isShareClassMerged: boolean
+  createSelected: boolean
+  draftFundName: string
+  holdingDraft: string
+  profitDraft: string
+}
+
+type PendingInvestmentCreate = {
+  tempId: string
+  fundName: string
+  currentValueCents: number
+  currentProfitRate: number
+  targetAmountCents: number
+  stopProfitLine: number | null
+  tradingCycle: 'none'
+  strategyTag: '待配置'
+  notes: string
+}
+
+type FundNameParts = {
+  normalizedName: string
+  familyName: string
+  shareClass: 'A' | 'C' | 'E' | null
+}
+
+type MergedOcrResult = RawOcrResult & {
+  mergedFundNames: string[]
+  shareClasses: string[]
+  isShareClassMerged: boolean
 }
 
 function applyInvestmentUpdate(fund: InvestmentData, params: InvestmentUpdateParams): InvestmentData {
@@ -78,6 +115,7 @@ function buildPendingUpdate(current: InvestmentData, saved: InvestmentData | und
 function normalizeFundNameForMatch(name: string): string {
   return name
     .replace(/\s+/g, '')
+    .replace(/[()（）]/g, '')
     .replace(/\.{2,}|…|⋯/g, '')
     .replace(/[，,。]/g, '')
 }
@@ -93,17 +131,30 @@ function isFundNameMatch(ocrName: string, dbName: string): boolean {
   )
 }
 
-function getOcrMergeKey(result: OcrResult): string {
-  if (result.matchedId) return `id:${result.matchedId}`
-  const normalizedName = normalizeFundNameForMatch(result.fund_name)
-  return normalizedName ? `name:${normalizedName}` : `raw:${result.sourceIndex}:${result.fund_name}`
+function splitFundShareClass(name: string): FundNameParts {
+  const normalizedName = normalizeFundNameForMatch(name)
+  const match = normalizedName.match(/^(.*?)([ACE])(?:类|份额)?$/i)
+  if (!match || match[1].length < 4) {
+    return { normalizedName, familyName: normalizedName, shareClass: null }
+  }
+
+  return {
+    normalizedName,
+    familyName: match[1],
+    shareClass: match[2].toUpperCase() as 'A' | 'C' | 'E',
+  }
 }
 
-function mergeOcrResults(results: OcrResult[]): OcrResult[] {
-  const merged = new Map<string, OcrResult>()
+function stripShareClassForDisplay(name: string): string {
+  return name.replace(/\s*[ACE]\s*(?:类|份额)?\s*$/i, '').trim()
+}
+
+function mergeExactOcrResults(results: RawOcrResult[]): RawOcrResult[] {
+  const merged = new Map<string, RawOcrResult>()
 
   for (const result of results) {
-    const key = getOcrMergeKey(result)
+    const normalizedName = normalizeFundNameForMatch(result.fund_name)
+    const key = normalizedName ? `name:${normalizedName}` : `raw:${result.sourceIndex}:${result.fund_name}`
     const existing = merged.get(key)
     if (!existing) {
       merged.set(key, result)
@@ -115,13 +166,139 @@ function mergeOcrResults(results: OcrResult[]): OcrResult[] {
       fund_name: result.fund_name.length > existing.fund_name.length ? result.fund_name : existing.fund_name,
       holding_cents: result.holding_cents ?? existing.holding_cents,
       profit_rate: result.profit_rate ?? existing.profit_rate,
-      matchedId: existing.matchedId ?? result.matchedId,
-      sourceIndex: existing.sourceIndex,
-      sourceName: existing.sourceName,
+      sourceIndex: result.sourceIndex,
+      sourceName: result.sourceName,
     })
   }
 
   return Array.from(merged.values())
+}
+
+function mergeShareClassProfitRate(results: RawOcrResult[]): number | null {
+  const withProfit = results.filter((result) =>
+    result.holding_cents !== null &&
+    result.holding_cents > 0 &&
+    result.profit_rate !== null &&
+    Number.isFinite(result.profit_rate) &&
+    result.profit_rate > -1,
+  )
+
+  if (withProfit.length === 1) return withProfit[0].profit_rate
+
+  const withHolding = results.filter((result) => result.holding_cents !== null && result.holding_cents > 0)
+  if (withHolding.length === 0 || withProfit.length !== withHolding.length) return null
+
+  const totalHolding = withProfit.reduce((sum, result) => sum + (result.holding_cents || 0), 0)
+  const totalCost = withProfit.reduce((sum, result) => {
+    return sum + (result.holding_cents || 0) / (1 + (result.profit_rate || 0))
+  }, 0)
+
+  if (!Number.isFinite(totalCost) || totalCost <= 0) return null
+  return totalHolding / totalCost - 1
+}
+
+function mergeShareClassResults(results: RawOcrResult[]): MergedOcrResult[] {
+  const groups = new Map<string, RawOcrResult[]>()
+  const passthrough: RawOcrResult[] = []
+
+  for (const result of results) {
+    const parts = splitFundShareClass(result.fund_name)
+    if (!parts.shareClass) {
+      passthrough.push(result)
+      continue
+    }
+    const group = groups.get(parts.familyName) || []
+    group.push(result)
+    groups.set(parts.familyName, group)
+  }
+
+  const merged: MergedOcrResult[] = passthrough.map((result) => ({
+    ...result,
+    mergedFundNames: [result.fund_name],
+    shareClasses: [],
+    isShareClassMerged: false,
+  }))
+
+  for (const group of groups.values()) {
+    const classes = Array.from(new Set(
+      group
+        .map((result) => splitFundShareClass(result.fund_name).shareClass)
+        .filter((shareClass): shareClass is 'A' | 'C' | 'E' => shareClass !== null),
+    )).sort()
+
+    if (classes.length < 2) {
+      merged.push(...group.map((result) => ({
+        ...result,
+        mergedFundNames: [result.fund_name],
+        shareClasses: classes,
+        isShareClassMerged: false,
+      })))
+      continue
+    }
+
+    const displayFamilyName = group
+      .map((result) => stripShareClassForDisplay(result.fund_name))
+      .sort((a, b) => b.length - a.length)[0]
+    const holdingValues = group
+      .map((result) => result.holding_cents)
+      .filter((value): value is number => value !== null)
+
+    merged.push({
+      fund_name: displayFamilyName,
+      holding_cents: holdingValues.length > 0
+        ? holdingValues.reduce((sum, value) => sum + value, 0)
+        : null,
+      profit_rate: mergeShareClassProfitRate(group),
+      sourceIndex: group[0].sourceIndex,
+      sourceName: group.map((result) => result.sourceName).join('、'),
+      mergedFundNames: group.map((result) => result.fund_name),
+      shareClasses: classes,
+      isShareClassMerged: true,
+    })
+  }
+
+  return merged
+}
+
+function getMatchingFundIds(names: string[], funds: InvestmentData[]): string[] {
+  return Array.from(new Set(
+    names.flatMap((name) =>
+      funds
+        .filter((fund) => isFundNameMatch(name, fund.fund_name))
+        .map((fund) => fund.id),
+    ),
+  ))
+}
+
+function prepareOcrResults(results: RawOcrResult[], funds: InvestmentData[]): OcrResult[] {
+  const exactMerged = mergeExactOcrResults(results)
+  const shareMerged = mergeShareClassResults(exactMerged)
+
+  return shareMerged.map((result, index) => {
+    const matchedIds = getMatchingFundIds(result.mergedFundNames, funds)
+    const matchedId = matchedIds.length === 1 ? matchedIds[0] : undefined
+    return {
+      ...result,
+      resultId: `${result.sourceIndex}:${index}:${normalizeFundNameForMatch(result.fund_name)}`,
+      matchedIds,
+      matchedId,
+      createSelected: matchedIds.length === 0,
+      draftFundName: result.fund_name,
+      holdingDraft: result.holding_cents !== null ? (result.holding_cents / 100).toFixed(2) : '',
+      profitDraft: result.profit_rate !== null ? (result.profit_rate * 100).toFixed(2) : '',
+    }
+  })
+}
+
+function isTemporaryInvestmentId(id: string): boolean {
+  return id.startsWith(temporaryInvestmentIdPrefix)
+}
+
+function createTemporaryInvestmentId(): string {
+  const suffix = typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+    ? crypto.randomUUID()
+    : `${Date.now()}-${Math.random().toString(36).slice(2)}`
+  return `${temporaryInvestmentIdPrefix}${suffix}`
 }
 
 function loadFormulaConfig(): InvestmentFormulaConfig {
@@ -146,9 +323,6 @@ function configToDraft(config: InvestmentFormulaConfig): FormulaDraft {
     strongStopMultiplier: config.strongStopMultiplier.toString(),
     strongStopBonusCents: (config.strongStopBonusCents / 100).toString(),
     strongStopMaxCurrentRatio: (config.strongStopMaxCurrentRatio * 100).toString(),
-    rebalanceOverTargetRatio: (config.rebalanceOverTargetRatio * 100).toString(),
-    rebalanceBelowTargetRatio: (config.rebalanceBelowTargetRatio * 100).toString(),
-    rebalanceBuyToTargetRatio: (config.rebalanceBuyToTargetRatio * 100).toString(),
   }
 }
 
@@ -166,9 +340,6 @@ function draftToConfig(draft: FormulaDraft): InvestmentFormulaConfig | null {
   const strongStopMultiplier = parse('strongStopMultiplier')
   const strongStopBonusCents = parse('strongStopBonusCents')
   const strongStopMaxCurrentRatio = parse('strongStopMaxCurrentRatio')
-  const rebalanceOverTargetRatio = parse('rebalanceOverTargetRatio')
-  const rebalanceBelowTargetRatio = parse('rebalanceBelowTargetRatio')
-  const rebalanceBuyToTargetRatio = parse('rebalanceBuyToTargetRatio')
 
   if (
     buyBelowTargetRatio == null ||
@@ -178,10 +349,7 @@ function draftToConfig(draft: FormulaDraft): InvestmentFormulaConfig | null {
     stopSellExcessRatio == null ||
     strongStopMultiplier == null ||
     strongStopBonusCents == null ||
-    strongStopMaxCurrentRatio == null ||
-    rebalanceOverTargetRatio == null ||
-    rebalanceBelowTargetRatio == null ||
-    rebalanceBuyToTargetRatio == null
+    strongStopMaxCurrentRatio == null
   ) {
     return null
   }
@@ -195,9 +363,6 @@ function draftToConfig(draft: FormulaDraft): InvestmentFormulaConfig | null {
     strongStopMultiplier,
     strongStopBonusCents: Math.round(strongStopBonusCents * 100),
     strongStopMaxCurrentRatio: strongStopMaxCurrentRatio / 100,
-    rebalanceOverTargetRatio: rebalanceOverTargetRatio / 100,
-    rebalanceBelowTargetRatio: rebalanceBelowTargetRatio / 100,
-    rebalanceBuyToTargetRatio: rebalanceBuyToTargetRatio / 100,
   }
 }
 
@@ -214,9 +379,6 @@ const formulaFields: Array<{
   { key: 'strongStopMultiplier', label: '强止盈倍数', suffix: '倍' },
   { key: 'strongStopBonusCents', label: '强止盈加额', suffix: '元' },
   { key: 'strongStopMaxCurrentRatio', label: '强止盈持仓上限', suffix: '%' },
-  { key: 'rebalanceOverTargetRatio', label: '超配线', suffix: '%' },
-  { key: 'rebalanceBelowTargetRatio', label: '低配线', suffix: '%' },
-  { key: 'rebalanceBuyToTargetRatio', label: '低配买到', suffix: '%' },
 ]
 
 export default function InvestmentPanel({ userId }: Props) {
@@ -231,6 +393,7 @@ export default function InvestmentPanel({ userId }: Props) {
   const [sortBy, setSortBy] = useState<string>('c-desc')
   const [sortOpen, setSortOpen] = useState(false)
   const [pendingUpdates, setPendingUpdates] = useState<Map<string, InvestmentUpdateParams>>(new Map())
+  const [pendingCreates, setPendingCreates] = useState<Map<string, PendingInvestmentCreate>>(new Map())
   const [formulaConfig, setFormulaConfig] = useState<InvestmentFormulaConfig>(() => loadFormulaConfig())
   const [formulaDraft, setFormulaDraft] = useState<FormulaDraft>(() => configToDraft(loadFormulaConfig()))
   const [formulaEditing, setFormulaEditing] = useState(false)
@@ -311,6 +474,8 @@ export default function InvestmentPanel({ userId }: Props) {
     savedFundsRef.current = new Map(list.map((fund) => [fund.id, fund]))
     setFunds(list)
     setPendingUpdates(new Map())
+    setPendingCreates(new Map())
+    setSuggestions(new Map())
   }, [userId])
 
   useEffect(() => {
@@ -331,6 +496,7 @@ export default function InvestmentPanel({ userId }: Props) {
     setTimeout(() => {
       const map = new Map<string, Suggestion>()
       for (const fund of sortedFunds) {
+        if (isTemporaryInvestmentId(fund.id)) continue
         map.set(fund.id, calcOne(fund))
       }
       setSuggestions(map)
@@ -339,6 +505,10 @@ export default function InvestmentPanel({ userId }: Props) {
   }, [sortedFunds, calcOne])
 
   const handleCalculateSingle = useCallback((id: string) => {
+    if (isTemporaryInvestmentId(id)) {
+      setToast('请先保存新增基金，再计算建议')
+      return
+    }
     const fund = funds.find((f) => f.id === id)
     if (!fund) return
     setSuggestions((prev) => {
@@ -346,9 +516,34 @@ export default function InvestmentPanel({ userId }: Props) {
       next.set(id, calcOne(fund))
       return next
     })
-  }, [funds, calcOne])
+  }, [funds, calcOne, setToast])
 
   const handleUpdate = useCallback((investmentId: string, params: InvestmentUpdateParams) => {
+    if (isTemporaryInvestmentId(investmentId)) {
+      setFunds((prev) =>
+        prev.map((fund) => fund.id === investmentId ? applyInvestmentUpdate(fund, params) : fund),
+      )
+      setPendingCreates((prev) => {
+        const current = prev.get(investmentId)
+        if (!current) return prev
+        const next = new Map(prev)
+        next.set(investmentId, {
+          ...current,
+          ...(params.c !== undefined ? { currentValueCents: params.c } : {}),
+          ...(params.r !== undefined ? { currentProfitRate: params.r } : {}),
+          ...(params.m !== undefined ? { targetAmountCents: params.m } : {}),
+          ...(params.stopProfit !== undefined ? { stopProfitLine: params.stopProfit } : {}),
+        })
+        return next
+      })
+      setSuggestions((prev) => {
+        const next = new Map(prev)
+        next.delete(investmentId)
+        return next
+      })
+      return
+    }
+
     setFunds((prev) => {
       let changedFund: InvestmentData | null = null
       const nextFunds = prev.map((fund) => {
@@ -377,7 +572,25 @@ export default function InvestmentPanel({ userId }: Props) {
     })
   }, [])
 
+  const handleCancelPendingCreate = useCallback((investmentId: string) => {
+    setPendingCreates((prev) => {
+      const next = new Map(prev)
+      next.delete(investmentId)
+      return next
+    })
+    setFunds((prev) => prev.filter((fund) => fund.id !== investmentId))
+    setSuggestions((prev) => {
+      const next = new Map(prev)
+      next.delete(investmentId)
+      return next
+    })
+    setToast('已取消新增基金')
+  }, [setToast])
+
   const handleConfirm = useCallback(async (investmentId: string, actualAmountCents: number) => {
+    if (isTemporaryInvestmentId(investmentId)) {
+      throw new Error('请先保存新增基金')
+    }
     const fund = funds.find((f) => f.id === investmentId)
     if (!fund) throw new Error('Fund not found')
 
@@ -457,11 +670,11 @@ export default function InvestmentPanel({ userId }: Props) {
     return { buy, sell, hold, totalBuy, totalSell }
   }, [suggestions])
 
-  const pendingCount = pendingUpdates.size
+  const pendingCount = pendingUpdates.size + pendingCreates.size
   const formulaLines = useMemo(() => getInvestmentFormulaLines(formulaConfig), [formulaConfig])
 
   const handleSavePending = useCallback(async () => {
-    if (pendingUpdates.size === 0) return
+    if (pendingUpdates.size === 0 && pendingCreates.size === 0) return
 
     const updates = Array.from(pendingUpdates.entries()).map(([investmentId, params]) => ({
       investmentId,
@@ -469,6 +682,17 @@ export default function InvestmentPanel({ userId }: Props) {
       ...(params.r !== undefined ? { currentProfitRate: params.r } : {}),
       ...(params.m !== undefined ? { targetAmountCents: params.m } : {}),
       ...(params.stopProfit !== undefined ? { stopProfitLine: params.stopProfit } : {}),
+    }))
+    const creates = Array.from(pendingCreates.values()).map((item) => ({
+      clientId: item.tempId,
+      fundName: item.fundName,
+      currentValueCents: item.currentValueCents,
+      currentProfitRate: item.currentProfitRate,
+      targetAmountCents: item.targetAmountCents,
+      stopProfitLine: item.stopProfitLine,
+      tradingCycle: item.tradingCycle,
+      strategyTag: item.strategyTag,
+      notes: item.notes,
     }))
 
     setSavingChanges(true)
@@ -480,26 +704,20 @@ export default function InvestmentPanel({ userId }: Props) {
           type: 'batch_update',
           userId,
           updates,
+          creates,
         }),
       })
       const data = await res.json()
       if (!res.ok) throw new Error(data.error || '保存失败')
 
-      const currentFunds = new Map(funds.map((fund) => [fund.id, fund]))
-      const nextSaved = new Map(savedFundsRef.current)
-      for (const investmentId of pendingUpdates.keys()) {
-        const fund = currentFunds.get(investmentId)
-        if (fund) nextSaved.set(investmentId, fund)
-      }
-      savedFundsRef.current = nextSaved
-      setPendingUpdates(new Map())
-      setToast(`已保存 ${updates.length} 只基金`)
+      await fetchFunds()
+      setToast(`已保存 ${updates.length + creates.length} 只基金`)
     } catch (e: any) {
       setToast(e.message || '保存失败')
     } finally {
       setSavingChanges(false)
     }
-  }, [funds, pendingUpdates, setToast, userId])
+  }, [fetchFunds, pendingCreates, pendingUpdates, setToast, userId])
 
   const handleFormulaDraftChange = useCallback((key: keyof InvestmentFormulaConfig, value: string) => {
     setFormulaDraft((prev) => ({ ...prev, [key]: value }))
@@ -518,10 +736,7 @@ export default function InvestmentPanel({ userId }: Props) {
       next.stopSellExcessRatio < 0 ||
       next.strongStopMultiplier <= 0 ||
       next.strongStopBonusCents < 0 ||
-      next.strongStopMaxCurrentRatio < 0 ||
-      next.rebalanceOverTargetRatio <= 0 ||
-      next.rebalanceBelowTargetRatio <= 0 ||
-      next.rebalanceBuyToTargetRatio <= 0
+      next.strongStopMaxCurrentRatio < 0
     ) {
       setFormulaError('比例和金额不能为负，倍数必须大于 0')
       return
@@ -557,7 +772,7 @@ export default function InvestmentPanel({ userId }: Props) {
     setOcrProgress(`0/${files.length}`)
     setOcrResults(null)
 
-    const allResults: OcrResult[] = []
+    const allResults: RawOcrResult[] = []
     let failedCount = 0
     let successCount = 0
     let firstError = ''
@@ -583,12 +798,11 @@ export default function InvestmentPanel({ userId }: Props) {
           if (!res.ok) throw new Error(data.error || 'OCR 失败')
           successCount++
 
-          const results: OcrResult[] = Array.isArray(data.funds)
+          const results: RawOcrResult[] = Array.isArray(data.funds)
             ? data.funds
                 .map((f: any) => {
                   const fundName = typeof f.fund_name === 'string' ? f.fund_name.trim() : ''
                   if (!fundName) return null
-                  const match = funds.find((existing) => isFundNameMatch(fundName, existing.fund_name))
                   return {
                     fund_name: fundName,
                     holding_cents: typeof f.holding_cents === 'number' && Number.isFinite(f.holding_cents)
@@ -597,12 +811,11 @@ export default function InvestmentPanel({ userId }: Props) {
                     profit_rate: typeof f.profit_rate === 'number' && Number.isFinite(f.profit_rate)
                       ? f.profit_rate
                       : null,
-                    matchedId: match?.id,
                     sourceIndex: idx,
                     sourceName: file.name || `截图 ${idx + 1}`,
                   }
                 })
-                .filter((item: OcrResult | null): item is OcrResult => item !== null)
+                .filter((item: RawOcrResult | null): item is RawOcrResult => item !== null)
             : []
 
           allResults.push(...results)
@@ -612,7 +825,7 @@ export default function InvestmentPanel({ userId }: Props) {
         }
       }
 
-      const mergedResults = mergeOcrResults(allResults)
+      const mergedResults = prepareOcrResults(allResults, funds)
       if (mergedResults.length > 0) {
         setOcrResults(mergedResults)
         if (failedCount > 0) {
@@ -636,8 +849,82 @@ export default function InvestmentPanel({ userId }: Props) {
     }
   }, [funds, investmentOcrConfig, setToast])
 
+  const handleOcrResultChange = useCallback((resultId: string, patch: Partial<OcrResult>) => {
+    setOcrResults((prev) => prev?.map((result) =>
+      result.resultId === resultId ? { ...result, ...patch } : result,
+    ) ?? null)
+  }, [])
+
   const handleOcrApply = useCallback(() => {
     if (!ocrResults) return
+
+    const createsToAdd: PendingInvestmentCreate[] = []
+    const newFunds: InvestmentData[] = []
+    const occupiedNames = new Set(funds.map((fund) => normalizeFundNameForMatch(fund.fund_name)))
+
+    for (const result of ocrResults) {
+      if (result.matchedIds.length > 0 || !result.createSelected) continue
+
+      const fundName = result.draftFundName.trim()
+      if (!fundName) {
+        setToast('请填写待新增基金的名称')
+        return
+      }
+
+      const normalizedName = normalizeFundNameForMatch(fundName)
+      if (!normalizedName) {
+        setToast('基金名称不能只包含空格或标点')
+        return
+      }
+      if (occupiedNames.has(normalizedName)) {
+        setToast(`“${fundName}”已存在，请修改名称或取消新增`)
+        return
+      }
+
+      const holdingYuan = result.holdingDraft.trim() === '' ? 0 : Number.parseFloat(result.holdingDraft)
+      const profitPercent = result.profitDraft.trim() === '' ? 0 : Number.parseFloat(result.profitDraft)
+      if (!Number.isFinite(holdingYuan) || holdingYuan < 0) {
+        setToast(`“${fundName}”的持仓金额无效`)
+        return
+      }
+      if (!Number.isFinite(profitPercent)) {
+        setToast(`“${fundName}”的收益率无效`)
+        return
+      }
+
+      const tempId = createTemporaryInvestmentId()
+      const currentValueCents = Math.round(holdingYuan * 100)
+      const currentProfitRate = profitPercent / 100
+      const pendingCreate: PendingInvestmentCreate = {
+        tempId,
+        fundName,
+        currentValueCents,
+        currentProfitRate,
+        targetAmountCents: currentValueCents,
+        stopProfitLine: null,
+        tradingCycle: 'none',
+        strategyTag: '待配置',
+        notes: result.isShareClassMerged
+          ? `由截图识别新增；已合并份额：${result.mergedFundNames.join('、')}`
+          : '由截图识别新增',
+      }
+
+      createsToAdd.push(pendingCreate)
+      newFunds.push({
+        id: tempId,
+        fund_code: null,
+        fund_name: fundName,
+        current_value_cents: currentValueCents,
+        current_profit_rate: currentProfitRate,
+        target_amount_cents: currentValueCents,
+        stop_profit_line: null,
+        trading_cycle: 'none',
+        strategy_tag: '待配置',
+        is_active: true,
+      })
+      occupiedNames.add(normalizedName)
+    }
+
     let updated = 0
     for (const r of ocrResults) {
       if (!r.matchedId) continue
@@ -649,11 +936,25 @@ export default function InvestmentPanel({ userId }: Props) {
       handleUpdate(r.matchedId, params)
       updated++
     }
-    setOcrResults(null)
-    if (updated > 0) {
-      setToast(`已套入 ${updated} 只基金，点击保存后同步`)
+
+    if (createsToAdd.length > 0) {
+      setPendingCreates((prev) => {
+        const next = new Map(prev)
+        for (const item of createsToAdd) next.set(item.tempId, item)
+        return next
+      })
+      setFunds((prev) => [...prev, ...newFunds])
     }
-  }, [handleUpdate, ocrResults, setToast])
+
+    setOcrResults(null)
+    const applied = updated + createsToAdd.length
+    if (applied > 0) {
+      const createText = createsToAdd.length > 0 ? `，新增 ${createsToAdd.length} 只` : ''
+      setToast(`已套入 ${updated} 只${createText}，点击保存后同步`)
+    } else {
+      setToast('本次没有可应用的识别结果')
+    }
+  }, [funds, handleUpdate, ocrResults, setToast])
 
   const dateLabel = getDateLabel()
 
@@ -867,8 +1168,7 @@ export default function InvestmentPanel({ userId }: Props) {
               <div>基金</div>
               <div className="text-right">当前/建议</div>
               <div className="text-right">收益/止盈</div>
-              <div className="text-right">建议</div>
-              <div className="text-right">算</div>
+              <div className="text-right">建议/计算</div>
             </div>
             {sortedFunds.map((fund) => (
               <InvestmentCard
@@ -878,6 +1178,8 @@ export default function InvestmentPanel({ userId }: Props) {
                 onUpdate={handleUpdate}
                 onConfirm={handleConfirm}
                 onCalculateSingle={handleCalculateSingle}
+                pendingCreate={isTemporaryInvestmentId(fund.id)}
+                onCancelPendingCreate={handleCancelPendingCreate}
               />
             ))}
           </div>
@@ -917,11 +1219,15 @@ export default function InvestmentPanel({ userId }: Props) {
               <div className="text-xs text-base-muted text-center py-4">未识别到基金数据</div>
             ) : (
               <div className="space-y-2">
-                {ocrResults.map((r, i) => (
+                {ocrResults.map((r) => (
                   <div
-                    key={i}
+                    key={r.resultId}
                     className={`rounded-xl border p-3 ${
-                      r.matchedId ? 'border-[#A3D9A5] bg-base-bg' : 'border-base-line bg-base-bg opacity-60'
+                      r.matchedId
+                        ? 'border-[#A3D9A5] bg-base-bg'
+                        : r.matchedIds.length > 1
+                          ? 'border-[#F4A261] bg-base-bg'
+                          : 'border-base-line bg-base-bg'
                     }`}
                   >
                     <div className="flex items-center justify-between gap-2">
@@ -939,10 +1245,117 @@ export default function InvestmentPanel({ userId }: Props) {
                           )}
                         </div>
                       </div>
-                      <span className={`text-[10px] shrink-0 ${r.matchedId ? 'text-[#A3D9A5]' : 'text-base-muted'}`}>
-                        {r.matchedId ? '✓ 已匹配' : '未匹配'}
+                      <span className={`text-[10px] shrink-0 ${
+                        r.matchedId
+                          ? 'text-[#A3D9A5]'
+                          : r.matchedIds.length > 1
+                            ? 'text-[#D97757]'
+                            : r.createSelected
+                              ? 'text-[#D97757]'
+                              : 'text-base-muted'
+                      }`}>
+                        {r.matchedId
+                          ? '✓ 已匹配'
+                          : r.matchedIds.length > 1
+                            ? '待选择'
+                            : r.createSelected
+                              ? '待新增'
+                              : '已忽略'}
                       </span>
                     </div>
+
+                    {r.isShareClassMerged && (
+                      <div className="mt-2 rounded-lg bg-pastel-butter/40 px-2 py-1.5 text-[10px] leading-4 text-base-muted">
+                        已合并 {r.shareClasses.join('/')} 类份额：{r.mergedFundNames.join(' + ')}
+                      </div>
+                    )}
+
+                    {r.matchedId && (
+                      <div className="mt-2 text-[10px] text-base-muted">
+                        更新到：{funds.find((fund) => fund.id === r.matchedId)?.fund_name || '现有基金'}
+                      </div>
+                    )}
+
+                    {r.matchedIds.length > 1 && (
+                      <label className="mt-2 block">
+                        <span className="text-[10px] text-base-muted">选择合并到哪只现有基金</span>
+                        <select
+                          value={r.matchedId || ''}
+                          onChange={(e) => handleOcrResultChange(r.resultId, {
+                            matchedId: e.target.value || undefined,
+                          })}
+                          className="mt-1 w-full rounded-lg border border-base-line bg-base-bg px-2 py-1.5 text-xs text-base-text focus:outline-none"
+                        >
+                          <option value="">本次忽略，暂不应用</option>
+                          {r.matchedIds.map((id) => (
+                            <option key={id} value={id}>
+                              {funds.find((fund) => fund.id === id)?.fund_name || id}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                    )}
+
+                    {r.matchedIds.length === 0 && (
+                      <div className="mt-2 border-t border-base-line pt-2">
+                        <label className="flex items-center gap-2 text-[11px] text-base-text">
+                          <input
+                            type="checkbox"
+                            checked={r.createSelected}
+                            onChange={(e) => handleOcrResultChange(r.resultId, {
+                              createSelected: e.target.checked,
+                            })}
+                            className="size-3.5 accent-[#A3D9A5]"
+                          />
+                          新增到持仓
+                        </label>
+
+                        {r.createSelected && (
+                          <div className="mt-2 space-y-2">
+                            <label className="block">
+                              <span className="text-[10px] text-base-muted">基金名称</span>
+                              <input
+                                value={r.draftFundName}
+                                onChange={(e) => handleOcrResultChange(r.resultId, {
+                                  draftFundName: e.target.value,
+                                })}
+                                className="mt-0.5 w-full rounded-lg border border-base-line bg-base-bg px-2 py-1.5 text-xs text-base-text focus:outline-none"
+                                placeholder="可填写完整基金名称"
+                              />
+                            </label>
+                            <div className="grid grid-cols-2 gap-2">
+                              <label className="block">
+                                <span className="text-[10px] text-base-muted">当前持仓（元）</span>
+                                <input
+                                  value={r.holdingDraft}
+                                  onChange={(e) => handleOcrResultChange(r.resultId, {
+                                    holdingDraft: e.target.value,
+                                  })}
+                                  className="mt-0.5 w-full rounded-lg border border-base-line bg-base-bg px-2 py-1.5 text-xs text-base-text focus:outline-none"
+                                  inputMode="decimal"
+                                  placeholder="识别为空时按 0"
+                                />
+                              </label>
+                              <label className="block">
+                                <span className="text-[10px] text-base-muted">收益率（%）</span>
+                                <input
+                                  value={r.profitDraft}
+                                  onChange={(e) => handleOcrResultChange(r.resultId, {
+                                    profitDraft: e.target.value,
+                                  })}
+                                  className="mt-0.5 w-full rounded-lg border border-base-line bg-base-bg px-2 py-1.5 text-xs text-base-text focus:outline-none"
+                                  inputMode="decimal"
+                                  placeholder="识别为空时按 0"
+                                />
+                              </label>
+                            </div>
+                            <div className="text-[10px] leading-4 text-base-muted">
+                              目标持仓暂按当前持仓设置，调仓周期设为“无”，可稍后在管理持仓中完善。
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    )}
                   </div>
                 ))}
               </div>
@@ -957,10 +1370,10 @@ export default function InvestmentPanel({ userId }: Props) {
               </button>
               <button
                 onClick={handleOcrApply}
-                disabled={!ocrResults.some((r) => r.matchedId)}
+                disabled={!ocrResults.some((r) => r.matchedId || (r.matchedIds.length === 0 && r.createSelected))}
                 className="flex-1 rounded-xl border border-base-line bg-base-bg py-2 text-xs text-base-text active:opacity-70 disabled:opacity-40"
               >
-                更新已匹配基金
+                应用识别结果
               </button>
             </div>
           </div>
