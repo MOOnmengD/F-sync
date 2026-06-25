@@ -69,7 +69,9 @@ export default function Home() {
   const [customMoodOpen, setCustomMoodOpen] = useState(false)
   const [customMoodDraft, setCustomMoodDraft] = useState('')
   const customMoodInputRef = useRef<HTMLInputElement | null>(null)
+  const fixedPanelRef = useRef<HTMLDivElement | null>(null)
   const [keyboardOffset, setKeyboardOffset] = useState(0)
+  const [fixedPanelHeight, setFixedPanelHeight] = useState(0)
   const [toast, setToast] = useState<string | null>(null)
   const [sending, setSending] = useState(false)
   const settings = useSettingsStore((s) => s.settings)
@@ -443,6 +445,24 @@ export default function Home() {
     return () => {
       vv.removeEventListener('resize', update)
       vv.removeEventListener('scroll', update)
+    }
+  }, [])
+
+  useEffect(() => {
+    const panel = fixedPanelRef.current
+    if (!panel) return
+
+    const updateHeight = () => {
+      setFixedPanelHeight(Math.ceil(panel.getBoundingClientRect().height))
+    }
+
+    updateHeight()
+    const observer = new ResizeObserver(updateHeight)
+    observer.observe(panel)
+    window.addEventListener('resize', updateHeight)
+    return () => {
+      observer.disconnect()
+      window.removeEventListener('resize', updateHeight)
     }
   }, [])
 
@@ -972,18 +992,23 @@ export default function Home() {
   return (
     <div
       className={`mx-auto min-h-dvh max-w-[480px] bg-base-bg px-4 text-base-text ${
-        mode === 'finance' ? 'pb-[280px]' : 'pb-[160px]'
+        mode === 'finance' ? '' : 'pb-[160px]'
       }`}
+      style={
+        mode === 'finance'
+          ? { paddingBottom: Math.max(220, fixedPanelHeight + 12) }
+          : undefined
+      }
     >
-      <header className="sticky top-0 z-50 -mx-4 bg-base-bg/95 px-4 pb-3 pt-4 backdrop-blur-sm">
+      <header className="sticky top-0 z-50 -mx-4 bg-base-bg/95 px-4 pb-2 pt-2 backdrop-blur-sm">
         <div className="flex items-center justify-between">
           <IconButton label="打开导航" onClick={toggleDrawer} icon={<Menu size={18} />} />
           <div className="text-sm font-medium text-base-text">主页</div>
           <IconButton label="AI 助手" onClick={() => navigate('/chat')} icon={<Sparkles size={18} />} />
         </div>
 
-        <div className="mt-4 rounded-2xl bg-base-surface p-2">
-          <div className="flex flex-wrap gap-2">
+        <div className="mt-2 rounded-2xl bg-base-surface p-1.5">
+          <div className="flex flex-wrap gap-1.5">
             <PillButton
               label="记账"
               active={mode === 'finance'}
@@ -1038,7 +1063,7 @@ export default function Home() {
           </div>
         </div>
         <div
-          className="pointer-events-none absolute inset-x-0 -bottom-5 h-5"
+          className="pointer-events-none absolute inset-x-0 -bottom-3 h-3"
           style={{ background: 'linear-gradient(to bottom, rgba(253,252,251,0.98), rgba(253,252,251,0))' }}
         />
       </header>
@@ -1067,6 +1092,7 @@ export default function Home() {
       )}
 
       <div
+        ref={fixedPanelRef}
         className="fixed left-1/2 z-40 w-full max-w-[480px] -translate-x-1/2 px-4"
         style={{ bottom: keyboardOffset }}
       >
@@ -1165,7 +1191,7 @@ export default function Home() {
               </div>
             )}
             {mode === 'finance' && (
-              <div className="mb-2 rounded-2xl bg-base-surface p-3">
+              <div className="mb-1 rounded-2xl bg-base-surface p-2">
                 <div className="flex flex-wrap items-center gap-1.5">
                   {financeCategories.map((c) => {
                     const active = category === c
@@ -1199,7 +1225,7 @@ export default function Home() {
                   )}
                 </div>
 
-                <div className="mt-2 flex items-center gap-2">
+                <div className="mt-1.5 flex items-center gap-2">
                   <div className="inline-grid grid-cols-2 overflow-hidden rounded-full border border-base-line bg-base-bg">
                     {(
                       [
@@ -1227,7 +1253,7 @@ export default function Home() {
                 </div>
 
                 {financeQuickRecords.length > 0 && (
-                  <div className="mt-2 flex flex-wrap items-center gap-1.5" aria-label="快捷记录">
+                  <div className="mt-1.5 flex flex-wrap items-center gap-1.5" aria-label="快捷记录">
                     {financeQuickRecords.map((record) => (
                       <button
                         key={record.key}
@@ -1341,15 +1367,10 @@ export default function Home() {
               </div>
             )}
             <section
-              className="rounded-2xl border bg-base-surface p-3"
+              className={`rounded-2xl border bg-base-surface ${mode === 'finance' ? 'p-2' : 'p-3'}`}
               style={composerBorder}
               aria-label="快速输入"
             >
-              {mode === 'finance' && selectedFinanceDate !== financeTodayKey && !activeReviewTx && (
-                <div className="mb-1 px-1 text-[11px] font-medium text-[#4F9F86]">
-                  记录到 {formatSelectedFinanceDate(selectedFinanceDate)}
-                </div>
-              )}
               <div className="relative">
                 <textarea
                   rows={2}
@@ -1376,7 +1397,16 @@ export default function Home() {
                 </button>
               </div>
 
-              <div className="mt-2 pb-[env(safe-area-inset-bottom)]">
+              <div
+                className={`pb-[env(safe-area-inset-bottom)] ${
+                  mode === 'finance' ? 'min-h-0' : 'mt-2'
+                }`}
+              >
+                {mode === 'finance' && selectedFinanceDate !== financeTodayKey && !activeReviewTx && (
+                  <div className="px-1 text-[11px] font-medium leading-4 text-[#4F9F86]">
+                    记录到 {formatSelectedFinanceDate(selectedFinanceDate)}
+                  </div>
+                )}
                 {mode !== 'finance' && mode !== 'note' && mode !== 'media' && (
                   <div className="flex flex-wrap gap-2">
                     <span className="rounded-full border border-base-line bg-base-bg px-3 py-1 text-xs text-base-muted">

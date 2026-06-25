@@ -41,8 +41,8 @@ export function FinanceDashboard({
   }, [selectedDayKey])
 
   return (
-    <section className="mt-3 space-y-2" aria-label="本月消费面板">
-      <div className="grid grid-cols-3 gap-2">
+    <section className="mt-1.5 space-y-1.5" aria-label="本月消费面板">
+      <div className="grid grid-cols-3 gap-1.5">
         <SummaryCell label="必需支出" amount={summary.necessary} />
         <SummaryCell label="本月总支出" amount={summary.total} emphasized />
         <SummaryCell label="非必需支出" amount={summary.nonNecessary} />
@@ -84,16 +84,16 @@ export function FinanceDashboard({
         </div>
       </div>
 
-      <div className="rounded-2xl border border-[#D7EEE6] bg-base-surface p-2">
+      <div className="rounded-2xl border border-[#D7EEE6] bg-base-surface p-1.5">
         <div
           ref={recordsRef}
-          className="grid h-[76px] grid-cols-2 content-start gap-x-3 gap-y-1 overflow-y-auto [-webkit-overflow-scrolling:touch] [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+          className="grid h-[60px] grid-cols-2 content-start gap-x-3 gap-y-0.5 overflow-y-auto [-webkit-overflow-scrolling:touch] [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
         >
           {selectedDayRecords.length > 0 ? (
             selectedDayRecords.map((record) => (
               <div
                 key={record.id}
-                className="flex h-8 min-w-0 items-center justify-between gap-2 border-b border-[#E1EEE9] px-1 text-xs"
+                className="flex h-7 min-w-0 items-center justify-between gap-2 border-b border-[#E1EEE9] px-1 text-xs"
               >
                 <span className="min-w-0 flex-1 truncate text-base-text" title={record.itemName}>
                   {record.itemName}
@@ -102,7 +102,7 @@ export function FinanceDashboard({
               </div>
             ))
           ) : (
-            <div className="col-span-2 flex h-[76px] items-center justify-center text-xs text-base-muted">
+            <div className="col-span-2 flex h-[60px] items-center justify-center text-xs text-base-muted">
               {loading ? '本月消费加载中…' : '当天暂无消费'}
             </div>
           )}
@@ -129,7 +129,7 @@ function SummaryCell({
 }) {
   return (
     <div
-      className={`min-w-0 rounded-2xl border px-2 py-2 text-center ${
+      className={`min-w-0 rounded-2xl border px-2 py-1.5 text-center ${
         emphasized
           ? 'border-[#A5E7D2] bg-[#E9F8F2]'
           : 'border-[#D7EEE6] bg-base-surface'
