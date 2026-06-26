@@ -22,6 +22,7 @@ import {
   formatSelectedFinanceDate,
   getLocalDayKey,
 } from '../utils/financeDashboard'
+import { getHomeModeDisplayGroups } from '../utils/homeModePreferences'
 
 const modeMeta: Record<
   QuickMode,
@@ -77,6 +78,10 @@ export default function Home() {
   const [sending, setSending] = useState(false)
   const settings = useSettingsStore((s) => s.settings)
   const loadSettingsFromCloud = useSettingsStore((s) => s.loadFromCloud)
+  const { pinnedModes, scrollModes } = useMemo(
+    () => getHomeModeDisplayGroups(settings.homeModePreferences),
+    [settings.homeModePreferences]
+  )
   const [repurchaseIndex, setRepurchaseIndex] = useState(0)
   const [lastFinanceTx, setLastFinanceTx] = useState<LastFinanceTx | null>(null)
   const [reviewTargetId, setReviewTargetId] = useState<string | null>(null)
@@ -995,6 +1000,21 @@ export default function Home() {
     await fetchLastFinanceTx()
   }
 
+  const handleModeChange = (nextMode: QuickMode) => {
+    setMode(nextMode)
+    if (nextMode === 'note') setMood('😐')
+  }
+
+  const renderModeButton = (modeKey: QuickMode) => (
+    <PillButton
+      key={modeKey}
+      label={modeMeta[modeKey].label}
+      active={mode === modeKey}
+      onClick={() => handleModeChange(modeKey)}
+      accent={modeMeta[modeKey].accent}
+    />
+  )
+
   return (
     <div
       className={`mx-auto min-h-dvh max-w-[480px] bg-base-bg px-4 text-base-text ${
@@ -1016,58 +1036,15 @@ export default function Home() {
         </div>
 
         <div className="mt-2 rounded-2xl border border-base-line bg-base-bg p-1.5">
-          <div className="flex flex-nowrap gap-1.5 overflow-x-auto pb-0.5 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-            <PillButton
-              label="记账"
-              active={mode === 'finance'}
-              onClick={() => setMode('finance')}
-              accent={modeMeta.finance.accent}
-            />
-            <PillButton
-              label="点评"
-              active={mode === 'review'}
-              onClick={() => setMode('review')}
-              accent={modeMeta.review.accent}
-            />
-            <PillButton
-              label="碎碎念"
-              active={mode === 'note'}
-              onClick={() => {
-                setMode('note')
-                setMood('😐')
-              }}
-              accent={modeMeta.note.accent}
-            />
-            <PillButton
-              label="工作"
-              active={mode === 'work'}
-              onClick={() => setMode('work')}
-              accent={modeMeta.work.accent}
-            />
-            <PillButton
-              label="收藏"
-              active={mode === 'save'}
-              onClick={() => setMode('save')}
-              accent={modeMeta.save.accent}
-            />
-            <PillButton
-              label="时间轴"
-              active={mode === 'timeline'}
-              onClick={() => setMode('timeline')}
-              accent="timeline"
-            />
-            <PillButton
-              label="理财"
-              active={mode === 'invest'}
-              onClick={() => setMode('invest')}
-              accent="rose"
-            />
-            <PillButton
-              label="书影"
-              active={mode === 'media'}
-              onClick={() => setMode('media')}
-              accent={modeMeta.media.accent}
-            />
+          <div className="flex w-full flex-nowrap gap-1.5 pb-0.5">
+            {pinnedModes.length > 0 && (
+              <div className="flex shrink-0 flex-nowrap gap-1.5">
+                {pinnedModes.map(renderModeButton)}
+              </div>
+            )}
+            <div className="flex min-w-0 flex-1 flex-nowrap gap-1.5 overflow-x-auto [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+              {scrollModes.map(renderModeButton)}
+            </div>
           </div>
         </div>
       </header>

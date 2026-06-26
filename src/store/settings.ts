@@ -1,6 +1,11 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 import { supabase } from '../supabaseClient'
+import type { HomeModePreferences } from '../types/domain'
+import {
+  DEFAULT_HOME_MODE_PREFERENCES,
+  normalizeHomeModePreferences,
+} from '../utils/homeModePreferences'
 
 export interface ApiConfig {
   name: string
@@ -38,6 +43,7 @@ export interface AISettings {
   userPrompt: string
   postHistoryPrompt: string
   proactivePrompt: string
+  homeModePreferences: HomeModePreferences
   apiConfigs: ApiConfig[]
   parseTransactionConfig: ParseServiceConfig
   parseMediaConfig: ParseServiceConfig
@@ -78,6 +84,7 @@ export const useSettingsStore = create<SettingsState>()(
         userPrompt: '',
         postHistoryPrompt: '',
         proactivePrompt: DEFAULT_PROACTIVE_PROMPT,
+        homeModePreferences: DEFAULT_HOME_MODE_PREFERENCES,
         apiConfigs: [
           { name: '配置 1', url: '', key: '', model: '', enabled: true },
           { name: '配置 2', url: '', key: '', model: '', enabled: true },
@@ -164,6 +171,7 @@ export const useSettingsStore = create<SettingsState>()(
             userPrompt: cloud.userPrompt ?? current.userPrompt,
             postHistoryPrompt: cloud.postHistoryPrompt ?? current.postHistoryPrompt,
             proactivePrompt: cloud.proactivePrompt ?? current.proactivePrompt,
+            homeModePreferences: normalizeHomeModePreferences(cloud.homeModePreferences ?? current.homeModePreferences),
             apiConfigs: Array.isArray(cloud.apiConfigs) && cloud.apiConfigs.length > 0
               ? migrateConfigs(cloud.apiConfigs)
               : current.apiConfigs,
@@ -225,14 +233,22 @@ export const useSettingsStore = create<SettingsState>()(
       partialize: (state) => ({ settings: state.settings }),
       // 深度合并 settings 对象，确保新增字段不会因为旧 localStorage 数据
       // 的浅合并而被置为 undefined（导致 Settings 页面 React 渲染崩溃）
-      merge: (persisted, current) => ({
-        ...current,
-        ...(persisted as Record<string, unknown>),
-        settings: {
+      merge: (persisted, current) => {
+        const persistedSettings = (persisted as { settings?: Record<string, unknown> })?.settings || {}
+        const settings = {
           ...current.settings,
-          ...((persisted as { settings?: Record<string, unknown> })?.settings || {}),
-        },
-      }),
+          ...persistedSettings,
+          homeModePreferences: normalizeHomeModePreferences(
+            persistedSettings.homeModePreferences ?? current.settings.homeModePreferences
+          ),
+        }
+
+        return {
+          ...current,
+          ...(persisted as Record<string, unknown>),
+          settings,
+        }
+      },
     }
   )
 )

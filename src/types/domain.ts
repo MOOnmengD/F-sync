@@ -31,6 +31,11 @@ export type Mood = string
 
 export type QuickMode = 'finance' | 'review' | 'note' | 'work' | 'save' | 'timeline' | 'invest' | 'media'
 
+export type HomeModePreferences = {
+  pinnedModes: QuickMode[]
+  modeOrder: QuickMode[]
+}
+
 export type HomeRecord =
   | {
       id: string

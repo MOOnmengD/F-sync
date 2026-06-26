@@ -2,10 +2,16 @@ import { useState, useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
   ChevronDown, ChevronUp, Eye, EyeOff, Copy, ClipboardPaste, Check,
-  Save, RotateCcw, ArrowRight, ArrowLeft,
+  Save, RotateCcw, ArrowRight, ArrowLeft, GripVertical, Pin,
 } from 'lucide-react'
 import { useSettingsStore, type InvestmentOcrConfig, type ParseServiceConfig, type TtsServiceConfig } from '../store/settings'
 import { IconButton } from '../shared/ui/IconButton'
+import type { HomeModePreferences, QuickMode } from '../types/domain'
+import {
+  HOME_MODE_LABELS,
+  MAX_PINNED_HOME_MODES,
+  normalizeHomeModePreferences,
+} from '../utils/homeModePreferences'
 import {
   DEFAULT_PARSE_TRANSACTION_SYSTEM_PROMPT,
   DEFAULT_PARSE_TRANSACTION_USER_PROMPT_TEMPLATE,
@@ -22,6 +28,7 @@ function AccordionCard({
   onToggle,
   saved,
   onSave,
+  saveDisabled = false,
   children,
 }: {
   title: string
@@ -30,6 +37,7 @@ function AccordionCard({
   onToggle: () => void
   saved: boolean
   onSave: () => void
+  saveDisabled?: boolean
   children: React.ReactNode
 }) {
   return (
@@ -41,6 +49,7 @@ function AccordionCard({
       >
         {/* Expand/collapse */}
         <button
+          type="button"
           className="shrink-0 p-0.5 text-base-text/25 hover:text-base-text/60 transition-colors"
           title={expanded ? '收起' : '展开'}
         >
@@ -57,9 +66,11 @@ function AccordionCard({
 
         {/* Save button */}
         <button
+          type="button"
           onClick={(e) => { e.stopPropagation(); onSave() }}
-          className="flex items-center gap-1 text-xs font-bold transition-all shrink-0"
-          style={{ color: saved ? '#86C8A8' : '#B4AEE8' }}
+          disabled={saveDisabled}
+          className="flex items-center gap-1 text-xs font-bold transition-all shrink-0 disabled:opacity-30 disabled:cursor-not-allowed"
+          style={{ color: saveDisabled ? undefined : saved ? '#86C8A8' : '#B4AEE8' }}
         >
           {saved ? <Check size={14} /> : <Save size={14} />}
           {saved ? '已保存' : '保存'}
@@ -73,6 +84,220 @@ function AccordionCard({
         </div>
       )}
     </div>
+  )
+}
+
+function TopLevelSection({
+  title,
+  subtitle,
+  expanded,
+  onToggle,
+  children,
+}: {
+  title: string
+  subtitle?: string
+  expanded: boolean
+  onToggle: () => void
+  children: React.ReactNode
+}) {
+  return (
+    <section className="space-y-3">
+      <button
+        type="button"
+        onClick={onToggle}
+        className="flex w-full items-center gap-2 rounded-2xl border border-base-line bg-[#F7F5F2] px-4 py-3 text-left transition-colors active:opacity-70"
+      >
+        <span className="shrink-0 text-base-text/25">
+          {expanded ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
+        </span>
+        <span className="min-w-0 flex-1">
+          <span className="block text-sm font-medium text-base-text">{title}</span>
+          {subtitle && <span className="mt-0.5 block truncate text-xs text-base-muted">{subtitle}</span>}
+        </span>
+      </button>
+      {expanded && (
+        <div className="space-y-4">
+          {children}
+        </div>
+      )}
+    </section>
+  )
+}
+
+function HomeModeOrderSection() {
+  const { settings, updateSettings, saveToCloud, isCloudLoaded } = useSettingsStore()
+  const [expanded, setExpanded] = useState(false)
+  const [saved, setSaved] = useState(false)
+  const [notice, setNotice] = useState<string | null>(null)
+  const [dragOverMode, setDragOverMode] = useState<QuickMode | null>(null)
+  const [local, setLocal] = useState<HomeModePreferences>(() =>
+    normalizeHomeModePreferences(settings.homeModePreferences)
+  )
+
+  useEffect(() => {
+    setLocal(normalizeHomeModePreferences(settings.homeModePreferences))
+  }, [settings.homeModePreferences])
+
+  const markSaved = () => {
+    setSaved(true)
+    setTimeout(() => setSaved(false), 2000)
+  }
+
+  const showNotice = (message: string) => {
+    setNotice(message)
+    setTimeout(() => setNotice(null), 1800)
+  }
+
+  const moveMode = (idx: number, direction: number) => {
+    moveModeTo(idx, idx + direction)
+  }
+
+  const moveModeTo = (sourceIdx: number, targetIdx: number) => {
+    if (
+      sourceIdx === targetIdx ||
+      sourceIdx < 0 ||
+      targetIdx < 0 ||
+      sourceIdx >= local.modeOrder.length ||
+      targetIdx >= local.modeOrder.length
+    ) {
+      return
+    }
+
+    const nextOrder = [...local.modeOrder]
+    const [moved] = nextOrder.splice(sourceIdx, 1)
+    nextOrder.splice(targetIdx, 0, moved)
+    setLocal(normalizeHomeModePreferences({ ...local, modeOrder: nextOrder }))
+  }
+
+  const handleDragStart = (e: React.DragEvent, idx: number) => {
+    e.dataTransfer.setData('text/plain', String(idx))
+    e.dataTransfer.effectAllowed = 'move'
+  }
+
+  const handleDragOver = (e: React.DragEvent) => {
+    e.preventDefault()
+    e.dataTransfer.dropEffect = 'move'
+  }
+
+  const handleDragEnter = (e: React.DragEvent, modeKey: QuickMode) => {
+    e.preventDefault()
+    setDragOverMode(modeKey)
+  }
+
+  const handleDrop = (e: React.DragEvent, targetIdx: number) => {
+    e.preventDefault()
+    setDragOverMode(null)
+    const sourceIdx = parseInt(e.dataTransfer.getData('text/plain'), 10)
+    if (Number.isNaN(sourceIdx)) return
+    moveModeTo(sourceIdx, targetIdx)
+  }
+
+  const handleDragEnd = () => {
+    setDragOverMode(null)
+  }
+
+  const togglePinned = (modeKey: QuickMode) => {
+    const pinned = local.pinnedModes.includes(modeKey)
+    if (!pinned && local.pinnedModes.length >= MAX_PINNED_HOME_MODES) {
+      showNotice(`最多置顶 ${MAX_PINNED_HOME_MODES} 个`)
+      return
+    }
+
+    const nextPinned = pinned
+      ? local.pinnedModes.filter((mode) => mode !== modeKey)
+      : [...local.pinnedModes, modeKey]
+
+    setLocal(normalizeHomeModePreferences({ ...local, pinnedModes: nextPinned }))
+  }
+
+  const handleSave = () => {
+    const next = normalizeHomeModePreferences(local)
+    updateSettings({ homeModePreferences: next })
+    saveToCloud()
+    markSaved()
+  }
+
+  return (
+    <AccordionCard
+      title="功能按钮顺序"
+      subtitle={`${local.pinnedModes.length}/${MAX_PINNED_HOME_MODES} 置顶`}
+      expanded={expanded}
+      onToggle={() => setExpanded(!expanded)}
+      saved={saved}
+      onSave={handleSave}
+      saveDisabled={!isCloudLoaded}
+    >
+      <div className="space-y-2">
+        {local.modeOrder.map((modeKey, idx) => {
+          const pinned = local.pinnedModes.includes(modeKey)
+          const isFirst = idx === 0
+          const isLast = idx === local.modeOrder.length - 1
+
+          return (
+            <div
+              key={modeKey}
+              className={`flex items-center gap-2 rounded-2xl border p-3 transition-colors ${
+                dragOverMode === modeKey
+                  ? 'border-[#B4AEE8] bg-[#F0EEFF]'
+                  : 'border-base-line bg-white'
+              }`}
+              draggable
+              onDragStart={(e) => handleDragStart(e, idx)}
+              onDragOver={handleDragOver}
+              onDragEnter={(e) => handleDragEnter(e, modeKey)}
+              onDragLeave={() => setDragOverMode(null)}
+              onDrop={(e) => handleDrop(e, idx)}
+              onDragEnd={handleDragEnd}
+            >
+              <GripVertical size={15} className="shrink-0 cursor-grab text-base-text/15 active:cursor-grabbing" />
+              <div className="min-w-0 flex-1">
+                <div className="truncate text-sm font-medium text-base-text">{HOME_MODE_LABELS[modeKey]}</div>
+              </div>
+              <button
+                type="button"
+                onClick={() => togglePinned(modeKey)}
+                className={`shrink-0 rounded-full border p-1.5 transition-colors ${
+                  pinned
+                    ? 'border-[#B4AEE8] bg-[#F0EEFF] text-[#8E7FD8]'
+                    : 'border-base-line text-base-text/25 active:text-[#8E7FD8]'
+                }`}
+                title={pinned ? '取消置顶' : '置顶'}
+                aria-label={pinned ? `取消置顶${HOME_MODE_LABELS[modeKey]}` : `置顶${HOME_MODE_LABELS[modeKey]}`}
+              >
+                <Pin size={13} fill={pinned ? 'currentColor' : 'none'} />
+              </button>
+              <div className="flex shrink-0">
+                <button
+                  type="button"
+                  onClick={() => moveMode(idx, -1)}
+                  disabled={isFirst}
+                  className="p-0.5 text-base-text/25 transition-colors active:text-base-text/60 disabled:opacity-10"
+                  title="上移"
+                  aria-label={`上移${HOME_MODE_LABELS[modeKey]}`}
+                >
+                  <ChevronUp size={15} />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => moveMode(idx, 1)}
+                  disabled={isLast}
+                  className="p-0.5 text-base-text/25 transition-colors active:text-base-text/60 disabled:opacity-10"
+                  title="下移"
+                  aria-label={`下移${HOME_MODE_LABELS[modeKey]}`}
+                >
+                  <ChevronDown size={15} />
+                </button>
+              </div>
+            </div>
+          )
+        })}
+      </div>
+      {notice && (
+        <div className="text-xs font-medium text-[#8E7FD8]">
+          {notice}
+        </div>
+      )}
+    </AccordionCard>
   )
 }
 
@@ -568,6 +793,7 @@ function InvestmentOcrSection() {
 export default function Settings() {
   const { settings, isCloudLoaded, loadFromCloud } = useSettingsStore()
   const navigate = useNavigate()
+  const [aiSettingsExpanded, setAiSettingsExpanded] = useState(false)
 
   useEffect(() => {
     void loadFromCloud()
@@ -587,7 +813,7 @@ export default function Settings() {
         <div className="absolute left-0 top-1/2 -translate-y-1/2">
           <IconButton label="返回主页" onClick={() => navigate('/')} icon={<ArrowLeft size={18} />} />
         </div>
-        <h1 className="text-sm font-medium text-base-text">AI 设置</h1>
+        <h1 className="text-sm font-medium text-base-text">设置</h1>
         {!isCloudLoaded && (
           <span className="absolute right-0 top-1/2 -translate-y-1/2 text-[10px] text-[#8D6E00] bg-[#FFF8E1] px-2 py-0.5 rounded-full">
             同步中…
@@ -603,63 +829,72 @@ export default function Settings() {
         </div>
       )}
 
-      {/* 记账解析 */}
-      <section className="space-y-3">
-        <h2 className="text-sm font-bold text-base-text/70 uppercase tracking-wider">文本解析</h2>
-        <ParseServiceSection
-          configKey="parseTransactionConfig"
-          title="记账解析"
-          subtitle="parse-transaction"
-          defaultSystemPrompt={DEFAULT_PARSE_TRANSACTION_SYSTEM_PROMPT}
-          defaultUserPrompt={DEFAULT_PARSE_TRANSACTION_USER_PROMPT_TEMPLATE}
-        />
-        <ParseServiceSection
-          configKey="parseMediaConfig"
-          title="影音解析"
-          subtitle="parse-media"
-          defaultSystemPrompt={DEFAULT_PARSE_MEDIA_SYSTEM_PROMPT}
-          defaultUserPrompt={DEFAULT_PARSE_MEDIA_USER_PROMPT_TEMPLATE}
-        />
-      </section>
+      <HomeModeOrderSection />
 
-      {/* 图像解析 */}
-      <section className="space-y-3">
-        <h2 className="text-sm font-bold text-base-text/70 uppercase tracking-wider">图像解析</h2>
-        <InvestmentOcrSection />
-      </section>
+      <TopLevelSection
+        title="AI 设置"
+        subtitle="解析、语音、对话模型"
+        expanded={aiSettingsExpanded}
+        onToggle={() => setAiSettingsExpanded(!aiSettingsExpanded)}
+      >
+        {/* 记账解析 */}
+        <section className="space-y-3">
+          <h2 className="text-sm font-bold text-base-text/70 uppercase tracking-wider">文本解析</h2>
+          <ParseServiceSection
+            configKey="parseTransactionConfig"
+            title="记账解析"
+            subtitle="parse-transaction"
+            defaultSystemPrompt={DEFAULT_PARSE_TRANSACTION_SYSTEM_PROMPT}
+            defaultUserPrompt={DEFAULT_PARSE_TRANSACTION_USER_PROMPT_TEMPLATE}
+          />
+          <ParseServiceSection
+            configKey="parseMediaConfig"
+            title="影音解析"
+            subtitle="parse-media"
+            defaultSystemPrompt={DEFAULT_PARSE_MEDIA_SYSTEM_PROMPT}
+            defaultUserPrompt={DEFAULT_PARSE_MEDIA_USER_PROMPT_TEMPLATE}
+          />
+        </section>
 
-      {/* TTS */}
-      <section className="space-y-3">
-        <h2 className="text-sm font-bold text-base-text/70 uppercase tracking-wider">语音合成</h2>
-        <TtsServiceSection />
-      </section>
+        {/* 图像解析 */}
+        <section className="space-y-3">
+          <h2 className="text-sm font-bold text-base-text/70 uppercase tracking-wider">图像解析</h2>
+          <InvestmentOcrSection />
+        </section>
 
-      {/* 对话模型 */}
-      <section className="space-y-3">
-        <h2 className="text-sm font-bold text-base-text/70 uppercase tracking-wider">对话模型</h2>
-        <div className="border rounded-2xl border-base-line bg-[#F7F5F2] p-4 space-y-3">
-          <p className="text-sm text-base-muted">
-            对话 AI 的 API 配置、角色设定 Prompt 等功能在 Chat 页面设置。此处仅展示当前配置摘要。
-          </p>
-          <div className="text-xs text-base-muted space-y-1 bg-white rounded-xl p-3 border border-base-line">
-            <div className="flex justify-between">
-              <span>已启用 API</span>
-              <span className="font-medium text-base-text">{enabledCount} 个</span>
+        {/* TTS */}
+        <section className="space-y-3">
+          <h2 className="text-sm font-bold text-base-text/70 uppercase tracking-wider">语音合成</h2>
+          <TtsServiceSection />
+        </section>
+
+        {/* 对话模型 */}
+        <section className="space-y-3">
+          <h2 className="text-sm font-bold text-base-text/70 uppercase tracking-wider">对话模型</h2>
+          <div className="border rounded-2xl border-base-line bg-[#F7F5F2] p-4 space-y-3">
+            <p className="text-sm text-base-muted">
+              对话 AI 的 API 配置、角色设定 Prompt 等功能在 Chat 页面设置。此处仅展示当前配置摘要。
+            </p>
+            <div className="text-xs text-base-muted space-y-1 bg-white rounded-xl p-3 border border-base-line">
+              <div className="flex justify-between">
+                <span>已启用 API</span>
+                <span className="font-medium text-base-text">{enabledCount} 个</span>
+              </div>
+              <div className="flex justify-between">
+                <span>当前模型</span>
+                <span className="font-medium text-base-text truncate max-w-[200px]">{modelSummary}</span>
+              </div>
             </div>
-            <div className="flex justify-between">
-              <span>当前模型</span>
-              <span className="font-medium text-base-text truncate max-w-[200px]">{modelSummary}</span>
-            </div>
+            <button
+              onClick={() => navigate('/chat')}
+              className="inline-flex items-center gap-1.5 text-xs font-medium text-[#B4AEE8] hover:underline transition-colors"
+            >
+              前往 Chat 页面设置
+              <ArrowRight size={12} />
+            </button>
           </div>
-          <button
-            onClick={() => navigate('/chat')}
-            className="inline-flex items-center gap-1.5 text-xs font-medium text-[#B4AEE8] hover:underline transition-colors"
-          >
-            前往 Chat 页面设置
-            <ArrowRight size={12} />
-          </button>
-        </div>
-      </section>
+        </section>
+      </TopLevelSection>
 
       {/* 底部安全区 */}
       <div className="h-[env(safe-area-inset-bottom)]" />
