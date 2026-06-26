@@ -18,14 +18,14 @@ const accentHex: Record<Props['accent'], string> = {
 export function PillButton({ label, active, onClick, accent }: Props) {
   const base =
     'shrink-0 rounded-full px-4 py-2 text-sm tracking-wide border border-base-line active:opacity-70'
-  const idleCls = 'bg-base-bg text-base-muted'
+  const idleCls = 'text-base-muted'
 
   return (
     <button
       type="button"
       onClick={onClick}
       className={`${base} ${active ? 'text-base-text' : idleCls}`}
-      style={active ? { backgroundColor: accentHex[accent] } : undefined}
+      style={{ backgroundColor: active ? accentHex[accent] : '#FDFCFB' }}
     >
       {label}
     </button>

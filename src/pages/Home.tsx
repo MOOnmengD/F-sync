@@ -71,6 +71,7 @@ export default function Home() {
   const customMoodInputRef = useRef<HTMLInputElement | null>(null)
   const fixedPanelRef = useRef<HTMLDivElement | null>(null)
   const [keyboardOffset, setKeyboardOffset] = useState(0)
+  const [composerFocused, setComposerFocused] = useState(false)
   const [fixedPanelHeight, setFixedPanelHeight] = useState(0)
   const [toast, setToast] = useState<string | null>(null)
   const [sending, setSending] = useState(false)
@@ -562,7 +563,7 @@ export default function Home() {
     }),
     [],
   )
-  const financeKeyboardOpen = mode === 'finance' && keyboardOffset > 80
+  const financeKeyboardOpen = mode === 'finance' && (keyboardOffset > 80 || composerFocused)
 
   useEffect(() => {
     if (!toast) return
@@ -570,6 +571,10 @@ export default function Home() {
     const t = window.setTimeout(() => setToast(null), 1200)
     return () => window.clearTimeout(t)
   }, [toast])
+
+  useEffect(() => {
+    setComposerFocused(false)
+  }, [mode])
 
   const financeCategories = useMemo(() => ['衣', '食', '住', '行', '其他'] as const, [])
   const baseMoods = useMemo(() => ['😐', '🥰', '😔', '🤬', '😖'] as const, [])
@@ -1001,14 +1006,20 @@ export default function Home() {
           : undefined
       }
     >
-      <header className="sticky top-0 z-30 -mx-4 bg-base-bg px-4 pb-2 pt-2">
+      <header
+        className="sticky top-0 z-[60] -mx-4 px-4 pb-3 pt-2"
+        style={{ backgroundColor: '#FDFCFB' }}
+      >
         <div className="flex items-center justify-between">
           <IconButton label="打开导航" onClick={toggleDrawer} icon={<Menu size={18} />} />
           <div className="text-sm font-medium text-base-text">主页</div>
           <IconButton label="AI 助手" onClick={() => navigate('/chat')} icon={<Sparkles size={18} />} />
         </div>
 
-        <div className="mt-2 rounded-2xl border border-base-line bg-base-surface p-1.5">
+        <div
+          className="mt-2 rounded-2xl border border-base-line p-1.5"
+          style={{ backgroundColor: '#F7F5F2' }}
+        >
           <div className="flex flex-nowrap gap-1.5 overflow-x-auto pb-0.5 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
             <PillButton
               label="记账"
@@ -1092,8 +1103,8 @@ export default function Home() {
 
       <div
         ref={fixedPanelRef}
-        className="fixed left-1/2 z-40 w-full max-w-[480px] -translate-x-1/2 bg-base-bg px-4 pt-1"
-        style={{ bottom: keyboardOffset }}
+        className="fixed left-1/2 z-50 w-full max-w-[480px] -translate-x-1/2 px-4 pt-1"
+        style={{ bottom: keyboardOffset, backgroundColor: '#FDFCFB' }}
       >
         {mode === 'timeline' && (
           <div
@@ -1190,7 +1201,10 @@ export default function Home() {
               </div>
             )}
             {mode === 'finance' && (
-              <div className="mb-1 rounded-2xl border border-[#D7EEE6] bg-base-surface p-2">
+              <div
+                className="mb-1 rounded-2xl border border-[#D7EEE6] p-2"
+                style={{ backgroundColor: '#F7F5F2' }}
+              >
                 <div className="flex flex-wrap items-center gap-1.5">
                   {financeCategories.map((c) => {
                     const active = category === c
@@ -1200,9 +1214,9 @@ export default function Home() {
                         type="button"
                         onClick={() => setCategory(active ? null : c)}
                         className={`rounded-full border border-base-line px-3 py-1 text-xs active:opacity-70 ${
-                          active ? 'text-base-text' : 'bg-base-bg text-base-muted'
+                          active ? 'text-base-text' : 'text-base-muted'
                         }`}
-                        style={active ? chipActiveStyle : undefined}
+                        style={active ? chipActiveStyle : { backgroundColor: '#FDFCFB' }}
                       >
                         {c}
                       </button>
@@ -1213,9 +1227,9 @@ export default function Home() {
                       type="button"
                       onClick={toggleReviewSupplement}
                       className={`rounded-full border border-base-line px-3 py-1 text-xs active:opacity-70 ${
-                        activeReviewTx ? 'text-base-text' : 'bg-base-bg text-base-muted'
+                        activeReviewTx ? 'text-base-text' : 'text-base-muted'
                       }`}
-                      style={activeReviewTx ? chipActiveStyle : undefined}
+                      style={activeReviewTx ? chipActiveStyle : { backgroundColor: '#FDFCFB' }}
                       aria-pressed={Boolean(activeReviewTx)}
                       aria-label="为上一条记账补点评"
                     >
@@ -1239,9 +1253,9 @@ export default function Home() {
                           type="button"
                           onClick={() => setNecessity(active ? null : o.key)}
                           className={`w-14 whitespace-nowrap py-1 text-xs font-medium active:opacity-70 ${
-                            active ? 'text-base-text' : 'bg-base-bg text-base-muted'
+                            active ? 'text-base-text' : 'text-base-muted'
                           }`}
-                          style={active ? chipActiveStyle : undefined}
+                          style={active ? chipActiveStyle : { backgroundColor: '#FDFCFB' }}
                         >
                           {o.label}
                         </button>
@@ -1366,8 +1380,8 @@ export default function Home() {
               </div>
             )}
             <section
-              className={`rounded-2xl border bg-base-surface ${mode === 'finance' ? 'p-2' : 'p-3'}`}
-              style={composerBorder}
+              className={`rounded-2xl border ${mode === 'finance' ? 'p-2' : 'p-3'}`}
+              style={{ ...composerBorder, backgroundColor: '#F7F5F2' }}
               aria-label="快速输入"
             >
               <div className="relative">
@@ -1375,6 +1389,8 @@ export default function Home() {
                   rows={2}
                   value={text}
                   onChange={(e) => setText(e.target.value)}
+                  onFocus={() => setComposerFocused(true)}
+                  onBlur={() => setComposerFocused(false)}
                   placeholder={
                     mode === 'finance' && activeReviewTx
                       ? `给「${activeReviewTx.item_name_snapshot || activeReviewTx.item_name || '上一条记账'}」补点评…`
@@ -1382,7 +1398,8 @@ export default function Home() {
                         ? `给《${selectedMediaItem.title}》写一条新点评…`
                       : `在「${meta.label}」里输入…`
                   }
-                  className="min-h-[52px] w-full resize-none rounded-xl bg-base-bg px-3 py-2 pr-14 text-base-text placeholder:text-base-muted focus:outline-none"
+                  className="min-h-[52px] w-full resize-none rounded-xl px-3 py-2 pr-14 text-base-text placeholder:text-base-muted focus:outline-none"
+                  style={{ backgroundColor: '#FDFCFB' }}
                 />
                 <button
                   type="button"
@@ -1421,7 +1438,7 @@ export default function Home() {
 
       {toast && (
         <div
-          className="fixed left-1/2 z-50 -translate-x-1/2 rounded-full border border-base-line bg-base-surface/95 px-4 py-2 text-xs text-base-text backdrop-blur-sm"
+          className="fixed left-1/2 z-[70] -translate-x-1/2 rounded-full border border-base-line bg-base-surface/95 px-4 py-2 text-xs text-base-text backdrop-blur-sm"
           style={{ bottom: keyboardOffset + 96 }}
           role="status"
           aria-live="polite"
@@ -1432,7 +1449,7 @@ export default function Home() {
 
       {customMoodOpen && (
         <div
-          className="fixed inset-0 z-[60] flex items-end justify-center bg-black/15 px-4 pb-6 backdrop-blur-sm"
+          className="fixed inset-0 z-[70] flex items-end justify-center bg-black/15 px-4 pb-6 backdrop-blur-sm"
           role="dialog"
           aria-modal="true"
           aria-label="添加自定义 emoji"
