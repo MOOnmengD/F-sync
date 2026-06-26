@@ -1007,8 +1007,7 @@ export default function Home() {
       }
     >
       <header
-        className="sticky top-0 z-[60] -mx-4 px-4 pb-3 pt-2"
-        style={{ backgroundColor: '#FDFCFB' }}
+        className="sticky top-0 z-[60] -mx-4 bg-base-bg px-4 pb-3 pt-2"
       >
         <div className="flex items-center justify-between">
           <IconButton label="打开导航" onClick={toggleDrawer} icon={<Menu size={18} />} />
@@ -1016,10 +1015,7 @@ export default function Home() {
           <IconButton label="AI 助手" onClick={() => navigate('/chat')} icon={<Sparkles size={18} />} />
         </div>
 
-        <div
-          className="mt-2 rounded-2xl border border-base-line p-1.5"
-          style={{ backgroundColor: '#F7F5F2' }}
-        >
+        <div className="mt-2 rounded-2xl border border-base-line bg-base-bg p-1.5">
           <div className="flex flex-nowrap gap-1.5 overflow-x-auto pb-0.5 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
             <PillButton
               label="记账"
@@ -1103,8 +1099,8 @@ export default function Home() {
 
       <div
         ref={fixedPanelRef}
-        className="fixed left-1/2 z-50 w-full max-w-[480px] -translate-x-1/2 px-4 pt-1"
-        style={{ bottom: keyboardOffset, backgroundColor: '#FDFCFB' }}
+        className="fixed left-1/2 z-50 w-full max-w-[480px] -translate-x-1/2 bg-base-bg px-4 pt-1"
+        style={{ bottom: keyboardOffset }}
       >
         {mode === 'timeline' && (
           <div
@@ -1201,10 +1197,7 @@ export default function Home() {
               </div>
             )}
             {mode === 'finance' && (
-              <div
-                className="mb-1 rounded-2xl border border-[#D7EEE6] p-2"
-                style={{ backgroundColor: '#F7F5F2' }}
-              >
+              <div className="mb-1 rounded-2xl border border-[#D7EEE6] bg-base-bg p-2">
                 <div className="flex flex-wrap items-center gap-1.5">
                   {financeCategories.map((c) => {
                     const active = category === c
@@ -1214,9 +1207,9 @@ export default function Home() {
                         type="button"
                         onClick={() => setCategory(active ? null : c)}
                         className={`rounded-full border border-base-line px-3 py-1 text-xs active:opacity-70 ${
-                          active ? 'text-base-text' : 'text-base-muted'
+                          active ? 'text-base-text' : 'bg-base-bg text-base-muted'
                         }`}
-                        style={active ? chipActiveStyle : { backgroundColor: '#FDFCFB' }}
+                        style={active ? chipActiveStyle : undefined}
                       >
                         {c}
                       </button>
@@ -1227,9 +1220,9 @@ export default function Home() {
                       type="button"
                       onClick={toggleReviewSupplement}
                       className={`rounded-full border border-base-line px-3 py-1 text-xs active:opacity-70 ${
-                        activeReviewTx ? 'text-base-text' : 'text-base-muted'
+                        activeReviewTx ? 'text-base-text' : 'bg-base-bg text-base-muted'
                       }`}
-                      style={activeReviewTx ? chipActiveStyle : { backgroundColor: '#FDFCFB' }}
+                      style={activeReviewTx ? chipActiveStyle : undefined}
                       aria-pressed={Boolean(activeReviewTx)}
                       aria-label="为上一条记账补点评"
                     >
@@ -1253,9 +1246,9 @@ export default function Home() {
                           type="button"
                           onClick={() => setNecessity(active ? null : o.key)}
                           className={`w-14 whitespace-nowrap py-1 text-xs font-medium active:opacity-70 ${
-                            active ? 'text-base-text' : 'text-base-muted'
+                            active ? 'text-base-text' : 'bg-base-bg text-base-muted'
                           }`}
-                          style={active ? chipActiveStyle : { backgroundColor: '#FDFCFB' }}
+                          style={active ? chipActiveStyle : undefined}
                         >
                           {o.label}
                         </button>
@@ -1380,8 +1373,8 @@ export default function Home() {
               </div>
             )}
             <section
-              className={`rounded-2xl border ${mode === 'finance' ? 'p-2' : 'p-3'}`}
-              style={{ ...composerBorder, backgroundColor: '#F7F5F2' }}
+              className={`rounded-2xl border bg-base-bg ${mode === 'finance' ? 'p-2' : 'p-3'}`}
+              style={composerBorder}
               aria-label="快速输入"
             >
               <div className="relative">
@@ -1398,8 +1391,7 @@ export default function Home() {
                         ? `给《${selectedMediaItem.title}》写一条新点评…`
                       : `在「${meta.label}」里输入…`
                   }
-                  className="min-h-[52px] w-full resize-none rounded-xl px-3 py-2 pr-14 text-base-text placeholder:text-base-muted focus:outline-none"
-                  style={{ backgroundColor: '#FDFCFB' }}
+                  className="min-h-[52px] w-full resize-none rounded-xl bg-base-bg px-3 py-2 pr-14 text-base-text placeholder:text-base-muted focus:outline-none"
                 />
                 <button
                   type="button"
