@@ -562,6 +562,7 @@ export default function Home() {
     }),
     [],
   )
+  const financeKeyboardOpen = mode === 'finance' && keyboardOffset > 80
 
   useEffect(() => {
     if (!toast) return
@@ -1000,15 +1001,15 @@ export default function Home() {
           : undefined
       }
     >
-      <header className="sticky top-0 z-50 -mx-4 bg-base-bg/95 px-4 pb-2 pt-2 backdrop-blur-sm">
+      <header className="sticky top-0 z-30 -mx-4 bg-base-bg px-4 pb-2 pt-2">
         <div className="flex items-center justify-between">
           <IconButton label="打开导航" onClick={toggleDrawer} icon={<Menu size={18} />} />
           <div className="text-sm font-medium text-base-text">主页</div>
           <IconButton label="AI 助手" onClick={() => navigate('/chat')} icon={<Sparkles size={18} />} />
         </div>
 
-        <div className="mt-2 rounded-2xl bg-base-surface p-1.5">
-          <div className="flex flex-wrap gap-1.5">
+        <div className="mt-2 rounded-2xl border border-base-line bg-base-surface p-1.5">
+          <div className="flex flex-nowrap gap-1.5 overflow-x-auto pb-0.5 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
             <PillButton
               label="记账"
               active={mode === 'finance'}
@@ -1062,10 +1063,6 @@ export default function Home() {
             />
           </div>
         </div>
-        <div
-          className="pointer-events-none absolute inset-x-0 -bottom-3 h-3"
-          style={{ background: 'linear-gradient(to bottom, rgba(253,252,251,0.98), rgba(253,252,251,0))' }}
-        />
       </header>
 
       {mode === 'timeline' ? (
@@ -1077,23 +1074,25 @@ export default function Home() {
           <div className="mt-4 text-center text-sm text-base-muted py-8">加载中…</div>
         )
       ) : mode === 'finance' ? (
-        <FinanceDashboard
-          monthLabel={formatFinanceMonthLabel(financeTodayKey)}
-          summary={financeSummary}
-          calendarDays={financeCalendarDays}
-          selectedDayKey={selectedFinanceDate}
-          selectedDayRecords={financeSelectedDayRecords}
-          loading={financeDashboardLoading}
-          errorText={financeDashboardError}
-          onSelectDay={setSelectedFinanceDate}
-        />
+        financeKeyboardOpen ? null : (
+          <FinanceDashboard
+            monthLabel={formatFinanceMonthLabel(financeTodayKey)}
+            summary={financeSummary}
+            calendarDays={financeCalendarDays}
+            selectedDayKey={selectedFinanceDate}
+            selectedDayRecords={financeSelectedDayRecords}
+            loading={financeDashboardLoading}
+            errorText={financeDashboardError}
+            onSelectDay={setSelectedFinanceDate}
+          />
+        )
       ) : (
         <div className="mt-4 text-sm text-base-muted">{meta.hint}</div>
       )}
 
       <div
         ref={fixedPanelRef}
-        className="fixed left-1/2 z-40 w-full max-w-[480px] -translate-x-1/2 px-4"
+        className="fixed left-1/2 z-40 w-full max-w-[480px] -translate-x-1/2 bg-base-bg px-4 pt-1"
         style={{ bottom: keyboardOffset }}
       >
         {mode === 'timeline' && (
@@ -1110,7 +1109,7 @@ export default function Home() {
                     type="button"
                     onClick={() => handleKindChange(k)}
                     className={`rounded-full border border-base-line px-4 py-2 text-sm active:opacity-70 ${
-                      active ? 'text-base-text' : 'bg-transparent text-base-muted'
+                      active ? 'text-base-text' : 'bg-base-bg text-base-muted'
                     }`}
                     style={active ? { backgroundColor: '#F2DEBD' } : undefined}
                   >
@@ -1191,7 +1190,7 @@ export default function Home() {
               </div>
             )}
             {mode === 'finance' && (
-              <div className="mb-1 rounded-2xl bg-base-surface p-2">
+              <div className="mb-1 rounded-2xl border border-[#D7EEE6] bg-base-surface p-2">
                 <div className="flex flex-wrap items-center gap-1.5">
                   {financeCategories.map((c) => {
                     const active = category === c
@@ -1201,7 +1200,7 @@ export default function Home() {
                         type="button"
                         onClick={() => setCategory(active ? null : c)}
                         className={`rounded-full border border-base-line px-3 py-1 text-xs active:opacity-70 ${
-                          active ? 'text-base-text' : 'bg-transparent text-base-muted'
+                          active ? 'text-base-text' : 'bg-base-bg text-base-muted'
                         }`}
                         style={active ? chipActiveStyle : undefined}
                       >
@@ -1214,7 +1213,7 @@ export default function Home() {
                       type="button"
                       onClick={toggleReviewSupplement}
                       className={`rounded-full border border-base-line px-3 py-1 text-xs active:opacity-70 ${
-                        activeReviewTx ? 'text-base-text' : 'bg-transparent text-base-muted'
+                        activeReviewTx ? 'text-base-text' : 'bg-base-bg text-base-muted'
                       }`}
                       style={activeReviewTx ? chipActiveStyle : undefined}
                       aria-pressed={Boolean(activeReviewTx)}
@@ -1240,7 +1239,7 @@ export default function Home() {
                           type="button"
                           onClick={() => setNecessity(active ? null : o.key)}
                           className={`w-14 whitespace-nowrap py-1 text-xs font-medium active:opacity-70 ${
-                            active ? 'text-base-text' : 'bg-transparent text-base-muted'
+                            active ? 'text-base-text' : 'bg-base-bg text-base-muted'
                           }`}
                           style={active ? chipActiveStyle : undefined}
                         >
@@ -1327,7 +1326,7 @@ export default function Home() {
                           setMediaType(active ? null : t)
                         }}
                         className={`rounded-full border border-base-line px-3 py-1 text-xs active:opacity-70 ${
-                          active ? 'text-base-text' : 'bg-transparent text-base-muted'
+                          active ? 'text-base-text' : 'bg-base-bg text-base-muted'
                         }`}
                         style={active ? mediaTypeActiveStyle : undefined}
                       >
@@ -1355,7 +1354,7 @@ export default function Home() {
                           setMediaStatus(active ? null : s)
                         }}
                         className={`rounded-full border border-base-line px-3 py-1 text-xs active:opacity-70 ${
-                          active ? 'text-base-text' : 'bg-transparent text-base-muted'
+                          active ? 'text-base-text' : 'bg-base-bg text-base-muted'
                         }`}
                         style={active ? { backgroundColor: mediaStatusAccent[s] } : undefined}
                       >
@@ -1383,7 +1382,7 @@ export default function Home() {
                         ? `给《${selectedMediaItem.title}》写一条新点评…`
                       : `在「${meta.label}」里输入…`
                   }
-                  className="min-h-[52px] w-full resize-none bg-transparent px-1 py-2 pr-14 text-base-text placeholder:text-base-muted focus:outline-none"
+                  className="min-h-[52px] w-full resize-none rounded-xl bg-base-bg px-3 py-2 pr-14 text-base-text placeholder:text-base-muted focus:outline-none"
                 />
                 <button
                   type="button"

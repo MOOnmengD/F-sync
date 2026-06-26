@@ -67,6 +67,12 @@ npm run preview   # 预览构建产物
 
 > 无测试框架，无 lint 脚本。
 
+### 预览与验证约定
+
+- 本项目后续不再尝试本地启动页面或用本地浏览器预览验证 UI 效果，避免在登录态、Supabase、HarmonyOS WebView 差异上浪费时间。
+- 前端修改默认执行 `npm run build` + 静态检查作为 Codex 侧验证；构建通过后由开发者 push/部署到 Vercel，并在手机端检查实际效果后截图或文字反馈。
+- 如需让 Codex 后续也能完整检查这类页面，应先新增开发专用 mock/preview 入口（使用假数据、不连接真实 Supabase、不写真实数据）。这属于新增开发辅助功能，必须按“新增功能”流程先写方案文档并获得用户确认。
+
 ### 技术栈
 
 - **前端**：React 19 + TypeScript + Vite 8
