@@ -1,4 +1,5 @@
 @import "tailwindcss";
+@config "../tailwind.config.ts";
 
 :root {
   color: #4b5563;
@@ -17,4 +18,3 @@ body {
 * {
   box-shadow: none !important;
 }
-
