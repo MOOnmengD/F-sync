@@ -33,6 +33,8 @@ const temporaryInvestmentIdPrefix = 'ocr:'
 type RawOcrResult = {
   fund_name: string
   holding_cents: number | null
+  holding_profit_rate: number | null
+  related_sector_rate: number | null
   profit_rate: number | null
   sourceIndex: number
   sourceName: string
@@ -149,6 +151,21 @@ function stripShareClassForDisplay(name: string): string {
   return name.replace(/\s*[ACE]\s*(?:类|份额)?\s*$/i, '').trim()
 }
 
+function toNullableNumber(value: unknown): number | null {
+  return typeof value === 'number' && Number.isFinite(value) ? value : null
+}
+
+function mergeSameRate(results: RawOcrResult[], key: 'holding_profit_rate' | 'related_sector_rate'): number | null {
+  const values = results
+    .map((result) => result[key])
+    .filter((value): value is number => value !== null && Number.isFinite(value))
+
+  if (values.length === 0) return null
+
+  const first = values[0]
+  return values.every((value) => Math.abs(value - first) < 0.00000001) ? first : null
+}
+
 function mergeExactOcrResults(results: RawOcrResult[]): RawOcrResult[] {
   const merged = new Map<string, RawOcrResult>()
 
@@ -165,6 +182,8 @@ function mergeExactOcrResults(results: RawOcrResult[]): RawOcrResult[] {
       ...existing,
       fund_name: result.fund_name.length > existing.fund_name.length ? result.fund_name : existing.fund_name,
       holding_cents: result.holding_cents ?? existing.holding_cents,
+      holding_profit_rate: result.holding_profit_rate ?? existing.holding_profit_rate,
+      related_sector_rate: result.related_sector_rate ?? existing.related_sector_rate,
       profit_rate: result.profit_rate ?? existing.profit_rate,
       sourceIndex: result.sourceIndex,
       sourceName: result.sourceName,
@@ -248,6 +267,8 @@ function mergeShareClassResults(results: RawOcrResult[]): MergedOcrResult[] {
       holding_cents: holdingValues.length > 0
         ? holdingValues.reduce((sum, value) => sum + value, 0)
         : null,
+      holding_profit_rate: mergeSameRate(group, 'holding_profit_rate'),
+      related_sector_rate: mergeSameRate(group, 'related_sector_rate'),
       profit_rate: mergeShareClassProfitRate(group),
       sourceIndex: group[0].sourceIndex,
       sourceName: group.map((result) => result.sourceName).join('、'),
@@ -808,9 +829,9 @@ export default function InvestmentPanel({ userId }: Props) {
                     holding_cents: typeof f.holding_cents === 'number' && Number.isFinite(f.holding_cents)
                       ? Math.round(f.holding_cents)
                       : null,
-                    profit_rate: typeof f.profit_rate === 'number' && Number.isFinite(f.profit_rate)
-                      ? f.profit_rate
-                      : null,
+                    holding_profit_rate: toNullableNumber(f.holding_profit_rate),
+                    related_sector_rate: toNullableNumber(f.related_sector_rate),
+                    profit_rate: toNullableNumber(f.profit_rate),
                     sourceIndex: idx,
                     sourceName: file.name || `截图 ${idx + 1}`,
                   }
@@ -1233,14 +1254,19 @@ export default function InvestmentPanel({ userId }: Props) {
                     <div className="flex items-center justify-between gap-2">
                       <div className="min-w-0 flex-1">
                         <div className="text-xs font-medium text-base-text truncate">{r.fund_name}</div>
-                        <div className="mt-0.5 flex items-center gap-2 text-[10px] text-base-muted">
+                        <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[10px] text-base-muted">
                           <span className="shrink-0" title={r.sourceName}>第 {r.sourceIndex + 1} 张</span>
                           {r.holding_cents !== null && (
                             <span>持仓 ¥{(r.holding_cents / 100).toFixed(2)}</span>
                           )}
                           {r.profit_rate !== null && (
                             <span className={r.profit_rate < 0 ? 'text-[#E76F51]' : r.profit_rate > 0 ? 'text-[#A3D9A5]' : ''}>
-                              收益率 {(r.profit_rate * 100).toFixed(2)}%
+                              更新收益率 {(r.profit_rate * 100).toFixed(2)}%
+                            </span>
+                          )}
+                          {r.holding_profit_rate !== null && r.related_sector_rate !== null && (
+                            <span className="basis-full text-base-muted">
+                              持有 {(r.holding_profit_rate * 100).toFixed(2)}% + 板块 {(r.related_sector_rate * 100).toFixed(2)}%
                             </span>
                           )}
                         </div>
@@ -1337,7 +1363,7 @@ export default function InvestmentPanel({ userId }: Props) {
                                 />
                               </label>
                               <label className="block">
-                                <span className="text-[10px] text-base-muted">收益率（%）</span>
+                                <span className="text-[10px] text-base-muted">真实收益率（%）</span>
                                 <input
                                   value={r.profitDraft}
                                   onChange={(e) => handleOcrResultChange(r.resultId, {

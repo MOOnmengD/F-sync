@@ -464,13 +464,17 @@ AI 对话上下文构建模块（详见 [05-AI系统设计](./05-AI系统设计.
     {
       "fund_name": "景顺长城宁景混合A",
       "holding_cents": 932500,
-      "profit_rate": 0.0431
+      "holding_profit_rate": 0.0075,
+      "related_sector_rate": 0.0277,
+      "profit_rate": 0.0352
     }
   ]
 }
 ```
 
-**配置优先级**：请求体字段 → `OCR_AI_*` 环境变量 → `CHAT_AI_*` → `AI_*`。模型默认 `doubao-vision-pro-32k`。Prompt 留空时使用 `DEFAULT_INVESTMENT_OCR_PROMPT`，默认按养基宝截图的「持有金额」列提取当前持仓、按「持有收益率」列提取收益率，并忽略「关联板块」等无关列。
+> `holding_profit_rate` 是截图第三列「持有收益率」，`related_sector_rate` 是第四列「关联板块」涨跌幅。`profit_rate` 为服务端清洗后的最终更新值：第三列 + 第四列；如果第四列缺失、为空或看不清，则等于第三列。
+
+**配置优先级**：请求体字段 → `OCR_AI_*` 环境变量 → `CHAT_AI_*` → `AI_*`。模型默认 `doubao-vision-pro-32k`。Prompt 留空时使用 `DEFAULT_INVESTMENT_OCR_PROMPT`，默认按养基宝截图的「持有金额」列提取当前持仓、按「持有收益率」列和「关联板块」列提取收益率组成。即使前端传入自定义 Prompt，服务端也会附加收益率口径强制规则，避免继续忽略第四列。
 
 ---
 

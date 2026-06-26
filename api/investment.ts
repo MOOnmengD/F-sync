@@ -23,6 +23,54 @@ function getSupabase() {
   return createClient(url, key)
 }
 
+const investmentOcrRateRules = [
+  '【强制收益率口径规则（优先级高于上文）】',
+  '1. 请单独识别第三列「持有收益率」，字段名为 holding_profit_rate。',
+  '2. 请单独识别第四列「关联板块」或同位置的涨跌幅，字段名为 related_sector_rate；如果该列不存在、为空或看不清，则返回 null。',
+  '3. 不要把第三列和第四列预先相加到 holding_profit_rate。如果仍返回 profit_rate，请让 profit_rate 表示第三列原始持有收益率。',
+  '4. 所有收益率字段都必须返回小数形式，例如 +2.77% 返回 0.0277，-0.28% 返回 -0.0028。',
+  '5. 服务端会在更新持仓前计算最终 profit_rate = holding_profit_rate + related_sector_rate；related_sector_rate 为 null 时，只使用 holding_profit_rate。',
+].join('\n')
+
+function buildInvestmentOcrPrompt(basePrompt: string): string {
+  return `${basePrompt.trim()}\n\n${investmentOcrRateRules}`
+}
+
+function normalizeOcrRate(value: any): number | null {
+  if (typeof value === 'number') {
+    return Number.isFinite(value) ? value : null
+  }
+
+  if (typeof value !== 'string') return null
+
+  const text = value.trim()
+  if (!text || /^(null|none|n\/a|无|空|--|—|-)$/.test(text.toLowerCase())) return null
+
+  const match = text.replace(/,/g, '').match(/[+-]?\d+(?:\.\d+)?/)
+  if (!match) return null
+
+  const parsed = Number.parseFloat(match[0])
+  if (!Number.isFinite(parsed)) return null
+
+  return /[%％]/.test(text) ? parsed / 100 : parsed
+}
+
+function pickOcrRate(record: any, keys: string[]): number | null {
+  for (const key of keys) {
+    if (!Object.prototype.hasOwnProperty.call(record, key)) continue
+    const rate = normalizeOcrRate(record[key])
+    if (rate !== null) return rate
+  }
+  return null
+}
+
+function combineOcrProfitRate(holdingProfitRate: number | null, relatedSectorRate: number | null): number | null {
+  if (holdingProfitRate === null) return null
+
+  const combined = holdingProfitRate + (relatedSectorRate ?? 0)
+  return Number.isFinite(combined) ? Number(combined.toFixed(8)) : null
+}
+
 async function handleAction(body: any, res: any) {
   const { userId, investmentId, suggestionId, actualAmountCents, actionType, cBeforeCents, cAfterCents } = body
 
@@ -565,9 +613,10 @@ async function handleOcr(body: any, res: any) {
   const model = (typeof body?.model === 'string' && body.model.trim())
     ? body.model.trim()
     : (process.env.OCR_AI_MODEL || process.env.CHAT_AI_MODEL || process.env.AI_MODEL || 'doubao-vision-pro-32k')
-  const prompt = (typeof body?.prompt === 'string' && body.prompt.trim())
+  const basePrompt = (typeof body?.prompt === 'string' && body.prompt.trim())
     ? body.prompt.trim()
     : DEFAULT_INVESTMENT_OCR_PROMPT
+  const prompt = buildInvestmentOcrPrompt(basePrompt)
 
   if (!apiUrl || !apiKey) {
     return res.status(500).json({ error: 'OCR AI not configured (missing API URL/Key)' })
@@ -633,15 +682,42 @@ async function handleOcr(body: any, res: any) {
   // 验证并清理每只基金的数据
   const funds = parsed.funds
     .filter((f: any) => f.fund_name && typeof f.fund_name === 'string')
-    .map((f: any) => ({
-      fund_name: f.fund_name.trim(),
-      holding_cents: typeof f.holding_cents === 'number' && Number.isFinite(f.holding_cents)
-        ? Math.round(f.holding_cents)
-        : null,
-      profit_rate: typeof f.profit_rate === 'number' && Number.isFinite(f.profit_rate)
-        ? f.profit_rate
-        : null,
-    }))
+    .map((f: any) => {
+      const holdingProfitRate = pickOcrRate(f, [
+        'holding_profit_rate',
+        'base_profit_rate',
+        'raw_profit_rate',
+        'holding_return_rate',
+        'current_profit_rate',
+        'profit_rate',
+      ])
+      const relatedSectorRate = pickOcrRate(f, [
+        'related_sector_rate',
+        'related_sector_change_rate',
+        'associated_sector_rate',
+        'associated_sector_change_rate',
+        'linked_sector_rate',
+        'linked_sector_change_rate',
+        'sector_rate',
+        'sector_change_rate',
+        'board_rate',
+        'board_change_rate',
+        'plate_rate',
+        'plate_change_rate',
+        '关联板块',
+        '关联板块涨跌幅',
+      ])
+
+      return {
+        fund_name: f.fund_name.trim(),
+        holding_cents: typeof f.holding_cents === 'number' && Number.isFinite(f.holding_cents)
+          ? Math.round(f.holding_cents)
+          : null,
+        holding_profit_rate: holdingProfitRate,
+        related_sector_rate: relatedSectorRate,
+        profit_rate: combineOcrProfitRate(holdingProfitRate, relatedSectorRate),
+      }
+    })
 
   return res.status(200).json({ funds })
 }
