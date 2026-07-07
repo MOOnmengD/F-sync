@@ -4,7 +4,7 @@ import {
   ChevronDown, ChevronUp, Eye, EyeOff, Copy, ClipboardPaste, Check,
   Save, RotateCcw, ArrowRight, ArrowLeft, GripVertical, Pin,
 } from 'lucide-react'
-import { useSettingsStore, type InvestmentOcrConfig, type ParseServiceConfig, type TtsServiceConfig } from '../store/settings'
+import { useSettingsStore, type ChatVisionConfig, type InvestmentOcrConfig, type ParseServiceConfig, type TtsServiceConfig } from '../store/settings'
 import { IconButton } from '../shared/ui/IconButton'
 import type { HomeModePreferences, QuickMode } from '../types/domain'
 import {
@@ -805,6 +805,11 @@ export default function Settings() {
     .map((c) => c.model)
     .filter(Boolean)
     .join(', ') || '（使用默认）'
+  const chatVisionConfig: ChatVisionConfig = settings.chatVisionConfig
+  const imageModeLabel = chatVisionConfig.mode === 'vision_summary' ? '识图转文字' : '直传主模型'
+  const imageModelLabel = chatVisionConfig.mode === 'vision_summary'
+    ? (chatVisionConfig.model || '（待配置）')
+    : '随对话模型'
 
   return (
     <div className="mx-auto min-h-dvh max-w-[480px] bg-base-bg px-4 pb-8 pt-[calc(env(safe-area-inset-top)+0.75rem)] text-base-text space-y-4">
@@ -833,7 +838,7 @@ export default function Settings() {
 
       <TopLevelSection
         title="AI 设置"
-        subtitle="解析、语音、对话模型"
+        subtitle="解析、图像、语音、对话模型"
         expanded={aiSettingsExpanded}
         onToggle={() => setAiSettingsExpanded(!aiSettingsExpanded)}
       >
@@ -883,6 +888,14 @@ export default function Settings() {
               <div className="flex justify-between">
                 <span>当前模型</span>
                 <span className="font-medium text-base-text truncate max-w-[200px]">{modelSummary}</span>
+              </div>
+              <div className="flex justify-between">
+                <span>图片模式</span>
+                <span className="font-medium text-base-text">{imageModeLabel}</span>
+              </div>
+              <div className="flex justify-between">
+                <span>识图模型</span>
+                <span className="font-medium text-base-text truncate max-w-[200px]">{imageModelLabel}</span>
               </div>
             </div>
             <button

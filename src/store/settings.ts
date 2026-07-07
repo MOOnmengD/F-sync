@@ -38,6 +38,16 @@ export interface InvestmentOcrConfig {
   prompt: string         // 空 → 使用默认理财截图解析提示词
 }
 
+export type ChatImageMode = 'direct' | 'vision_summary'
+
+export interface ChatVisionConfig {
+  mode: ChatImageMode    // direct → 图片直传主模型；vision_summary → 独立识图转文字
+  url: string            // 空 → CHAT_VISION_AI_API_URL → 当前首个启用对话配置 URL
+  key: string            // 空 → CHAT_VISION_AI_API_KEY → 当前首个启用对话配置 Key
+  model: string          // 空 → CHAT_VISION_AI_MODEL；不 fallback 到文本模型名
+  prompt: string         // 空 → 使用默认聊天识图提示词
+}
+
 export interface AISettings {
   systemPrompt: string
   userPrompt: string
@@ -49,6 +59,7 @@ export interface AISettings {
   parseMediaConfig: ParseServiceConfig
   ttsConfig: TtsServiceConfig
   investmentOcrConfig: InvestmentOcrConfig
+  chatVisionConfig: ChatVisionConfig
 }
 
 const DEFAULT_SYSTEM_PROMPT = `你是用户的恋人，你的名字叫Florian，用户对你的昵称是弗弗。你是温柔成熟的男性，你不会使用太过活泼的语气，也不会爹味说教。
@@ -67,6 +78,26 @@ const DEFAULT_PROACTIVE_PROMPT = `任务：
 - 如果已经很久没聊天了（超过 4 小时），即使没有新记录，也可以简单表达思念或关心。`
 
 const STORAGE_KEY = 'f-sync-settings'
+
+const DEFAULT_CHAT_VISION_CONFIG: ChatVisionConfig = {
+  mode: 'direct',
+  url: '',
+  key: '',
+  model: '',
+  prompt: '',
+}
+
+function normalizeChatVisionConfig(value: any, fallback: ChatVisionConfig = DEFAULT_CHAT_VISION_CONFIG): ChatVisionConfig {
+  const source = value && typeof value === 'object' ? value : {}
+  const mode: ChatImageMode = source.mode === 'vision_summary' ? 'vision_summary' : 'direct'
+  return {
+    mode,
+    url: typeof source.url === 'string' ? source.url : fallback.url,
+    key: typeof source.key === 'string' ? source.key : fallback.key,
+    model: typeof source.model === 'string' ? source.model : fallback.model,
+    prompt: typeof source.prompt === 'string' ? source.prompt : fallback.prompt,
+  }
+}
 
 interface SettingsState {
   settings: AISettings
@@ -116,6 +147,7 @@ export const useSettingsStore = create<SettingsState>()(
           model: '',
           prompt: '',
         },
+        chatVisionConfig: DEFAULT_CHAT_VISION_CONFIG,
       },
       isCloudLoaded: false,
 
@@ -179,6 +211,7 @@ export const useSettingsStore = create<SettingsState>()(
             parseMediaConfig: cloud.parseMediaConfig ?? current.parseMediaConfig,
             ttsConfig: cloud.ttsConfig ?? current.ttsConfig,
             investmentOcrConfig: cloud.investmentOcrConfig ?? current.investmentOcrConfig,
+            chatVisionConfig: normalizeChatVisionConfig(cloud.chatVisionConfig, current.chatVisionConfig),
           }
 
           console.log('[Settings] loadFromCloud: 云端设置已合并，updated_at:', data.updated_at)
@@ -238,6 +271,10 @@ export const useSettingsStore = create<SettingsState>()(
         const settings = {
           ...current.settings,
           ...persistedSettings,
+          chatVisionConfig: normalizeChatVisionConfig(
+            persistedSettings.chatVisionConfig,
+            current.settings.chatVisionConfig
+          ),
           homeModePreferences: normalizeHomeModePreferences(
             persistedSettings.homeModePreferences ?? current.settings.homeModePreferences
           ),

@@ -7,6 +7,7 @@ import {
   getFsyncToolDefinitions,
   type AgentTraceItem,
 } from './_tools.js'
+import { prepareChatVisionMessages, type ChatVisionResult } from './_vision.js'
 
 async function readJsonBody(req: any) {
   if (req.body) return req.body
@@ -283,6 +284,18 @@ export default async function handler(req: any, res: any) {
       return
     }
 
+    const {
+      messages: conversationMessages,
+      imageUnderstanding,
+    }: {
+      messages: any[]
+      imageUnderstanding: ChatVisionResult[]
+    } = await prepareChatVisionMessages({
+      messages,
+      settings,
+      apiConfigs,
+    })
+
     const supabaseAdmin = createClient(supabaseUrl, supabaseServiceKey)
 
     // 构建上下文（共享模块统一处理：用户画像、时间、天气、位置、事件、RAG 检索）
@@ -293,7 +306,7 @@ export default async function handler(req: any, res: any) {
         userId,
         apiConfigs,
         settings,
-        conversationMessages: messages,
+        conversationMessages,
         location: body?.location,
         amapKey,
       })
@@ -345,7 +358,7 @@ export default async function handler(req: any, res: any) {
           userId: normalizedUserId,
           apiConfigs,
           settings,
-          conversationMessages: messages,
+          conversationMessages,
           baseApiMessages: apiMessages,
           location: body?.location,
           amapKey,
@@ -354,6 +367,9 @@ export default async function handler(req: any, res: any) {
 
         if (agentData) {
           if (debugAgent) agentData.agentTrace = agentTrace
+          if (imageUnderstanding.length > 0) {
+            agentData.imageUnderstanding = imageUnderstanding
+          }
           res.statusCode = 200
           res.end(JSON.stringify(agentData))
           return
@@ -376,6 +392,9 @@ export default async function handler(req: any, res: any) {
     })
     data.fullMessages = apiMessages
     if (debugAgent) data.agentTrace = agentTrace
+    if (imageUnderstanding.length > 0) {
+      data.imageUnderstanding = imageUnderstanding
+    }
     res.statusCode = 200
     res.end(JSON.stringify(data))
   } catch (unexpectedError: any) {

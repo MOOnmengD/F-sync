@@ -38,7 +38,7 @@
 
 ### `_prompt-defaults.ts`
 
-解析与 OCR 的默认提示词模块，不作为公开 Serverless Function。`parse-transaction`、`parse-media`、`investment(type=ocr)` 会从这里读取默认 Prompt。
+解析与 OCR 的默认提示词模块，不作为公开 Serverless Function。`parse-transaction`、`parse-media`、`investment(type=ocr)`、聊天识图会从这里读取默认 Prompt。
 
 ### `_context.ts`
 
@@ -82,6 +82,16 @@ AI 对话上下文构建模块（详见 [05-AI系统设计](./05-AI系统设计.
 ### `_weather.ts`
 
 天气服务模块，通过高德天气 API 获取实时天气，缓存到 `weather_cache` 表。
+
+### `_vision.ts`
+
+聊天图片理解内部模块，不作为公开 Serverless Function。用于 `chat-completion` 的 `vision_summary` 模式。
+
+| 导出 | 用途 |
+|------|------|
+| `prepareChatVisionMessages()` | 识别需要转文字的图片消息，调用视觉模型生成摘要，或复用本地传入的 `imageSummary` |
+
+配置优先级：`settings.chatVisionConfig` → `CHAT_VISION_AI_*` → 当前第一组启用的对话 API URL/Key。视觉模型名不 fallback 到文本聊天模型，缺失时返回明确错误。
 
 ---
 
@@ -165,20 +175,36 @@ AI 对话上下文构建模块（详见 [05-AI系统设计](./05-AI系统设计.
 }
 ```
 
-**输出**：透传 AI API 的原始响应，附加 `fullMessages`（最终发送给 AI 的完整消息列表）。`debugAgent/agentLab` 为 true 时额外附加简要 `agentTrace`。
+**输出**：透传 AI API 的原始响应，附加 `fullMessages`（最终发送给 AI 的完整消息列表）。`debugAgent/agentLab` 为 true 时额外附加简要 `agentTrace`；聊天识图生成新摘要时附加 `imageUnderstanding`。
 
 **处理流程**：
 1. 构建 API 配置（前端传来 > 环境变量 fallback）
-2. 调用 `enrichMessages()` 构建基础上下文（含按需记忆检索、按需生活记录检索、位置、天气、计时状态）
-3. 图片消息转为多模态格式（`image_url` + `text` parts）
-4. 若存在 `userId` 且配置了 `SUPABASE_SERVICE_ROLE_KEY`，先发起最多 2 轮只读 tool-calling
-5. 后端执行 `_tools.ts` 白名单工具，生成内部 tool protocol 消息和 `AgentContextItem[]`
-6. 一旦有工具结果，重新调用 `enrichMessages(agentContextItems)` 构建最终上下文：有时间戳的工具结果进入时间线，无时间戳的工具结果进入「本轮工具查询摘要」，均位于真实世界信息和当前用户消息之前
-7. 最终模型调用不再携带 raw tool messages，避免工具结果占据倒数第一/第二条消息
-8. 不支持 tools 或工具模式失败时，自动降级为普通对话
-9. 位置信息异步写入 `user_locations` 表
+2. 若 `chatVisionConfig.mode='vision_summary'`，先调用 `_vision.ts` 将未缓存的图片转为文字摘要；已有 `imageSummary` 的消息直接复用摘要，不重复识图
+3. 调用 `enrichMessages()` 构建基础上下文（含按需记忆检索、按需生活记录检索、位置、天气、计时状态）
+4. `direct` 图片模式下，图片消息转为多模态格式（`image_url` + `text` parts）；`vision_summary` 模式下，主聊天模型只接收纯文本图片摘要
+5. 若存在 `userId` 且配置了 `SUPABASE_SERVICE_ROLE_KEY`，先发起最多 2 轮只读 tool-calling
+6. 后端执行 `_tools.ts` 白名单工具，生成内部 tool protocol 消息和 `AgentContextItem[]`
+7. 一旦有工具结果，重新调用 `enrichMessages(agentContextItems)` 构建最终上下文：有时间戳的工具结果进入时间线，无时间戳的工具结果进入「本轮工具查询摘要」，均位于真实世界信息和当前用户消息之前
+8. 最终模型调用不再携带 raw tool messages，避免工具结果占据倒数第一/第二条消息
+9. 不支持 tools 或工具模式失败时，自动降级为普通对话
+10. 位置信息异步写入 `user_locations` 表
 
 **环境变量**：`CHAT_AI_*`（优先）> `AI_*`（fallback），`SUPABASE_SERVICE_ROLE_KEY`，`AMAP_API_KEY`（可选）
+
+**聊天识图环境变量**：`CHAT_VISION_AI_API_URL`、`CHAT_VISION_AI_API_KEY`、`CHAT_VISION_AI_MODEL`（仅 `vision_summary` 模式需要；URL/Key 可 fallback 到当前对话配置，模型名必须显式配置）。
+
+**`imageUnderstanding` 示例**：
+```json
+[
+  {
+    "messageId": "客户端消息ID",
+    "messageCreatedAt": 1783420000000,
+    "model": "glm-4.6v",
+    "summary": "图片1：..."
+  }
+]
+```
+前端收到后写回本地用户消息的 `imageSummary`，用于后续对话复用。
 
 **特色**：
 - 多 AI 配置轮询容错
@@ -485,6 +511,7 @@ parse-transaction ─── 独立（仅依赖 AI_API_*）
 
 chat-completion ─── _context ─── _weather ─── 高德天气 API
                  ├── _tools ─── Supabase（只读业务域查询）
+                 ├── _vision ─── 独立视觉模型（可选）
                  ├── _utils
                  └── Supabase (RAG / 位置 / Agent 查询）
 

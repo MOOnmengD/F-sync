@@ -10,6 +10,8 @@ export interface ChatMessage {
   createdAt: number
   isSynced?: boolean
   images?: string[] // base64 data URLs, only on user messages, not synced to cloud
+  imageSummary?: string // 图片识别摘要，仅本地缓存，不同步云端
+  imageSummaryModel?: string
 }
 
 type ChatState = {

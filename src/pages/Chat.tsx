@@ -7,10 +7,11 @@ import { compressImage, type CompressedImage } from '../utils/image'
 import { IconButton } from '../shared/ui/IconButton'
 import { useChatStore, type ChatMessage } from '../store/chat'
 import { supabase } from '../supabaseClient'
-import { useSettingsStore } from '../store/settings'
+import { useSettingsStore, type ChatVisionConfig } from '../store/settings'
 import { QuickRecordButtonBar } from '../components/QuickRecordButtonBar'
 import { QuickRecordPopup } from '../components/QuickRecordPopup'
 import type { QuickMode } from '../types/domain'
+import { DEFAULT_CHAT_VISION_PROMPT } from '../../api/_prompt-defaults'
 
 // 位置缓存，避免频繁调用原生定位（5 分钟窗口）
 let locationCache: { latitude: number; longitude: number; accuracy: number; address?: string; timestamp: number } | null = null
@@ -313,6 +314,8 @@ function SettingsModal({ isOpen, onClose, vectorSyncStatus, onVectorSync, onClea
   const [expandedApis, setExpandedApis] = useState<Record<number, boolean>>({})
   const [dragOverIdx, setDragOverIdx] = useState<number | null>(null)
   const [deleteConfirmIdx, setDeleteConfirmIdx] = useState<number | null>(null)
+  const [showVisionKey, setShowVisionKey] = useState(false)
+  const [visionKeyEditing, setVisionKeyEditing] = useState(false)
 
   // 打开设置面板时，用当前 Zustand 中的 settings 重置本地编辑副本
   useEffect(() => {
@@ -342,6 +345,16 @@ function SettingsModal({ isOpen, onClose, vectorSyncStatus, onVectorSync, onClea
     const next = [...localSettings.apiConfigs]
     next[index] = { ...next[index], [field]: value }
     setLocalSettings({ ...localSettings, apiConfigs: next })
+  }
+
+  const updateLocalChatVision = <K extends keyof ChatVisionConfig>(field: K, value: ChatVisionConfig[K]) => {
+    setLocalSettings({
+      ...localSettings,
+      chatVisionConfig: {
+        ...localSettings.chatVisionConfig,
+        [field]: value,
+      },
+    })
   }
 
   const toggleApiKeyVisibility = (index: number) => {
@@ -431,9 +444,27 @@ function SettingsModal({ isOpen, onClose, vectorSyncStatus, onVectorSync, onClea
     }
   }
 
+  const handleVisionPaste = async () => {
+    try {
+      const text = await navigator.clipboard.readText()
+      updateLocalChatVision('key', text)
+    } catch (err) {
+      console.error('Paste failed:', err)
+      const text = prompt('请输入 API Key:')
+      if (text) updateLocalChatVision('key', text)
+    }
+  }
+
   const handleCopy = (text: string) => {
     navigator.clipboard.writeText(text)
   }
+
+  const visionKeyPlainText = showVisionKey || visionKeyEditing
+  const visionKeyDisplayValue = visionKeyPlainText
+    ? localSettings.chatVisionConfig.key
+    : localSettings.chatVisionConfig.key
+      ? '•'.repeat(Math.min(localSettings.chatVisionConfig.key.length, 24))
+      : ''
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm">
@@ -704,6 +735,125 @@ function SettingsModal({ isOpen, onClose, vectorSyncStatus, onVectorSync, onClea
               <Plus size={14} />
               新增 API 配置
             </button>
+          </section>
+
+          {/* 图片理解 */}
+          <section className="space-y-4">
+            <div className="flex items-center justify-between">
+              <h3 className="text-sm font-bold text-base-text/70 uppercase tracking-wider">图片理解</h3>
+              <button
+                onClick={() => handleSave('chatVisionConfig', localSettings.chatVisionConfig)}
+                disabled={!isCloudLoaded}
+                className="flex items-center gap-1 text-xs font-bold transition-all disabled:opacity-30 disabled:cursor-not-allowed"
+                style={{ color: !isCloudLoaded ? undefined : savedSections['chatVisionConfig'] ? '#86C8A8' : '#B4AEE8' }}
+              >
+                {savedSections['chatVisionConfig'] ? <Check size={14} /> : <Save size={14} />}
+                {savedSections['chatVisionConfig'] ? '已保存' : '保存'}
+              </button>
+            </div>
+
+            <div className="border rounded-2xl border-base-line bg-[#F7F5F2] p-4 space-y-4">
+              <div className="grid grid-cols-2 gap-2 rounded-xl bg-white p-1 border border-base-line">
+                {[
+                  { value: 'direct', label: '直传主模型' },
+                  { value: 'vision_summary', label: '识图转文字' },
+                ].map((mode) => (
+                  <button
+                    key={mode.value}
+                    type="button"
+                    onClick={() => updateLocalChatVision('mode', mode.value as ChatVisionConfig['mode'])}
+                    className={`h-9 rounded-lg text-xs font-medium transition-colors ${
+                      localSettings.chatVisionConfig.mode === mode.value
+                        ? 'bg-[#E9D9FF] text-base-text'
+                        : 'text-base-muted'
+                    }`}
+                  >
+                    {mode.label}
+                  </button>
+                ))}
+              </div>
+
+              <p className="text-xs text-base-muted leading-relaxed">
+                文本模型使用「识图转文字」；原生多模态模型使用「直传主模型」。
+              </p>
+
+              {localSettings.chatVisionConfig.mode === 'vision_summary' && (
+                <div className="space-y-3">
+                  <input
+                    className="w-full p-2 text-xs bg-white border border-base-line rounded-lg outline-none focus:border-[#B4AEE8]"
+                    placeholder="识图 API URL，留空可复用当前对话 API URL"
+                    value={localSettings.chatVisionConfig.url}
+                    onChange={(e) => updateLocalChatVision('url', e.target.value)}
+                    inputMode="url"
+                    autoComplete="off"
+                  />
+                  <div className="relative group/key">
+                    <input
+                      className="w-full p-2 pr-20 text-xs bg-white border border-base-line rounded-lg outline-none focus:border-[#B4AEE8]"
+                      type="text"
+                      placeholder="识图 API Key，留空可复用当前对话 API Key"
+                      value={visionKeyDisplayValue}
+                      onFocus={() => setVisionKeyEditing(true)}
+                      onBlur={() => setVisionKeyEditing(false)}
+                      onChange={(e) => {
+                        if (visionKeyPlainText) updateLocalChatVision('key', e.target.value)
+                      }}
+                      inputMode="text"
+                      autoComplete="off"
+                      autoCapitalize="none"
+                      autoCorrect="off"
+                      spellCheck={false}
+                    />
+                    <div className="absolute right-1 top-1/2 -translate-y-1/2 flex items-center gap-0.5">
+                      <button
+                        type="button"
+                        className="p-1.5 text-base-text/40 hover:text-[#B4AEE8] transition-colors"
+                        onClick={() => setShowVisionKey((v) => !v)}
+                        title={showVisionKey ? '隐藏' : '显示'}
+                      >
+                        {showVisionKey ? <EyeOff size={14} /> : <Eye size={14} />}
+                      </button>
+                      <button
+                        type="button"
+                        className="p-1.5 text-base-text/40 hover:text-[#B4AEE8] transition-colors"
+                        onClick={handleVisionPaste}
+                        title="粘贴"
+                      >
+                        <ClipboardPaste size={14} />
+                      </button>
+                      <button
+                        type="button"
+                        className="p-1.5 text-base-text/40 hover:text-[#B4AEE8] transition-colors"
+                        onClick={() => handleCopy(localSettings.chatVisionConfig.key)}
+                        title="复制"
+                      >
+                        <Copy size={14} />
+                      </button>
+                    </div>
+                  </div>
+                  <input
+                    className="w-full p-2 text-xs bg-white border border-base-line rounded-lg outline-none focus:border-[#B4AEE8]"
+                    placeholder="视觉模型名，例如 glm-4.6v"
+                    value={localSettings.chatVisionConfig.model}
+                    onChange={(e) => updateLocalChatVision('model', e.target.value)}
+                    autoComplete="off"
+                  />
+                  <textarea
+                    className="w-full h-32 p-2.5 text-xs bg-white border border-base-line rounded-xl focus:ring-2 focus:ring-[#B4AEE8]/20 focus:border-[#B4AEE8] transition-all resize-y outline-none leading-relaxed"
+                    placeholder={DEFAULT_CHAT_VISION_PROMPT.slice(0, 120) + '…'}
+                    value={localSettings.chatVisionConfig.prompt}
+                    onChange={(e) => updateLocalChatVision('prompt', e.target.value)}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => updateLocalChatVision('prompt', '')}
+                    className="text-xs text-base-muted hover:text-red-400 transition-colors"
+                  >
+                    重置为默认提示词
+                  </button>
+                </div>
+              )}
+            </div>
           </section>
 
           {/* 工具 */}
@@ -2016,10 +2166,13 @@ export default function Chat() {
           }
 
           return {
+            id: m.id,
             role: m.role,
             content,
             createdAt: m.createdAt,
-            images: i === lastImageIdx ? m.images : undefined
+            images: i === lastImageIdx ? m.images : undefined,
+            imageSummary: m.imageSummary,
+            imageSummaryModel: m.imageSummaryModel,
           }
         })
 
@@ -2045,7 +2198,8 @@ export default function Chat() {
             systemPrompt: settings.systemPrompt,
             userPrompt: settings.userPrompt,
             postHistoryPrompt: settings.postHistoryPrompt,
-            apiConfigs: settings.apiConfigs
+            apiConfigs: settings.apiConfigs,
+            chatVisionConfig: settings.chatVisionConfig,
           },
           userId: user?.id,
           location: location || undefined
@@ -2069,6 +2223,28 @@ export default function Chat() {
         setLastFullContext(context)
       }
 
+      if (Array.isArray(data.imageUnderstanding)) {
+        for (const item of data.imageUnderstanding) {
+          if (item?.messageId && item?.summary) {
+            updateMessage(item.messageId, {
+              imageSummary: item.summary,
+              imageSummaryModel: item.model || undefined,
+            })
+          } else if (item?.messageCreatedAt && item?.summary) {
+            const matched = useChatStore
+              .getState()
+              .messages
+              .find((msg) => msg.role === 'user' && msg.createdAt === item.messageCreatedAt)
+            if (matched) {
+              updateMessage(matched.id, {
+                imageSummary: item.summary,
+                imageSummaryModel: item.model || undefined,
+              })
+            }
+          }
+        }
+      }
+
       const aiRawContent = data.choices?.[0]?.message?.content || 'AI 暂时无法回答。'
       const { thinking, cleanContent } = extractThinking(aiRawContent)
       updateMessage(aiMsgId, { content: cleanContent, thinking: thinking || undefined })
@@ -2086,7 +2262,7 @@ export default function Chat() {
       console.error('[Chat] Error:', error)
       updateMessage(aiMsgId, { content: `抱歉，出错了：${error.message}` })
     }
-  }, [settings, autoReadEnabled, requestAndPlay])
+  }, [settings, autoReadEnabled, requestAndPlay, updateMessage, syncMessages])
 
   const handleSend = async () => {
     const text = input.trim()

@@ -674,6 +674,7 @@ export async function enrichMessages(params: {
     role: string
     content: string
     createdAt?: string
+    images?: string[]
   }>
   location?: {
     latitude: number
@@ -685,7 +686,7 @@ export async function enrichMessages(params: {
   agentContextItems?: AgentContextItem[]
   amapKey?: string
 }): Promise<{
-  enrichedMessages: Array<{ role: string; content: string }>
+  enrichedMessages: Array<{ role: string; content: string; images?: string[] }>
   locationInfo: string
   amapAdcode: string
 }> {
@@ -721,7 +722,7 @@ export async function enrichMessages(params: {
   const systemPromptContent = `${baseSystemPrompt}${userPrompt}`
 
   // ---- 构建消息序列 ----
-  const enrichedMessages: Array<{ role: string; content: string }> = [
+  const enrichedMessages: Array<{ role: string; content: string; images?: string[] }> = [
     { role: 'system', content: systemPromptContent },
   ]
 
@@ -776,6 +777,7 @@ export async function enrichMessages(params: {
     timestamp: Date
     role: string
     content: string
+    images?: string[]
   }
 
   const timeBoundItems: TimeBoundItem[] = []
@@ -815,6 +817,7 @@ export async function enrichMessages(params: {
       timestamp: ts,
       role: m.role,
       content: m.content,
+      images: Array.isArray((m as any).images) ? (m as any).images : undefined,
     })
   }
 
@@ -877,10 +880,14 @@ export async function enrichMessages(params: {
       })
     }
 
-    enrichedMessages.push({
+    const renderedItem: { role: string; content: string; images?: string[] } = {
       role: item.role,
       content: item.content,
-    })
+    }
+    if (item.images && item.images.length > 0) {
+      renderedItem.images = item.images
+    }
+    enrichedMessages.push(renderedItem)
   }
 
   // ---- 将"历史对话后提示词"和"真实世界信息"插入到当前用户消息之前 ----
