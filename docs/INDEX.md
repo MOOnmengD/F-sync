@@ -36,8 +36,6 @@ docs/
 ├── 08-配置与环境变量.md
 └── 方案文档/                    ← 功能设计文档 + 模板
     ├── TEMPLATE.md              ← 新功能设计模板
-    ├── investment-feature-design.md
-    ├── 资产配置规则（暂行版）.md
     ├── 2026-06-11-Agentic-RAG-混合检索架构方案.md
     ├── 2026-06-12-F-Sync-Agent工具调用系统设计.md
     ├── 2026-06-12-前端乐观更新方案.md

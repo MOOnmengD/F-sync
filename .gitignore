@@ -17,6 +17,9 @@ dist-ssr
 
 # Private project data kept locally, never published
 docs/调试/
+docs/方案文档/.obsidian/
+docs/方案文档/资产配置规则（暂行版）.md
+docs/方案文档/investment-feature-design.md
 migrations/017_seed_investments.sql
 supabase.schema.json
 前端设计.pptx
