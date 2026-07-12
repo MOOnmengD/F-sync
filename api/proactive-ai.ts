@@ -99,7 +99,10 @@ export default async function handler(req: any, res: any) {
     const settings = body.settings
     const force = body.force === true
 
-    const targetUserId = process.env.PROACTIVE_USER_ID || '00000000-0000-0000-0000-000000000000'
+    const targetUserId = process.env.PROACTIVE_USER_ID
+    if (!targetUserId) {
+      return res.status(500).json({ error: 'Missing PROACTIVE_USER_ID' })
+    }
 
     // 构建 API 配置
     const apiConfigs = settings?.apiConfigs?.filter(

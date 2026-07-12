@@ -22,8 +22,11 @@ export default async function handler(req: any, res: any) {
     return res.status(400).json({ error: 'Token is empty after trimming' })
   }
 
+  const userId = process.env.PROACTIVE_USER_ID
+  if (!userId) {
+    return res.status(500).json({ error: 'Missing PROACTIVE_USER_ID' })
+  }
   const supabase = createClient(supabaseUrl, supabaseServiceKey)
-  const userId = process.env.PROACTIVE_USER_ID || '00000000-0000-0000-0000-000000000000'
 
   const { error } = await supabase
     .from('push_tokens')

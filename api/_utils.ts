@@ -1,13 +1,31 @@
-// 校内地标（新增地点时只改这里）
-export const CAMPUS_LOCATIONS = [
-  { name: '私有地点A',  lat: 0.000001, lng: 0.000001, scene: '宝贝在工作/学习' },
-  { name: '私有地点B',     lat: 0.000002, lng: 0.000002, scene: '宝贝在取快递/取外卖/要出学校' },
-  { name: '私有地点C',        lat: 0.000003, lng: 0.000003, scene: '宝贝在吃饭' },
-  { name: '私有地点D', lat: 0.000004, lng: 0.000004, scene: '宝贝在吃饭' },
-  { name: '私有地点E',        lat: 0.000005, lng: 0.000005, scene: '宝贝在吃饭' },
-  { name: '私有地点F',     lat: 0.000006, lng: 0.000006, scene: '宝贝在休息' },
-]
-export const CAMPUS_MATCH_RADIUS = 100 // 米
+type PrivateLocation = {
+  name: string
+  lat: number
+  lng: number
+  scene: string
+}
+
+function loadPrivateLocations(): PrivateLocation[] {
+  const raw = process.env.PRIVATE_LOCATIONS_JSON
+  if (!raw) return []
+
+  try {
+    const parsed = JSON.parse(raw)
+    if (!Array.isArray(parsed)) return []
+    return parsed.filter((item): item is PrivateLocation =>
+      typeof item?.name === 'string' &&
+      typeof item?.lat === 'number' &&
+      typeof item?.lng === 'number' &&
+      typeof item?.scene === 'string',
+    )
+  } catch (error) {
+    console.error('[Location] PRIVATE_LOCATIONS_JSON 解析失败', error)
+    return []
+  }
+}
+
+export const PRIVATE_LOCATIONS = loadPrivateLocations()
+export const PRIVATE_LOCATION_MATCH_RADIUS = Number(process.env.PRIVATE_LOCATION_MATCH_RADIUS || 100)
 
 export function haversineDistance(lat1: number, lng1: number, lat2: number, lng2: number): number {
   const R = 6371000
@@ -20,12 +38,12 @@ export function haversineDistance(lat1: number, lng1: number, lat2: number, lng2
 
 export function matchCampusLocation(lat: number, lng: number): string | null {
   let bestDist = Infinity
-  let best: (typeof CAMPUS_LOCATIONS)[0] | null = null
-  for (const loc of CAMPUS_LOCATIONS) {
+  let best: PrivateLocation | null = null
+  for (const loc of PRIVATE_LOCATIONS) {
     const d = haversineDistance(lat, lng, loc.lat, loc.lng)
     if (d < bestDist) { bestDist = d; best = loc }
   }
-  if (best && bestDist <= CAMPUS_MATCH_RADIUS) {
+  if (best && bestDist <= PRIVATE_LOCATION_MATCH_RADIUS) {
     return `${best.name}（${best.scene}）`
   }
   return null

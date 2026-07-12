@@ -27,8 +27,11 @@ export default async function handler(req: any, res: any) {
     return res.status(500).json({ error: 'Missing AI configuration' })
   }
 
+  const targetUserId = process.env.PROACTIVE_USER_ID
+  if (!targetUserId) {
+    return res.status(500).json({ error: 'Missing PROACTIVE_USER_ID' })
+  }
   const supabase = createClient(supabaseUrl, supabaseServiceKey)
-  const targetUserId = process.env.PROACTIVE_USER_ID || '00000000-0000-0000-0000-000000000000'
 
   const now = new Date()
 

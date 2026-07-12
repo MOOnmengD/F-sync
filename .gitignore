@@ -12,6 +12,16 @@ dist
 dist-ssr
 *.local
 
+# Local AI-tool permissions may contain command history or credentials
+.claude/settings.local.json
+
+# Private project data kept locally, never published
+docs/调试/
+migrations/017_seed_investments.sql
+supabase.schema.json
+前端设计.pptx
+页面截图/*.pptx
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json

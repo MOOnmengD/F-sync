@@ -27,7 +27,7 @@
 
 | 导出函数 | 用途 |
 |----------|------|
-| `CAMPUS_LOCATIONS` | 校内地标坐标表（含场景描述） |
+| `PRIVATE_LOCATIONS` | 从环境变量读取的私有地点配置（含场景描述） |
 | `matchCampusLocation(lat, lng)` | 匹配最近校内地点（Haversine 距离，100m 半径） |
 | `resolveChatCompletionsUrl(base)` | 补全 `/chat/completions` 后缀 |
 | `resolveEmbeddingUrl(base)` | 补全 `/embeddings` 后缀 |
