@@ -8,6 +8,13 @@ import {
   type AgentTraceItem,
 } from './_tools.js'
 import { prepareChatVisionMessages, type ChatVisionResult } from './_vision.js'
+import {
+  buildSearchSummaryMessages,
+  buildWebSearchContext,
+  formatWebSearchContextForModel,
+  type WebSearchContext,
+  type WebSearchDraft,
+} from './_web-search.js'
 
 async function readJsonBody(req: any) {
   if (req.body) return req.body
@@ -99,13 +106,16 @@ function convertMessagesForApi(messages: any[]): ApiMessage[] {
   })
 }
 
-function withAgentInstruction(messages: ApiMessage[]) {
+function withAgentInstruction(
+  messages: ApiMessage[],
+  capabilities: { includeFsyncTools: boolean; includeWebSearch: boolean },
+) {
   const next = messages.map((message) => ({ ...message }))
   const firstSystem = next.find((message) => message.role === 'system')
   if (firstSystem && typeof firstSystem.content === 'string') {
-    firstSystem.content = `${firstSystem.content}\n\n${getAgentSystemInstruction()}`
+    firstSystem.content = `${firstSystem.content}\n\n${getAgentSystemInstruction(capabilities)}`
   } else {
-    next.unshift({ role: 'system', content: getAgentSystemInstruction() })
+    next.unshift({ role: 'system', content: getAgentSystemInstruction(capabilities) })
   }
   return next
 }
@@ -124,9 +134,46 @@ function normalizeToolCalls(message: any): any[] {
   return []
 }
 
+async function summarizeWebSearchDrafts(params: {
+  drafts: WebSearchDraft[]
+  apiConfigs: ApiConfig[]
+  trace: AgentTraceItem[]
+}): Promise<WebSearchContext[]> {
+  const usableDrafts = params.drafts.filter((draft) => draft.results.length > 0)
+  if (usableDrafts.length === 0) return []
+
+  try {
+    const { data } = await callChatCompletions({
+      apiConfigs: params.apiConfigs,
+      messages: buildSearchSummaryMessages(usableDrafts),
+    })
+    const summary = data.choices?.[0]?.message?.content
+    if (typeof summary !== 'string' || !summary.trim()) {
+      throw new Error('检索 AI 未返回有效结论')
+    }
+    const contexts = buildWebSearchContext(usableDrafts, summary)
+    if (!contexts[0]?.summary) {
+      throw new Error('检索 AI 仅返回了思考过程，未形成有效结论')
+    }
+    params.trace.push({
+      tool: 'summarize_web_search',
+      status: 'ok',
+      count: contexts[0]?.sources.length || 0,
+    })
+    return contexts
+  } catch (error: any) {
+    params.trace.push({
+      tool: 'summarize_web_search',
+      status: 'error',
+      message: error?.message || '检索 AI 归纳失败',
+    })
+    return []
+  }
+}
+
 async function runAgentConversation(params: {
   supabase: any
-  userId: string
+  userId?: string
   apiConfigs: ApiConfig[]
   settings: any
   conversationMessages: any[]
@@ -134,6 +181,10 @@ async function runAgentConversation(params: {
   location?: any
   amapKey?: string
   trace: AgentTraceItem[]
+  includeFsyncTools: boolean
+  includeWebSearch: boolean
+  webSearchApiKey?: string
+  webSearchEngine?: string
 }) {
   const {
     supabase,
@@ -145,11 +196,18 @@ async function runAgentConversation(params: {
     location,
     amapKey,
     trace,
+    includeFsyncTools,
+    includeWebSearch,
+    webSearchApiKey,
+    webSearchEngine,
   } = params
 
-  const toolDefinitions = getFsyncToolDefinitions()
-  const protocolMessages = withAgentInstruction(baseApiMessages)
+  const capabilities = { includeFsyncTools, includeWebSearch }
+  const toolDefinitions = getFsyncToolDefinitions(capabilities)
+  const protocolMessages = withAgentInstruction(baseApiMessages, capabilities)
   const agentContextItems: AgentContextItem[] = []
+  const webSearchDrafts: WebSearchDraft[] = []
+  const webSearchBudget = { used: 0, max: 2 }
   let sawToolCalls = false
 
   for (let round = 0; round < 2; round++) {
@@ -184,9 +242,13 @@ async function runAgentConversation(params: {
         supabase,
         userId,
         apiConfigs,
+        webSearchApiKey,
+        webSearchEngine,
+        webSearchBudget,
       })
       trace.push(result.trace)
       agentContextItems.push(...result.contextItems)
+      if (result.webSearchDraft) webSearchDrafts.push(result.webSearchDraft)
       protocolMessages.push({
         role: 'tool',
         tool_call_id: result.toolCallId,
@@ -197,6 +259,31 @@ async function runAgentConversation(params: {
   }
 
   if (!sawToolCalls) return null
+
+  const webSearchContexts = await summarizeWebSearchDrafts({
+    drafts: webSearchDrafts,
+    apiConfigs,
+    trace,
+  })
+  if (webSearchContexts.length > 0) {
+    agentContextItems.push({
+      domain: 'web_search',
+      sourceTool: 'search_web',
+      title: '本轮网页检索结论',
+      content: [
+        '以下是检索 AI 根据临时网页结果整理的结论，不是网页原文。',
+        '外部资料可能不完整或有误；回答时应保留必要的不确定性并引用来源。',
+        formatWebSearchContextForModel(webSearchContexts),
+      ].join('\n'),
+    })
+  } else if (webSearchDrafts.length > 0) {
+    agentContextItems.push({
+      domain: 'web_search_errors',
+      sourceTool: 'search_web',
+      title: '网页检索未获得可用结论',
+      content: '网页搜索已执行，但检索 AI 未能形成可用结论。不要假称已核实；如需回答，请说明本次检索未完成。',
+    })
+  }
 
   if (agentContextItems.length === 0 && trace.length > 0) {
     agentContextItems.push({
@@ -211,7 +298,7 @@ async function runAgentConversation(params: {
 
   const { enrichedMessages } = await enrichMessages({
     supabase,
-    userId,
+    userId: userId || '',
     apiConfigs,
     settings,
     conversationMessages,
@@ -225,6 +312,9 @@ async function runAgentConversation(params: {
     messages: finalMessages,
   })
   finalData.fullMessages = finalMessages
+  if (webSearchContexts.length > 0) {
+    finalData.webSearchContext = webSearchContexts
+  }
   return finalData
 }
 
@@ -336,18 +426,22 @@ export default async function handler(req: any, res: any) {
     const debugAgent = body?.debugAgent === true || body?.agentLab === true
     const agentTrace: AgentTraceItem[] = []
     const normalizedUserId = typeof userId === 'string' ? userId : ''
-    const enableAgent =
-      body?.enableAgent !== false &&
+    const webSearchApiKey = process.env.BIGMODEL_SEARCH_API_KEY
+    const webSearchEngine = process.env.WEB_SEARCH_ENGINE || 'search_std'
+    const includeFsyncTools =
       Boolean(normalizedUserId) &&
       Boolean(supabaseServiceRoleKey)
+    const includeWebSearch = Boolean(webSearchApiKey)
+    const enableAgent =
+      body?.enableAgent !== false &&
+      (includeFsyncTools || includeWebSearch)
 
     if (!enableAgent && debugAgent) {
       agentTrace.push({
         tool: 'agent',
         status: 'skipped',
-        message: !normalizedUserId
-          ? '缺少 userId，已跳过 Agent 工具。'
-          : '缺少 SUPABASE_SERVICE_ROLE_KEY，已跳过 Agent 工具。',
+        message:
+          '没有可用的 Agent 工具：F-Sync 数据工具需要 userId + SUPABASE_SERVICE_ROLE_KEY，网页搜索需要 BIGMODEL_SEARCH_API_KEY。',
       })
     }
 
@@ -363,6 +457,10 @@ export default async function handler(req: any, res: any) {
           location: body?.location,
           amapKey,
           trace: agentTrace,
+          includeFsyncTools,
+          includeWebSearch,
+          webSearchApiKey,
+          webSearchEngine,
         })
 
         if (agentData) {

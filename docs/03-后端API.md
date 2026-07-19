@@ -8,7 +8,7 @@
 |------|------|------|------|
 | `/api/parse-transaction` | POST | 无 | AI 解析记账文本 |
 | `/api/parse-media` | POST | 无 | AI 解析书影文本（标题+评价） |
-| `/api/chat-completion` | POST | 无（工具读取要求 `userId` + service role） | AI 对话（含 RAG + 只读 Agent） |
+| `/api/chat-completion` | POST | 无（F-Sync 数据工具要求 `userId` + service role；网页搜索要求独立搜索 Key） | AI 对话（含 RAG + 只读 Agent + 轻量网页检索） |
 | `/api/vectorize` | POST | 无 | 生成 embedding |
 | `/api/proactive-ai` | POST | `CRON_SECRET` | 主动消息 + 推送 |
 | `/api/daily-summary` | POST | `CRON_SECRET` | 每日日记 + 画像更新 |
@@ -63,7 +63,7 @@ AI 对话上下文构建模块（详见 [05-AI系统设计](./05-AI系统设计.
 |------|------|
 | `getFsyncToolDefinitions()` | 返回 OpenAI-compatible tools schema |
 | `getAgentSystemInstruction()` | 给支持工具调用的模型追加只读工具说明 |
-| `executeFsyncTool(toolCall, context)` | 执行工具调用，返回 protocol tool message 内容、`AgentContextItem[]` 和简要 trace |
+| `executeFsyncTool(toolCall, context)` | 执行工具调用，返回 protocol tool message 内容、`AgentContextItem[]`、可选网页检索草稿和简要 trace |
 
 第一版开放工具：
 
@@ -74,10 +74,24 @@ AI 对话上下文构建模块（详见 [05-AI系统设计](./05-AI系统设计.
 | `query_fsync_records` | 按白名单 domain/字段查询记录，不接受 SQL 或裸表名 |
 | `search_memories` | 语义搜索历史共同记忆，内部使用事件索引回捞聊天原文 |
 | `search_life_logs` | 语义搜索生活记录，失败时回退关键词查询 |
+| `search_web` | 搜索近期或外部公开信息；每个用户请求最多 2 次，仅在配置智谱搜索 Key 时暴露 |
 
 开放读取的数据域包括：`life_logs`、`chat_history`、`media_library`（书影当前状态/最近点评）、`media_history`（书影多条点评/状态事件）、`items`、`social_relationships`、`user_profile_facts`、`investment_portfolio`、`investment_suggestions`、`investment_actions`。
 
 不开放直接读取：`user_settings`、`push_tokens`、`daily_logs`、`weather_cache`、`user_locations`、`daily_event_items`、embedding/search_vector 等技术字段。
+
+### `_web-search.ts`
+
+智谱轻量网页检索内部模块，不作为公开 Serverless Function。
+
+| 导出 | 用途 |
+|------|------|
+| `searchWeb()` | 调用智谱 Web Search API；固定最多 5 条、`content_size=medium`，校验 URL 并裁剪标题/摘要 |
+| `buildSearchSummaryMessages()` | 构造检索 AI 专用提示词；网页结果只作为本轮不可信外部数据 |
+| `buildWebSearchContext()` | 将检索 AI 的简短结论与来源整理为可持久化上下文 |
+| `formatWebSearchContextForModel()` | 把结论与来源格式化给最终 Florian 调用 |
+
+原始网页搜索片段只在本轮交给当前对话模型做检索归纳，不写入数据库，也不进入后续聊天上下文。
 
 ### `_weather.ts`
 
@@ -175,21 +189,23 @@ AI 对话上下文构建模块（详见 [05-AI系统设计](./05-AI系统设计.
 }
 ```
 
-**输出**：透传 AI API 的原始响应，附加 `fullMessages`（最终发送给 AI 的完整消息列表）。`debugAgent/agentLab` 为 true 时额外附加简要 `agentTrace`；聊天识图生成新摘要时附加 `imageUnderstanding`。
+**输出**：透传 AI API 的原始响应，附加 `fullMessages`（最终发送给 AI 的完整消息列表）。`debugAgent/agentLab` 为 true 时额外附加简要 `agentTrace`；聊天识图生成新摘要时附加 `imageUnderstanding`；本轮执行网页搜索并成功归纳时附加 `webSearchContext`（检索结论 + 来源，不含网页片段）。
 
 **处理流程**：
 1. 构建 API 配置（前端传来 > 环境变量 fallback）
 2. 若 `chatVisionConfig.mode='vision_summary'`，先调用 `_vision.ts` 将未缓存的图片转为文字摘要；已有 `imageSummary` 的消息直接复用摘要，不重复识图
 3. 调用 `enrichMessages()` 构建基础上下文（含按需记忆检索、按需生活记录检索、位置、天气、计时状态）
 4. `direct` 图片模式下，图片消息转为多模态格式（`image_url` + `text` parts）；`vision_summary` 模式下，主聊天模型只接收纯文本图片摘要
-5. 若存在 `userId` 且配置了 `SUPABASE_SERVICE_ROLE_KEY`，先发起最多 2 轮只读 tool-calling
-6. 后端执行 `_tools.ts` 白名单工具，生成内部 tool protocol 消息和 `AgentContextItem[]`
-7. 一旦有工具结果，重新调用 `enrichMessages(agentContextItems)` 构建最终上下文：有时间戳的工具结果进入时间线，无时间戳的工具结果进入「本轮工具查询摘要」，均位于真实世界信息和当前用户消息之前
-8. 最终模型调用不再携带 raw tool messages，避免工具结果占据倒数第一/第二条消息
-9. 不支持 tools 或工具模式失败时，自动降级为普通对话
-10. 位置信息异步写入 `user_locations` 表
+5. 根据配置暴露可用工具：F-Sync 数据工具要求 `userId + SUPABASE_SERVICE_ROLE_KEY`；网页搜索只要求 `BIGMODEL_SEARCH_API_KEY`
+6. 发起最多 2 轮只读 tool-calling；`search_web` 每个用户请求最多执行 2 次
+7. `search_web` 调用智谱 Web Search API，最多取 5 条中等长度结果；网页片段作为不可信数据只在内部协议层临时存在
+8. 搜索结束后，用当前对话 API 配置额外调用一次检索 AI，生成不超过约 1500 中文字符的简短结论；只保留结论和来源
+9. 后端把 F-Sync 工具结果和网页检索结论转换为 `AgentContextItem[]`，重新调用 `enrichMessages()` 构建最终上下文
+10. 最终 Florian 调用不再携带 raw tool messages 或网页片段，只接收检索结论、来源和正常聊天上下文
+11. 不支持 tools、搜索失败或工具模式失败时安全降级，不得假称已完成检索
+12. 位置信息异步写入 `user_locations` 表
 
-**环境变量**：`CHAT_AI_*`（优先）> `AI_*`（fallback），`SUPABASE_SERVICE_ROLE_KEY`，`AMAP_API_KEY`（可选）
+**环境变量**：`CHAT_AI_*`（优先）> `AI_*`（fallback），`SUPABASE_SERVICE_ROLE_KEY`，`AMAP_API_KEY`（可选），`BIGMODEL_SEARCH_API_KEY`（可选），`WEB_SEARCH_ENGINE`（可选，默认 `search_std`）
 
 **聊天识图环境变量**：`CHAT_VISION_AI_API_URL`、`CHAT_VISION_AI_API_KEY`、`CHAT_VISION_AI_MODEL`（仅 `vision_summary` 模式需要；URL/Key 可 fallback 到当前对话配置，模型名必须显式配置）。
 

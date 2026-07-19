@@ -2,6 +2,20 @@ import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 import { supabase } from '../supabaseClient'
 
+export interface WebSearchSource {
+  title: string
+  url: string
+  media?: string
+  publishedAt?: string
+}
+
+export interface WebSearchContext {
+  query: string
+  searchedAt: string
+  summary: string
+  sources: WebSearchSource[]
+}
+
 export interface ChatMessage {
   id: string
   role: 'user' | 'assistant' | 'system'
@@ -12,6 +26,7 @@ export interface ChatMessage {
   images?: string[] // base64 data URLs, only on user messages, not synced to cloud
   imageSummary?: string // 图片识别摘要，仅本地缓存，不同步云端
   imageSummaryModel?: string
+  webSearchContext?: WebSearchContext[] // 网页检索结论与来源，随消息同步并自然退出上下文窗口
 }
 
 type ChatState = {
@@ -102,7 +117,8 @@ export const useChatStore = create<ChatState>()(
           client_id: m.id,
           role: m.role,
           content: m.content,
-          created_at: new Date(m.createdAt).toISOString()
+          created_at: new Date(m.createdAt).toISOString(),
+          web_search_context: m.webSearchContext?.length ? m.webSearchContext : null,
         }))
 
         const { error } = await client.from('chat_messages').insert(toUpload)
